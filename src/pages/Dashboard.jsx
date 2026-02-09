@@ -3,7 +3,7 @@ import Webcam from 'react-webcam';
 import { useAuth } from '../contexts/AuthContext';
 import { addWatermarkToImage, fetchServerTime, fetchLocationName } from '../utils/watermark';
 import { db } from '../firebaseConfig';
-import { collection, addDoc } from 'firebase/firestore';
+import { collection, addDoc, query, where, getDocs, serverTimestamp } from 'firebase/firestore';
 import { Camera, MapPin, Search, CheckCircle, AlertCircle, LogOut, LogIn, Share2, Settings } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import AdminPasswordModal from '../components/AdminPasswordModal';
@@ -24,7 +24,32 @@ export default function Dashboard() {
     const [adminTarget, setAdminTarget] = useState(''); // '/registro' or '/admin'
 
     // Cleanup and Security: Logout on reload (F5)
+    // Verificación de acceso y Migración perezosa
     useEffect(() => {
+        const checkAccess = async () => {
+            if (!currentUser) return;
+
+            try {
+                const q = query(collection(db, "employees"), where("email", "==", currentUser.email));
+                const querySnapshot = await getDocs(q);
+
+                if (querySnapshot.empty) {
+                    // Si no está en la colección pero está logueado, es un usuario antiguo.
+                    // Lo agregamos automáticamente para que aparezca en la lista del admin
+                    // y pueda ser gestionado (exportado/borrado).
+                    await addDoc(collection(db, "employees"), {
+                        email: currentUser.email,
+                        fechaCreacion: serverTimestamp()
+                    });
+                    console.log("Usuario migrado automáticamente a la colección de gestión.");
+                }
+            } catch (err) {
+                console.error("Error verificando acceso:", err);
+            }
+        };
+
+        checkAccess();
+
         const handleUnload = () => {
             logout();
         };
@@ -36,7 +61,7 @@ export default function Dashboard() {
                 streamRef.current.getTracks().forEach(track => track.stop());
             }
         };
-    }, [logout]);
+    }, [logout, currentUser]);
 
     const startCamera = async () => {
         try {
