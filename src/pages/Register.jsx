@@ -116,8 +116,12 @@ export default function Register() {
             const link = document.createElement('a');
             const url = URL.createObjectURL(blob);
 
+            const now = new Date();
+            const timeStr = now.getHours().toString().padStart(2, '0') + now.getMinutes().toString().padStart(2, '0');
+            const dateStr = now.toISOString().split('T')[0];
+
             link.setAttribute('href', url);
-            link.setAttribute('download', `empleados_${new Date().toISOString().split('T')[0]}.csv`);
+            link.setAttribute('download', `empleados_${dateStr}_${timeStr}.csv`);
             link.style.visibility = 'hidden';
             document.body.appendChild(link);
             link.click();

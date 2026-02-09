@@ -192,9 +192,13 @@ export default function Admin() {
             const link = document.createElement('a');
             const url = URL.createObjectURL(blob);
 
+            const now = new Date();
+            const timeStr = now.getHours().toString().padStart(2, '0') + now.getMinutes().toString().padStart(2, '0');
+            const dateStr = now.toISOString().split('T')[0];
+
             const fileName = startDate && endDate
-                ? `asistencia_${startDate}_${endDate}.csv`
-                : `asistencia_${new Date().toISOString().split('T')[0]}.csv`;
+                ? `asistencia_${startDate}_${endDate}_${timeStr}.csv`
+                : `asistencia_${dateStr}_${timeStr}.csv`;
 
             link.setAttribute('href', url);
             link.setAttribute('download', fileName);
