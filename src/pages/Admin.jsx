@@ -157,13 +157,26 @@ export default function Admin() {
             }
 
             // Crear CSV
-            const headers = ['Usuario', 'Tipo', 'Fecha', 'Hora', 'Localidad'];
+            const headers = ['Usuario', 'Tipo', 'Dia', 'Fecha', 'Hora', 'Localidad'];
             const csvRows = [headers.join(',')];
 
+            const dayFormatter = new Intl.DateTimeFormat('es-ES', { weekday: 'long' });
+
             filteredLogs.forEach(log => {
+                let diaNombre = 'N/A';
+                if (log.fecha) {
+                    const d = parseSpanishDate(log.fecha);
+                    if (d) {
+                        diaNombre = dayFormatter.format(d);
+                        // Capitalizar primera letra
+                        diaNombre = diaNombre.charAt(0).toUpperCase() + diaNombre.slice(1);
+                    }
+                }
+
                 const row = [
                     log.usuario || '',
                     log.tipo || '',
+                    diaNombre,
                     log.fecha || '',
                     log.hora || '',
                     `"${(log.localidad || '').replace(/"/g, '""')}"` // Escapar comillas
@@ -171,7 +184,8 @@ export default function Admin() {
                 csvRows.push(row.join(','));
             });
 
-            const csvContent = csvRows.join('\n');
+            // Añadir BOM para compatibilidad con Excel (tildes/UTF-8)
+            const csvContent = "\ufeff" + csvRows.join('\n');
 
             // Descargar archivo
             const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
