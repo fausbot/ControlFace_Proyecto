@@ -266,7 +266,7 @@ export default function Admin() {
         <div className="min-h-screen bg-gray-50 p-6">
             <div className="max-w-6xl mx-auto">
                 <div className="flex justify-between items-center mb-8">
-                    <h1 className="text-3xl font-bold text-gray-800">Panel de Administración</h1>
+                    <h1 className="text-3xl font-bold text-gray-800">Centro de Datos</h1>
                     <button onClick={() => navigate('/dashboard')} className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300">
                         Volver
                     </button>

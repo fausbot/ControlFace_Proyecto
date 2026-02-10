@@ -10,10 +10,13 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg', 'logo.jpg'],
       manifest: {
-        name: 'Control de Asistencia PWA',
-        short_name: 'Asistencia',
+        name: 'Centro de Datos',
+        short_name: 'Datos',
         description: 'Sistema de control de asistencia para empleados',
         theme_color: '#ffffff',
+        background_color: '#ffffff',
+        display: 'standalone',
+        start_url: '/',
         icons: [
           {
             src: 'logo.jpg',
@@ -28,6 +31,8 @@ export default defineConfig({
         ]
       },
       workbox: {
+        skipWaiting: true,
+        clientsClaim: true,
         globPatterns: ['**/*.{js,css,html,ico,png,svg,jpg}'],
         runtimeCaching: [
           {

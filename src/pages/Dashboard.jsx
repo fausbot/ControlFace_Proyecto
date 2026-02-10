@@ -29,6 +29,56 @@ export default function Dashboard() {
     const [verifyingFace, setVerifyingFace] = useState(false);
     const [faceError, setFaceError] = useState('');
     const [cameraReady, setCameraReady] = useState(false);
+    const [deferredPrompt, setDeferredPrompt] = useState(null);
+    const [showInstallBtn, setShowInstallBtn] = useState(false);
+    const [isIOS, setIsIOS] = useState(false);
+    const [isStandalone, setIsStandalone] = useState(false);
+
+    useEffect(() => {
+        // Detectar si ya está instalada
+        if (window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true) {
+            setIsStandalone(true);
+        }
+
+        // Detectar iOS
+        const userAgent = window.navigator.userAgent.toLowerCase();
+        if (userAgent.includes('iphone') || userAgent.includes('ipad') || userAgent.includes('ipod')) {
+            setIsIOS(true);
+        }
+
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();
+            setDeferredPrompt(e);
+            setShowInstallBtn(true);
+        });
+    }, []);
+
+    const handleInstallClick = async () => {
+        if (!deferredPrompt) return;
+        deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        if (outcome === 'accepted') {
+            setShowInstallBtn(false);
+        }
+        setDeferredPrompt(null);
+    };
+
+    const clearAppCache = async () => {
+        if (window.confirm("¿Deseas limpiar la memoria de la aplicación? Esto forzará la carga de la versión más reciente.")) {
+            if ('serviceWorker' in navigator) {
+                const registrations = await navigator.serviceWorker.getRegistrations();
+                for (let registration of registrations) {
+                    await registration.unregister();
+                }
+            }
+            const names = await caches.keys();
+            for (let name of names) {
+                await caches.delete(name);
+            }
+            localStorage.clear();
+            window.location.reload(true);
+        }
+    };
 
     // Cleanup and Security: Logout on reload (F5)
     // Verificación de acceso y Migración perezosa
@@ -351,12 +401,29 @@ export default function Dashboard() {
                         className="flex flex-col items-center gap-0.5 text-blue-600 font-bold border-2 border-blue-200 px-3 py-1.5 rounded-xl hover:bg-blue-50 transition"
                     >
                         <Settings size={18} />
-                        <span className="text-[10px] uppercase">Admin</span>
+                        <span className="text-[10px] uppercase">Datos</span>
                     </button>
                 </div>
                 <h1 className="text-lg font-bold text-gray-800 flex-1 text-center truncate">Control Asistencia</h1>
                 <button onClick={() => logout()} className="text-red-500 text-xs font-semibold hover:text-red-700 shrink-0">Salir</button>
             </div>
+
+            {(showInstallBtn && !isStandalone) && (
+                <div className="bg-green-500 p-2 flex justify-center animate-pulse">
+                    <button
+                        onClick={handleInstallClick}
+                        className="text-white text-xs font-bold uppercase tracking-wider flex items-center gap-2"
+                    >
+                        + Descargar Aplicación en Celular
+                    </button>
+                </div>
+            )}
+
+            {(isIOS && !isStandalone && !showInstallBtn) && (
+                <div className="bg-blue-600 p-2 flex justify-center items-center gap-2 text-[10px] text-white overflow-x-auto whitespace-nowrap">
+                    <span>📱 iPhone: Toca "Compartir" y "Añadir a pantalla de inicio"</span>
+                </div>
+            )}
 
             <div className="flex-1 p-4 flex flex-col items-center justify-center max-w-md mx-auto w-full">
 
@@ -513,8 +580,14 @@ export default function Dashboard() {
                 )}
             </div>
             {/* Version Indicator */}
-            <div className="p-2 text-center text-[8px] text-black pointer-events-none lowercase">
-                (v1.0.2)
+            <div className="p-2 text-center flex flex-col items-center gap-1 opacity-50">
+                <span className="text-[10px] text-black font-mono px-2 py-0.5 rounded">v1.0.5</span>
+                <button
+                    onClick={clearAppCache}
+                    className="text-[9px] text-blue-600 underline decoration-blue-300 hover:text-blue-800 transition pointer-events-auto"
+                >
+                    Limpiar App si no se actualiza
+                </button>
             </div>
         </div>
     );

@@ -19,7 +19,7 @@ registerSW({
 
 // --- CONTROL DE VERSIÓN FORZADO ---
 // Cambiar este número cuando se necesite forzar a TODOS los usuarios a recargar
-const APP_VERSION = '1.0.2';
+const APP_VERSION = '1.0.5';
 const savedVersion = localStorage.getItem('app_version');
 
 if (savedVersion !== APP_VERSION) {
