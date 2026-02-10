@@ -4,9 +4,10 @@ import { useAuth } from '../contexts/AuthContext';
 import { addWatermarkToImage, fetchServerTime, fetchLocationName } from '../utils/watermark';
 import { db } from '../firebaseConfig';
 import { collection, addDoc, query, where, getDocs, serverTimestamp } from 'firebase/firestore';
-import { Camera, MapPin, Search, CheckCircle, AlertCircle, LogOut, LogIn, Share2, Settings } from 'lucide-react';
+import { Camera, MapPin, Search, CheckCircle, AlertCircle, LogOut, LogIn, Share2, Settings, UserCheck, ShieldAlert } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import AdminPasswordModal from '../components/AdminPasswordModal';
+import * as faceapi from '@vladmandic/face-api';
 
 export default function Dashboard() {
     const { currentUser, logout } = useAuth();
@@ -22,10 +23,43 @@ export default function Dashboard() {
     const [isCapturing, setIsCapturing] = useState(false);
     const [showAdminModal, setShowAdminModal] = useState(false);
     const [adminTarget, setAdminTarget] = useState(''); // '/registro' or '/admin'
+    const [modelsLoaded, setModelsLoaded] = useState(false);
+    const [savedDescriptor, setSavedDescriptor] = useState(null);
+    const [faceVerified, setFaceVerified] = useState(false);
+    const [verifyingFace, setVerifyingFace] = useState(false);
+    const [faceError, setFaceError] = useState('');
+    const [cameraReady, setCameraReady] = useState(false);
 
     // Cleanup and Security: Logout on reload (F5)
     // Verificación de acceso y Migración perezosa
+    // Cargar modelos y descriptor del empleado
     useEffect(() => {
+        const loadModelsAndData = async () => {
+            try {
+                const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
+                await Promise.all([
+                    faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+                    faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+                    faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL)
+                ]);
+                setModelsLoaded(true);
+
+                if (currentUser) {
+                    const q = query(collection(db, "employees"), where("email", "==", currentUser.email));
+                    const snap = await getDocs(q);
+                    if (!snap.empty) {
+                        const data = snap.docs[0].data();
+                        if (data.faceDescriptor) {
+                            setSavedDescriptor(new Float32Array(data.faceDescriptor));
+                        }
+                    }
+                }
+            } catch (err) {
+                console.error("Error cargando modelos/datos faciales:", err);
+            }
+        };
+        loadModelsAndData();
+
         const checkAccess = async () => {
             if (!currentUser) return;
 
@@ -34,14 +68,9 @@ export default function Dashboard() {
                 const querySnapshot = await getDocs(q);
 
                 if (querySnapshot.empty) {
-                    // Si no está en la colección pero está logueado, es un usuario antiguo.
-                    // Lo agregamos automáticamente para que aparezca en la lista del admin
-                    // y pueda ser gestionado (exportado/borrado).
-                    await addDoc(collection(db, "employees"), {
-                        email: currentUser.email,
-                        fechaCreacion: serverTimestamp()
-                    });
-                    console.log("Usuario migrado automáticamente a la colección de gestión.");
+                    console.warn("Acceso denegado: Usuario no encontrado en lista activa.");
+                    logout();
+                    navigate('/login');
                 }
             } catch (err) {
                 console.error("Error verificando acceso:", err);
@@ -70,9 +99,7 @@ export default function Dashboard() {
                 audio: false
             });
             streamRef.current = stream;
-            if (videoRef.current) {
-                videoRef.current.srcObject = stream;
-            }
+            setCameraReady(true);
         } catch (err) {
             console.error("Error accessing camera:", err);
             alert("No se pudo acceder a la cámara. Verifique los permisos.");
@@ -82,11 +109,21 @@ export default function Dashboard() {
         }
     };
 
+    // Efecto para asignar el flujo de video cuando el elemento esté montado
+    useEffect(() => {
+        if (step === 'camera' && cameraReady && videoRef.current && streamRef.current) {
+            console.log("Dashboard: Asignando stream al video...");
+            videoRef.current.srcObject = streamRef.current;
+            videoRef.current.play().catch(e => console.error("Error auto-reproduciendo video:", e));
+        }
+    }, [step, cameraReady]);
+
     const stopCamera = () => {
         if (streamRef.current) {
             streamRef.current.getTracks().forEach(track => track.stop());
             streamRef.current = null;
         }
+        setCameraReady(false);
     };
 
     const handleStopCamera = () => {
@@ -101,8 +138,8 @@ export default function Dashboard() {
         setStep('camera');
         setStatusMessage('');
 
-        // Wait a tick for the video element to mount
-        setTimeout(() => startCamera(), 100);
+        // Iniciamos la cámara; el useEffect se encargará de conectarla al videoRef
+        await startCamera();
 
         if (!navigator.geolocation) {
             alert("Geolocalización no soportada en este navegador.");
@@ -134,23 +171,60 @@ export default function Dashboard() {
             const imageSrc = canvas.toDataURL('image/jpeg', 0.8); // Higher quality for sharing
             if (!imageSrc) throw new Error("Error generando imagen");
 
-            // Stop camera immediately after capture
+            // --- NUEVO FLUJO: VERIFICACIÓN FACIAL INMEDIATA ---
+            if (savedDescriptor) {
+                setStep('processing');
+                setStatusMessage('Verificando identidad facial...');
+                setVerifyingFace(true);
+
+                try {
+                    // Detectar directamente desde el video (más rápido y preciso)
+                    const detection = await faceapi.detectSingleFace(
+                        video,
+                        new faceapi.TinyFaceDetectorOptions()
+                    ).withFaceLandmarks().withFaceDescriptor();
+
+                    if (!detection) {
+                        setFaceError('No se pudo detectar tu rostro. Asegúrate de tener buena luz y estar frente a la cámara.');
+                        setFaceVerified(false);
+                    } else {
+                        const distance = faceapi.euclideanDistance(detection.descriptor, savedDescriptor);
+                        console.log("Distancia facial:", distance);
+                        if (distance < 0.6) {
+                            setFaceVerified(true);
+                            setFaceError('');
+                        } else {
+                            setFaceError('La identidad facial no coincide con el registro.');
+                            setFaceVerified(false);
+                        }
+                    }
+                } catch (faceErr) {
+                    console.error("Error en detección facial:", faceErr);
+                    setFaceError('Error en el sensor de reconocimiento. Reintenta.');
+                    setFaceVerified(false);
+                } finally {
+                    setVerifyingFace(false);
+                }
+            } else {
+                setFaceVerified(true); // Permitir si no hay registro previo
+            }
+
+            // AHORA DETENEMOS LA CÁMARA
             stopCamera();
 
-            setStep('processing');
+            // CONTINUAMOS CON LOS DATOS LENTOS (GPS, HORA)
             setStatusMessage('Obteniendo ubicación y hora...');
 
             // 1. Get Location
             const position = await new Promise((resolve, reject) => {
                 navigator.geolocation.getCurrentPosition(resolve, reject, {
                     enableHighAccuracy: true,
-                    timeout: 5000,
+                    timeout: 8000, // Aumentado timeout para móviles lentos
                     maximumAge: 0
                 });
             });
 
             const { latitude, longitude, accuracy } = position.coords;
-            if (accuracy > 100) console.warn("Low accuracy GPS");
 
             // 2. Get Time
             const serverTime = await fetchServerTime();
@@ -168,7 +242,7 @@ export default function Dashboard() {
                 timestamp: serverTime,
                 coords: `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`,
                 locationName: address,
-                mode: mode // Pass 'entry' or 'exit'
+                mode: mode
             });
 
             // STORE DATA FOR PREVIEW, DONT SAVE YET
@@ -318,7 +392,7 @@ export default function Dashboard() {
                         </h2>
 
                         {/* Native Video Element */}
-                        <div className="relative rounded-2xl overflow-hidden shadow-2xl border-4 border-white bg-black w-full aspect-[3/4] max-w-sm">
+                        <div className="relative rounded-2xl overflow-hidden shadow-2xl border-4 border-white bg-black w-full aspect-[3/4] max-w-[280px]">
                             <video
                                 ref={videoRef}
                                 autoPlay
@@ -368,16 +442,36 @@ export default function Dashboard() {
                     <div className="w-full flex flex-col items-center animate-fade-in">
                         <h2 className="text-xl font-bold mb-2 text-gray-800">Vista Previa</h2>
                         <p className="text-sm text-gray-500 mb-4 text-center">
-                            Comparte esta imagen como evidencia.
+                            {faceVerified
+                                ? 'Identidad verificada correctamente. Comparte esta imagen como evidencia.'
+                                : 'No se pudo verificar tu identidad facial.'}
                         </p>
 
-                        <div className="relative rounded-2xl overflow-hidden shadow-2xl border-4 border-white bg-gray-900 w-full max-w-sm mb-6">
+                        {!faceVerified && faceError && (
+                            <div className="bg-red-100 text-red-700 p-3 rounded-lg flex items-center gap-2 mb-4 w-full max-w-sm">
+                                <ShieldAlert size={20} />
+                                <span className="text-xs font-bold">{faceError}</span>
+                            </div>
+                        )}
+
+                        <div className="relative rounded-2xl overflow-hidden shadow-2xl border-4 bg-gray-900 w-full max-w-sm mb-6"
+                            style={{ borderColor: faceVerified ? '#22c55e' : '#ef4444' }}>
                             <img src={capturedData.image} alt="Capture" className="w-full h-auto" />
+                            {faceVerified && (
+                                <div className="absolute top-4 right-4 bg-green-500 text-white p-1 rounded-full shadow-lg">
+                                    <UserCheck size={24} />
+                                </div>
+                            )}
                         </div>
 
                         <div className="flex flex-col gap-3 w-full max-w-xs">
                             <button
                                 onClick={async () => {
+                                    if (!faceVerified) {
+                                        alert("Verificación facial fallida. No se puede guardar el registro.");
+                                        return;
+                                    }
+
                                     // 1. GUARDAR EN BASE DE DATOS (Obligatorio)
                                     const saved = await saveRecord();
                                     if (!saved) return; // Si falla, no continuar

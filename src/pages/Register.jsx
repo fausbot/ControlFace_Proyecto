@@ -5,7 +5,8 @@ import { auth, db } from '../firebaseConfig';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { collection, addDoc, serverTimestamp, getDocs, query, orderBy, where } from 'firebase/firestore';
 import DeleteEmployeeModal from '../components/DeleteEmployeeModal';
-import { Trash2, Download, UserPlus, LogOut, FileText, Loader2 } from 'lucide-react';
+import { Trash2, Download, UserPlus, LogOut, FileText, Loader2, Camera, UserCheck } from 'lucide-react';
+import * as faceapi from '@vladmandic/face-api';
 
 export default function Register() {
     const [email, setEmail] = useState('');
@@ -15,14 +16,107 @@ export default function Register() {
     const [loading, setLoading] = useState(false);
     const [exporting, setExporting] = useState(false);
     const [showDeleteModal, setShowDeleteModal] = useState(false);
+    const [faceDescriptor, setFaceDescriptor] = useState(null);
+    const [isCameraOpen, setIsCameraOpen] = useState(false);
+    const [modelsLoaded, setModelsLoaded] = useState(false);
+    const [capturingFace, setCapturingFace] = useState(false);
+    const videoRef = React.useRef(null);
+    const canvasRef = React.useRef(null);
+    const streamRef = React.useRef(null);
+
     const navigate = useNavigate();
     const { isAdminAuthenticated } = useAuth();
+
+    // Cargar modelos al iniciar
+    useEffect(() => {
+        const loadModels = async () => {
+            try {
+                const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
+                await Promise.all([
+                    faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+                    faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+                    faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL)
+                ]);
+                setModelsLoaded(true);
+            } catch (err) {
+                console.error("Error al cargar modelos de cara:", err);
+                setError("No se pudieron cargar los modelos de reconocimiento facial.");
+            }
+        };
+        loadModels();
+    }, []);
 
     React.useEffect(() => {
         if (!isAdminAuthenticated) {
             navigate('/login');
         }
     }, [isAdminAuthenticated, navigate]);
+
+    const startCamera = async () => {
+        setError('');
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: 'user' },
+                audio: false
+            });
+            streamRef.current = stream;
+            // Solo abrimos la interfaz; el useEffect se encargará de asignar el stream al videoRef
+            setIsCameraOpen(true);
+        } catch (err) {
+            console.error("Error al acceder a la cámara:", err);
+            setError("No se pudo acceder a la cámara. Asegúrate de dar permisos.");
+        }
+    };
+
+    // Efecto para asignar el stream cuando el videoRef esté disponible
+    useEffect(() => {
+        if (isCameraOpen && videoRef.current && streamRef.current) {
+            console.log("Asignando stream al videoRef...");
+            videoRef.current.srcObject = streamRef.current;
+            // Intentar reproducir explícitamente
+            videoRef.current.play().catch(e => {
+                console.error("Error al reproducir video en ref:", e);
+                setError("Error al iniciar el video. Intenta de nuevo.");
+            });
+        }
+    }, [isCameraOpen]);
+
+    const stopCamera = () => {
+        if (streamRef.current) {
+            streamRef.current.getTracks().forEach(track => track.stop());
+            streamRef.current = null;
+        }
+        setIsCameraOpen(false);
+    };
+
+    const captureFace = async () => {
+        if (!videoRef.current || !modelsLoaded) return;
+        setCapturingFace(true);
+        setError('');
+
+        try {
+            const detections = await faceapi.detectSingleFace(
+                videoRef.current,
+                new faceapi.TinyFaceDetectorOptions()
+            ).withFaceLandmarks().withFaceDescriptor();
+
+            if (!detections) {
+                setError('No se detectó un rostro. Asegúrate de estar en un lugar iluminado.');
+                setCapturingFace(false);
+                return;
+            }
+
+            // Guardamos el descriptor como Array para Firestore
+            setFaceDescriptor(Array.from(detections.descriptor));
+            setCapturingFace(false);
+            stopCamera();
+            alert('¡Rostro capturado exitosamente!');
+        } catch (err) {
+            console.error("Error al capturar rostro:", err);
+            setError("Error al procesar el reconocimiento facial.");
+            setCapturingFace(false);
+        }
+    };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -31,39 +125,58 @@ export default function Register() {
             return setError('Las contraseñas no coinciden');
         }
 
+        if (!faceDescriptor) {
+            return setError('Debes capturar el rostro del empleado antes de crear la cuenta.');
+        }
+
         try {
             setError('');
             setLoading(true);
-            // Auto-agregar dominio si no está presente
-            const emailToUse = email.includes('@') ? email : `${email}@vertiaguas.com`;
+            // Auto-agregar dominio si no está presente y normalizar a minúsculas
+            let emailToUse = email.includes('@') ? email : `${email}@vertiaguas.com`;
+            emailToUse = emailToUse.toLowerCase().trim();
 
             await createUserWithEmailAndPassword(auth, emailToUse, password);
 
             // Guardar en colección de empleados para gestión
             await addDoc(collection(db, "employees"), {
                 email: emailToUse,
-                fechaCreacion: serverTimestamp()
+                fechaCreacion: serverTimestamp(),
+                faceDescriptor: faceDescriptor // Guardar el descriptor facial
             });
 
             alert('Usuario creado exitosamente.');
             setEmail('');
             setPassword('');
             setConfirmPassword('');
+            setFaceDescriptor(null);
         } catch (err) {
             console.error(err);
             if (err.code === 'auth/email-already-in-use') {
                 // Lógica de "vincular" si ya existe en Auth pero no en Firestore
                 try {
-                    const emailToUse = email.includes('@') ? email : `${email}@vertiaguas.com`;
+                    let emailToUse = email.includes('@') ? email : `${email}@vertiaguas.com`;
+                    emailToUse = emailToUse.toLowerCase().trim();
+
                     const q = query(collection(db, "employees"), where("email", "==", emailToUse));
                     const snap = await getDocs(q);
 
                     if (snap.empty) {
+                        // Agregar a la lista de empleados
                         await addDoc(collection(db, "employees"), {
                             email: emailToUse,
                             fechaCreacion: serverTimestamp()
                         });
-                        alert('Este usuario ya existía en Auth y ha sido vinculado correctamente a la lista de gestión.');
+
+                        // Limpiar de la cola de borrado si estaba allí
+                        const { deleteDoc, doc } = await import('firebase/firestore');
+                        const qQueue = query(collection(db, "deletionQueue"), where("email", "==", emailToUse));
+                        const snapQueue = await getDocs(qQueue);
+                        snapQueue.forEach(async (d) => {
+                            await deleteDoc(d.ref);
+                        });
+
+                        alert('Este usuario ya tenía cuenta de acceso. Se ha re-vinculado correctamente a la lista de empleados.');
                         setEmail('');
                         setPassword('');
                         setConfirmPassword('');
@@ -71,7 +184,7 @@ export default function Register() {
                         setError('Este usuario ya existe y ya está en la lista de gestión.');
                     }
                 } catch (linkErr) {
-                    setError('El usuario ya existe, pero hubo un error al vincularlo: ' + linkErr.message);
+                    setError('El usuario ya existe, pero hubo un error al sincronizarlo: ' + linkErr.message);
                 }
             } else if (err.code === 'auth/weak-password') {
                 setError('La contraseña debe tener al menos 6 caracteres.');
@@ -117,11 +230,15 @@ export default function Register() {
             const url = URL.createObjectURL(blob);
 
             const now = new Date();
-            const timeStr = now.getHours().toString().padStart(2, '0') + now.getMinutes().toString().padStart(2, '0');
-            const dateStr = now.toISOString().split('T')[0];
+            const year = now.getFullYear();
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const day = String(now.getDate()).padStart(2, '0');
+            const hours = String(now.getHours()).padStart(2, '0');
+            const minutes = String(now.getMinutes()).padStart(2, '0');
+            const timestamp = `${year}${month}${day}${hours}${minutes}`;
 
             link.setAttribute('href', url);
-            link.setAttribute('download', `empleados_${dateStr}_${timeStr}.csv`);
+            link.setAttribute('download', `empleados_${timestamp}.csv`);
             link.style.visibility = 'hidden';
             document.body.appendChild(link);
             link.click();
@@ -133,6 +250,71 @@ export default function Register() {
         } finally {
             setExporting(false);
         }
+    };
+
+    const handleImportCSV = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        setLoading(true);
+        const reader = new FileReader();
+        reader.onload = async (event) => {
+            try {
+                const text = event.target.result;
+                const lines = text.split('\n').map(line => line.trim()).filter(line => line);
+
+                // Saltar encabezado si existe
+                const startIndex = lines[0].toLowerCase().includes('email') ? 1 : 0;
+                const emailsToRestore = lines.slice(startIndex).map(line => line.split(',')[0].trim().toLowerCase());
+
+                if (emailsToRestore.length === 0) {
+                    alert('No se encontraron correos válidos en el archivo.');
+                    setLoading(false);
+                    return;
+                }
+
+                // 1. Obtener empleados actuales para no duplicar
+                const currentSnap = await getDocs(collection(db, "employees"));
+                const currentEmails = new Set(currentSnap.docs.map(doc => doc.data().email.toLowerCase().trim()));
+
+                let count = 0;
+                const { writeBatch, doc, deleteDoc } = await import('firebase/firestore');
+                const batch = writeBatch(db);
+
+                for (const emailToRestore of emailsToRestore) {
+                    if (emailToRestore && !currentEmails.has(emailToRestore)) {
+                        const newDocRef = doc(collection(db, "employees"));
+                        batch.set(newDocRef, {
+                            email: emailToRestore,
+                            fechaCreacion: serverTimestamp(),
+                            recuperado: true
+                        });
+                        count++;
+
+                        // Intentar limpiar de la cola de borrado si está allí
+                        const qQueue = query(collection(db, "deletionQueue"), where("email", "==", emailToRestore));
+                        const snapQueue = await getDocs(qQueue);
+                        snapQueue.forEach((d) => {
+                            batch.delete(d.ref);
+                        });
+                    }
+                }
+
+                if (count > 0) {
+                    await batch.commit();
+                    alert(`Se han recuperado ${count} empleados exitosamente.`);
+                } else {
+                    alert('Todos los empleados del archivo ya están en la lista activa.');
+                }
+            } catch (err) {
+                console.error("Error al importar CSV:", err);
+                alert("Error al procesar el archivo CSV.");
+            } finally {
+                setLoading(false);
+                e.target.value = null; // Reset input
+            }
+        };
+        reader.readAsText(file);
     };
 
     return (
@@ -183,6 +365,63 @@ export default function Register() {
                             onChange={(e) => setConfirmPassword(e.target.value)}
                         />
                     </div>
+
+                    {/* Sección de Reconocimiento Facial */}
+                    <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
+                        <label className="block text-sm font-bold text-gray-700 mb-2">Reconocimiento Facial</label>
+                        {!isCameraOpen ? (
+                            <div className="flex flex-col items-center">
+                                {faceDescriptor ? (
+                                    <div className="flex items-center gap-2 text-green-600 mb-3">
+                                        <UserCheck size={20} />
+                                        <span className="text-sm font-medium">Rostro registrado correctamente</span>
+                                    </div>
+                                ) : (
+                                    <p className="text-xs text-gray-500 mb-3 text-center">Es necesario registrar el rostro para que el empleado pueda marcar asistencia.</p>
+                                )}
+                                <button
+                                    type="button"
+                                    onClick={startCamera}
+                                    disabled={!modelsLoaded}
+                                    className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition ${faceDescriptor ? 'bg-gray-100 text-gray-600' : 'bg-blue-600 text-white hover:bg-blue-700'}`}
+                                >
+                                    <Camera size={18} />
+                                    {faceDescriptor ? 'Capturar de nuevo' : 'Activar Cámara'}
+                                </button>
+                                {!modelsLoaded && <p className="text-[10px] text-orange-500 mt-1">Cargando modelos inteligentes...</p>}
+                            </div>
+                        ) : (
+                            <div className="flex flex-col items-center animate-fade-in">
+                                <div className="relative rounded-lg overflow-hidden border-2 border-blue-400 bg-black aspect-[3/4] w-full max-w-[200px]">
+                                    <video
+                                        ref={videoRef}
+                                        autoPlay
+                                        playsInline
+                                        muted
+                                        className="w-full h-full object-cover transform scale-x-[-1]"
+                                    />
+                                    <canvas ref={canvasRef} className="hidden" />
+                                </div>
+                                <div className="flex gap-2 mt-3">
+                                    <button
+                                        type="button"
+                                        onClick={stopCamera}
+                                        className="px-3 py-1.5 bg-gray-200 text-gray-700 rounded-md text-xs font-bold"
+                                    >
+                                        Cancelar
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={captureFace}
+                                        disabled={capturingFace}
+                                        className="px-4 py-1.5 bg-blue-600 text-white rounded-md text-xs font-bold"
+                                    >
+                                        {capturingFace ? 'Analizando...' : 'Capturar Rostro'}
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
                     <button
                         onClick={handleSubmit}
                         disabled={loading}
@@ -191,23 +430,42 @@ export default function Register() {
                         {loading ? 'Creando...' : 'Crear Cuenta'}
                     </button>
 
-                    <div className="grid grid-cols-2 gap-3 mt-4">
+                    <div className="grid grid-cols-1 gap-3 mt-4">
+                        <div className="grid grid-cols-2 gap-3">
+                            <button
+                                type="button"
+                                onClick={() => setShowDeleteModal(true)}
+                                className="flex items-center justify-center gap-2 py-2.5 px-4 bg-blue-600 text-white text-xs rounded-lg hover:bg-blue-700 font-bold transition shadow-sm"
+                            >
+                                <Trash2 size={16} />
+                                Borrar Empleado
+                            </button>
+                            <button
+                                type="button"
+                                onClick={exportEmployeesToCSV}
+                                disabled={exporting}
+                                className="flex items-center justify-center gap-2 py-2.5 px-4 bg-blue-500 text-white text-xs rounded-lg hover:bg-blue-600 font-bold transition shadow-sm disabled:opacity-50"
+                            >
+                                {exporting ? <Loader2 size={16} className="animate-spin" /> : <FileText size={16} />}
+                                Exportar CSV
+                            </button>
+                        </div>
+
+                        <input
+                            type="file"
+                            id="csv-upload"
+                            accept=".csv"
+                            onChange={handleImportCSV}
+                            className="hidden"
+                        />
                         <button
                             type="button"
-                            onClick={() => setShowDeleteModal(true)}
-                            className="flex items-center justify-center gap-2 py-2.5 px-4 bg-blue-600 text-white text-xs rounded-lg hover:bg-blue-700 font-bold transition shadow-sm"
+                            onClick={() => document.getElementById('csv-upload').click()}
+                            disabled={loading}
+                            className="flex items-center justify-center gap-2 py-2.5 px-4 bg-orange-500 text-white text-xs rounded-lg hover:bg-orange-600 font-bold transition shadow-sm disabled:opacity-50 border border-orange-400"
                         >
-                            <Trash2 size={16} />
-                            Borrar Empleado
-                        </button>
-                        <button
-                            type="button"
-                            onClick={exportEmployeesToCSV}
-                            disabled={exporting}
-                            className="flex items-center justify-center gap-2 py-2.5 px-4 bg-blue-500 text-white text-xs rounded-lg hover:bg-blue-600 font-bold transition shadow-sm disabled:opacity-50"
-                        >
-                            {exporting ? <Loader2 size={16} className="animate-spin" /> : <FileText size={16} />}
-                            Exportar CSV
+                            <Download size={16} className="rotate-180" />
+                            Recuperar desde CSV
                         </button>
                     </div>
 

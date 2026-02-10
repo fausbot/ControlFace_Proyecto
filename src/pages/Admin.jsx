@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { db } from '../firebaseConfig';
-import { collection, query, orderBy, getDocs, limit, startAfter, deleteDoc, doc, writeBatch, where } from 'firebase/firestore';
+import { collection, query, orderBy, getDocs, limit, startAfter, deleteDoc, doc, writeBatch, where, serverTimestamp } from 'firebase/firestore';
 import { useNavigate } from 'react-router-dom';
 import { Download, Calendar, Trash2, ChevronLeft, ChevronRight, AlertTriangle } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
@@ -53,7 +53,50 @@ export default function Admin() {
             return;
         }
         fetchLogs();
+        checkAndRestoreEmployees();
     }, [isAdminAuthenticated]);
+
+    const checkAndRestoreEmployees = async () => {
+        try {
+            const empSnap = await getDocs(collection(db, "employees"));
+            if (empSnap.empty) {
+                console.log("Detectada lista de empleados vacía. Iniciando auto-restauración...");
+
+                // 1. Obtener correos en la cola de borrado para NO restaurarlos
+                const queueSnap = await getDocs(collection(db, "deletionQueue"));
+                const deletedEmails = new Set();
+                queueSnap.forEach(doc => {
+                    if (doc.data().email) deletedEmails.add(doc.data().email.toLowerCase().trim());
+                });
+
+                // 2. Obtener correos del historial de asistencia
+                const attSnap = await getDocs(collection(db, "attendance"));
+                const uniqueEmails = new Set();
+                attSnap.forEach(doc => {
+                    const email = doc.data().usuario?.toLowerCase().trim();
+                    if (email && !deletedEmails.has(email)) {
+                        uniqueEmails.add(email);
+                    }
+                });
+
+                if (uniqueEmails.size > 0) {
+                    const batch = writeBatch(db);
+                    uniqueEmails.forEach(email => {
+                        const newDocRef = doc(collection(db, "employees"));
+                        batch.set(newDocRef, {
+                            email: email,
+                            fechaCreacion: serverTimestamp(),
+                            estado: 'activo'
+                        });
+                    });
+                    await batch.commit();
+                    console.log(`Se han restaurado ${uniqueEmails.size} empleados desde la historia de asistencia (excluyendo borrados).`);
+                }
+            }
+        } catch (err) {
+            console.error("Error en auto-restauración:", err);
+        }
+    };
 
     const handleDelete = async (id) => {
         if (!window.confirm('¿Está seguro de que desea eliminar este registro permanentemente?')) return;
@@ -193,12 +236,16 @@ export default function Admin() {
             const url = URL.createObjectURL(blob);
 
             const now = new Date();
-            const timeStr = now.getHours().toString().padStart(2, '0') + now.getMinutes().toString().padStart(2, '0');
-            const dateStr = now.toISOString().split('T')[0];
+            const year = now.getFullYear();
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const day = String(now.getDate()).padStart(2, '0');
+            const hours = String(now.getHours()).padStart(2, '0');
+            const minutes = String(now.getMinutes()).padStart(2, '0');
+            const timestamp = `${year}${month}${day}${hours}${minutes}`;
 
             const fileName = startDate && endDate
-                ? `asistencia_${startDate}_${endDate}_${timeStr}.csv`
-                : `asistencia_${dateStr}_${timeStr}.csv`;
+                ? `asistencia_${startDate.replace(/-/g, '')}_${endDate.replace(/-/g, '')}_${timestamp}.csv`
+                : `asistencia_${timestamp}.csv`;
 
             link.setAttribute('href', url);
             link.setAttribute('download', fileName);

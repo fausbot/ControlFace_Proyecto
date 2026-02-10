@@ -7,13 +7,12 @@ import { getAnalytics } from "firebase/analytics";
 
 // Your web app's Firebase configuration
 const firebaseConfig = {
-    apiKey: "AIzaSyATN3fVmJUpkpf7LKhoX780TeiihwQgu_0",
-    authDomain: "control-de-entrada-3d85b.firebaseapp.com",
-    projectId: "control-de-entrada-3d85b",
-    storageBucket: "control-de-entrada-3d85b.firebasestorage.app",
-    messagingSenderId: "770945112496",
-    appId: "1:770945112496:web:cee48c2ac7e3e2f4f41e75",
-    measurementId: "G-5EELJV0VLX"
+    apiKey: "AIzaSyCknF4e08GbrAX3R7O6MSHrZLARQlsECl4",
+    authDomain: "attendance-pwa-dev.firebaseapp.com",
+    projectId: "attendance-pwa-dev",
+    storageBucket: "attendance-pwa-dev.firebasestorage.app",
+    messagingSenderId: "747910832076",
+    appId: "1:747910832076:web:835510de0a520c32994769"
 };
 
 // Initialize Firebase
