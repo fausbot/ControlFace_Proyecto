@@ -524,6 +524,18 @@ export default function Dashboard() {
                         <div className="relative rounded-2xl overflow-hidden shadow-2xl border-4 bg-gray-900 w-full max-w-sm mb-6"
                             style={{ borderColor: faceVerified ? '#22c55e' : '#ef4444' }}>
                             <img src={capturedData.image} alt="Capture" className="w-full h-auto" />
+
+                            {/* Botón REPETIR FOTO sobre la imagen */}
+                            {!faceVerified && (
+                                <button
+                                    onClick={handleStopCamera}
+                                    className="absolute top-4 left-4 flex items-center gap-2 px-4 py-2 bg-red-600 text-white font-bold rounded-lg shadow-lg hover:bg-red-700 transition transform hover:scale-105"
+                                >
+                                    <Camera size={20} />
+                                    REPETIR FOTO
+                                </button>
+                            )}
+
                             {faceVerified && (
                                 <div className="absolute top-4 right-4 bg-green-500 text-white p-1 rounded-full shadow-lg">
                                     <UserCheck size={24} />
@@ -558,13 +570,6 @@ export default function Dashboard() {
                             >
                                 <CheckCircle size={20} />
                                 Guardar y Compartir
-                            </button>
-
-                            <button
-                                onClick={handleStopCamera}
-                                className="w-full text-gray-500 text-sm mt-2 underline"
-                            >
-                                Cancelar / Tomar otra
                             </button>
                         </div>
                     </div>
