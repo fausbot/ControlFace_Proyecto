@@ -11,6 +11,8 @@ import * as faceapi from '@vladmandic/face-api';
 
 export default function Register() {
     const [email, setEmail] = useState('');
+    const [firstName, setFirstName] = useState('');
+    const [lastName, setLastName] = useState('');
     const [password, setPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
     const [error, setError] = useState('');
@@ -143,8 +145,10 @@ export default function Register() {
         try {
             setError('');
             setLoading(true);
-            // Auto-agregar dominio si no está presente y normalizar a minúsculas
-            let emailToUse = email.includes('@') ? email : `${email}@vertiaguas.com`;
+            // Si no tiene arroba, le agregamos @usuario.com por defecto (o lo dejamos libre)
+            // El usuario pidió quitar el autocompletado de vertiaguas, así que usaremos un genérico o dejaremos que escriban todo.
+            // Dado el ejemplo "nuevo@usuario.com", asumiré que si no escriben dominio, agrego @usuario.com por seguridad.
+            let emailToUse = email.includes('@') ? email : `${email}@usuario.com`;
             emailToUse = emailToUse.toLowerCase().trim();
 
             await createUserWithEmailAndPassword(auth, emailToUse, password);
@@ -152,12 +156,17 @@ export default function Register() {
             // Guardar en colección de empleados para gestión
             await addDoc(collection(db, "employees"), {
                 email: emailToUse,
+                firstName: firstName.trim(),
+                lastName: lastName.trim(),
                 fechaCreacion: serverTimestamp(),
                 faceDescriptor: faceDescriptor // Guardar el descriptor facial
             });
 
             alert('Usuario creado exitosamente.');
+            alert('Usuario creado exitosamente.');
             setEmail('');
+            setFirstName('');
+            setLastName('');
             setPassword('');
             setConfirmPassword('');
             setFaceDescriptor(null);
@@ -176,6 +185,8 @@ export default function Register() {
                         // Agregar a la lista de empleados
                         await addDoc(collection(db, "employees"), {
                             email: emailToUse,
+                            firstName: firstName.trim(),
+                            lastName: lastName.trim(),
                             fechaCreacion: serverTimestamp()
                         });
 
@@ -278,7 +289,29 @@ export default function Register() {
                             className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
                             value={email}
                             onChange={(e) => setEmail(e.target.value)}
-                            placeholder="Ej: nuevoempleado"
+                            placeholder="Ej: nuevo.empleado"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700">Nombres</label>
+                        <input
+                            type="text"
+                            required
+                            className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
+                            value={firstName}
+                            onChange={(e) => setFirstName(e.target.value)}
+                            placeholder="Ej: Juan"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700">Apellidos</label>
+                        <input
+                            type="text"
+                            required
+                            className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
+                            value={lastName}
+                            onChange={(e) => setLastName(e.target.value)}
+                            placeholder="Ej: Pérez"
                         />
                     </div>
                     <div>

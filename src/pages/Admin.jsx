@@ -197,11 +197,11 @@ export default function Admin() {
         return new Date(year, month, day);
     };
 
-    const exportToCSV = () => {
+    const exportToCSV = async () => {
         setExporting(true);
 
         try {
-            // Filtrar por rango de fechas
+            // 1. Filtrar por rango de fechas
             let filteredLogs = logs;
 
             if (startDate || endDate) {
@@ -225,8 +225,22 @@ export default function Admin() {
                 return;
             }
 
-            // Crear CSV
-            const headers = ['Usuario', 'Tipo', 'Dia', 'Fecha', 'Hora', 'Localidad'];
+            // 2. Obtener datos de empleados para cruzar (Nombres y Apellidos)
+            const employeesSnap = await getDocs(collection(db, "employees"));
+            const employeesMap = {};
+            employeesSnap.forEach(doc => {
+                const data = doc.data();
+                if (data.email) {
+                    employeesMap[data.email.toLowerCase().trim()] = {
+                        firstName: data.firstName || '',
+                        lastName: data.lastName || ''
+                    };
+                }
+            });
+
+            // 3. Crear CSV
+            // Campos requeridos: usuario, nombres, apellidos, dia, fecha, hora, localidad
+            const headers = ['Usuario', 'Nombres', 'Apellidos', 'Dia', 'Fecha', 'Hora', 'Localidad'];
             const csvRows = [headers.join(',')];
 
             const dayFormatter = new Intl.DateTimeFormat('es-ES', { weekday: 'long' });
@@ -242,13 +256,18 @@ export default function Admin() {
                     }
                 }
 
+                const emailKey = (log.usuario || '').toLowerCase().trim();
+                const empData = employeesMap[emailKey] || { firstName: '', lastName: '' };
+
+                // Envolver en comillas para evitar problemas con comas en los datos
                 const row = [
                     log.usuario || '',
-                    log.tipo || '',
+                    `"${empData.firstName}"`,
+                    `"${empData.lastName}"`,
                     diaNombre,
                     log.fecha || '',
                     log.hora || '',
-                    `"${(log.localidad || '').replace(/"/g, '""')}"` // Escapar comillas
+                    `"${(log.localidad || '').replace(/"/g, '""')}"` // Escapar comillas dobles
                 ];
                 csvRows.push(row.join(','));
             });

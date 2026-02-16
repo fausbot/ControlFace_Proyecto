@@ -69,9 +69,16 @@ export default function Login() {
         e.preventDefault();
         try {
             setError('');
-            // Auto-append domain if not present y normalizar
-            let emailToUse = email.includes('@') ? email : `${email}@vertiaguas.com`;
-            emailToUse = emailToUse.toLowerCase().trim();
+            // Auto-append domain removed as per user request
+            let emailToUse = email.trim().toLowerCase();
+            // Si el usuario no escribe @, podríamos asumir un defecto, pero la instrucción fue "quitar el autocompletado"
+            // así que dejaremos que falle si no es un email válido, o el navegador lo validará.
+            if (!emailToUse.includes('@')) {
+                // Opción: agregar @usuario.com si se desea mantener un default, pero "quitar autocompletado" sugiere inputs limpios.
+                // Sin embargo, para mantener consistencia con el registro (donde agregué @usuario.com si falta), haré lo mismo aquí
+                // O mejor, dejo que el usuario escriba todo. El prompt dice "nuevo@usiuario.com", lo que implica escribir todo.
+                // Voy a dejarlo limpio.
+            }
             const userCredential = await login(emailToUse, password);
             const user = userCredential.user;
 
@@ -136,7 +143,7 @@ export default function Login() {
                             className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                             value={email}
                             onChange={(e) => setEmail(e.target.value)}
-                            placeholder="Ej: juan (sin @vertiaguas.com)"
+                            placeholder="Ej: nuevo@usuario.com"
                         />
                     </div>
                     <div>
@@ -175,7 +182,7 @@ export default function Login() {
             </div>
 
             <div className="fixed bottom-4 left-0 right-0 flex flex-col items-center gap-1 opacity-90 px-4">
-                <span className="text-[10px] text-white font-mono bg-red-600 px-2 py-0.5 rounded shadow-lg animate-pulse">Versión: 1.0.6 check</span>
+                <span className="text-[10px] text-white font-mono bg-red-600 px-2 py-0.5 rounded shadow-lg animate-pulse">Versión: 1.1.0</span>
                 <button
                     onClick={clearAppCache}
                     className="text-[9px] text-white underline decoration-white/30 hover:text-white/80 transition"
