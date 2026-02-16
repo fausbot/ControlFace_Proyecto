@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { db } from '../firebaseConfig';
 import { collection, query, orderBy, getDocs, limit, startAfter, deleteDoc, doc, writeBatch, where, serverTimestamp } from 'firebase/firestore';
 import { useNavigate } from 'react-router-dom';
-import { Download, Calendar, Trash2, ChevronLeft, ChevronRight, AlertTriangle } from 'lucide-react';
+import { Download, Calendar, Trash2, ChevronLeft, ChevronRight, AlertTriangle, Lock } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
 export default function Admin() {
@@ -17,31 +17,45 @@ export default function Admin() {
     const [pageNumber, setPageNumber] = useState(1);
     const [hasMore, setHasMore] = useState(true);
     const navigate = useNavigate();
-    const { isAdminAuthenticated } = useAuth();
+    const { isAdminAuthenticated, currentUser } = useAuth();
     const PAGE_SIZE = 100;
 
     const fetchLogs = async (direction = 'initial') => {
         setLoading(true);
         try {
-            let q;
-            if (direction === 'next' && lastDoc) {
-                q = query(collection(db, "attendance"), orderBy("fecha", "desc"), startAfter(lastDoc), limit(PAGE_SIZE));
-            } else {
-                q = query(collection(db, "attendance"), orderBy("fecha", "desc"), limit(PAGE_SIZE));
-                setPageNumber(1);
-            }
+            // SOLUCIÓN: Traer todos los registros sin ordenamiento en servidor
+            // y ordenar en cliente para manejar registros con y sin timestamp
+            const snapshot = await getDocs(collection(db, "attendance"));
 
-            const querySnapshot = await getDocs(q);
-            const data = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            let allData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
-            setLogs(data);
-            setFirstDoc(querySnapshot.docs[0]);
-            setLastDoc(querySnapshot.docs[querySnapshot.docs.length - 1]);
-            setHasMore(querySnapshot.docs.length === PAGE_SIZE);
+            // Ordenar en cliente: priorizar timestamp, fallback a fecha/hora
+            allData.sort((a, b) => {
+                // Si ambos tienen timestamp, usar eso
+                if (a.timestamp && b.timestamp) {
+                    return b.timestamp.toMillis() - a.timestamp.toMillis();
+                }
+                // Si solo uno tiene timestamp, ese va primero
+                if (a.timestamp) return -1;
+                if (b.timestamp) return 1;
+
+                // Fallback: comparar por fecha y hora como strings
+                const dateTimeA = (a.fecha || '') + ' ' + (a.hora || '');
+                const dateTimeB = (b.fecha || '') + ' ' + (b.hora || '');
+                return dateTimeB.localeCompare(dateTimeA);
+            });
+
+            // Implementar paginación manual en cliente
+            const startIndex = (pageNumber - 1) * PAGE_SIZE;
+            const endIndex = startIndex + PAGE_SIZE;
+            const paginatedData = allData.slice(startIndex, endIndex);
+
+            setLogs(paginatedData);
+            setHasMore(endIndex < allData.length);
 
         } catch (error) {
             console.error("Error fetching logs:", error);
-            alert("Error al cargar los datos: " + error.message);
+            alert("Error al cargar registros. Revisa la consola.");
         } finally {
             setLoading(false);
         }
@@ -52,9 +66,16 @@ export default function Admin() {
             navigate('/login');
             return;
         }
+
+        if (!currentUser) {
+            alert('Debes iniciar sesión primero como empleado antes de acceder al panel de administración.');
+            navigate('/login');
+            return;
+        }
+
         fetchLogs();
         checkAndRestoreEmployees();
-    }, [isAdminAuthenticated]);
+    }, [isAdminAuthenticated, currentUser]);
 
     const checkAndRestoreEmployees = async () => {
         try {
@@ -122,22 +143,27 @@ export default function Admin() {
 
         setDeleting(true);
         try {
-            // Firestore no permite filtrado complejo por fecha guardada como string fécilmente para borrado masivo sin traerlos
-            // Así que traemos los que coincidan o filtramos en cliente si son pocos, 
-            // pero lo más seguro es filtrar por la fecha guardada.
-
-            // Nota: Para borrado masivo eficiente en cliente:
-            const q = query(collection(db, "attendance"), orderBy("fecha", "desc"));
-            const snapshot = await getDocs(q);
+            // Traer todos los registros sin ordenamiento específico
+            const snapshot = await getDocs(collection(db, "attendance"));
 
             const toDelete = snapshot.docs.filter(doc => {
                 const data = doc.data();
-                const logDate = parseSpanishDate(data.fecha);
+                let logDate = null;
+                if (data.timestamp) {
+                    logDate = data.timestamp.toDate();
+                } else if (data.fecha) {
+                    logDate = parseSpanishDate(data.fecha);
+                }
+
                 if (!logDate) return false;
                 const start = new Date(startDate);
                 const end = new Date(endDate);
+                // Ajustar end al final del día
+                end.setHours(23, 59, 59, 999);
+
                 return logDate >= start && logDate <= end;
             });
+
 
             if (toDelete.length === 0) {
                 alert("No se encontraron registros en ese rango.");
@@ -267,9 +293,21 @@ export default function Admin() {
             <div className="max-w-6xl mx-auto">
                 <div className="flex justify-between items-center mb-8">
                     <h1 className="text-3xl font-bold text-gray-800">Centro de Datos</h1>
-                    <button onClick={() => navigate('/dashboard')} className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300">
-                        Volver
-                    </button>
+                    <div className="flex gap-3">
+                        <button
+                            onClick={() => navigate('/cambiar-clave-admin')}
+                            className="px-4 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 font-bold transition flex items-center gap-2"
+                        >
+                            <Lock size={18} />
+                            Cambiar Contraseña
+                        </button>
+                        <button
+                            onClick={() => navigate('/dashboard')}
+                            className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300"
+                        >
+                            Volver
+                        </button>
+                    </div>
                 </div>
 
                 {/* Sección de Exportación */}
@@ -341,7 +379,10 @@ export default function Admin() {
                             </button>
                         </div>
                     </div>
+
+
                 </div>
+
 
                 {/* Tabla de Registros */}
                 <div className="bg-white rounded-xl shadow-lg overflow-hidden">
@@ -396,7 +437,10 @@ export default function Admin() {
                         </p>
                         <div className="flex gap-2">
                             <button
-                                onClick={() => fetchLogs('initial')}
+                                onClick={() => {
+                                    setPageNumber(1);
+                                    fetchLogs('initial');
+                                }}
                                 disabled={loading || pageNumber === 1}
                                 className="px-4 py-2 text-sm bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition"
                             >
@@ -404,8 +448,17 @@ export default function Admin() {
                             </button>
                             <button
                                 onClick={() => {
+                                    setPageNumber(prev => Math.max(1, prev - 1));
+                                }}
+                                disabled={loading || pageNumber === 1}
+                                className="flex items-center gap-1 px-4 py-2 text-sm bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition"
+                            >
+                                <ChevronLeft size={16} />
+                                Anterior
+                            </button>
+                            <button
+                                onClick={() => {
                                     setPageNumber(prev => prev + 1);
-                                    fetchLogs('next');
                                 }}
                                 disabled={loading || !hasMore}
                                 className="flex items-center gap-1 px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition font-bold"

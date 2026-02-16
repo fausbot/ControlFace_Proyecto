@@ -240,7 +240,9 @@ export default function Dashboard() {
                     } else {
                         const distance = faceapi.euclideanDistance(detection.descriptor, savedDescriptor);
                         console.log("Distancia facial:", distance);
-                        if (distance < 0.6) {
+                        // Umbral más permisivo: 0.68 (era 0.62)
+                        // Esto reduce falsos negativos por iluminación/ángulo
+                        if (distance < 0.68) {
                             setFaceVerified(true);
                             setFaceError('');
                         } else {
@@ -309,7 +311,8 @@ export default function Dashboard() {
                     tipo: mode === 'entry' ? 'Entrada' : 'Salida', // 2. Qué
                     fecha: dateStr, // 3. Cuándo (Día)
                     hora: timeStr, // 4. Cuándo (Hora)
-                    localidad: address // 5. Dónde
+                    localidad: address, // 5. Dónde
+                    timestamp: serverTimestamp() // 6. Ordenamiento real
                 }
             });
 
@@ -586,7 +589,7 @@ export default function Dashboard() {
             </div>
             {/* Version Indicator */}
             <div className="p-2 text-center flex flex-col items-center gap-1 opacity-50">
-                <span className="text-[10px] text-black font-mono px-2 py-0.5 rounded">v1.0.5</span>
+                <span className="text-[10px] text-black font-mono px-2 py-0.5 rounded">v1.0.6</span>
                 <button
                     onClick={clearAppCache}
                     className="text-[9px] text-blue-600 underline decoration-blue-300 hover:text-blue-800 transition pointer-events-auto"

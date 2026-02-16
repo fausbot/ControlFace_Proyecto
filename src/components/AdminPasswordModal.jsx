@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { X, Lock, Loader2 } from 'lucide-react';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { db } from '../firebaseConfig';
 import { useAuth } from '../contexts/AuthContext';
+import { functions } from '../firebaseConfig';
+import { httpsCallable } from 'firebase/functions';
 
 export default function AdminPasswordModal({ isOpen, onClose, onSuccess }) {
     const [password, setPassword] = useState('');
@@ -18,34 +18,12 @@ export default function AdminPasswordModal({ isOpen, onClose, onSuccess }) {
         setError('');
 
         try {
-            const docRef = doc(db, 'settings', 'config');
-            const docSnap = await getDoc(docRef);
+            const verifyPasswordFn = httpsCallable(functions, 'verifyAdminPassword');
+            const result = await verifyPasswordFn({ password: password });
 
-            let storedPassword = 'admin123'; // Default fallback
-
-            if (docSnap.exists()) {
-                storedPassword = docSnap.data().adminPassword;
-            } else {
-                // First run: Create the document with default
-                try {
-                    await setDoc(docRef, { adminPassword: 'admin123' });
-                    console.log("Password document created via first run logic.");
-                } catch (writeErr) {
-                    console.error("Could not write default password (likely permission issue):", writeErr);
-                }
-            }
-
-            // Limpiar espacios en blanco de ambas contraseñas
-            const cleanPassword = password.trim();
-            const cleanStoredPassword = storedPassword.trim();
-
-            console.log('Contraseña ingresada:', cleanPassword);
-            console.log('Contraseña almacenada:', cleanStoredPassword);
-
-            if (cleanPassword === cleanStoredPassword) {
-                // Otorgar acceso administrativo en el estado global (se pierde con F5)
+            if (result.data.success) {
+                // Otorgar acceso administrativo en el estado global
                 setIsAdminAuthenticated(true);
-
                 onSuccess();
                 setPassword('');
                 onClose();
@@ -54,7 +32,7 @@ export default function AdminPasswordModal({ isOpen, onClose, onSuccess }) {
             }
         } catch (err) {
             console.error("Error verifying password:", err);
-            setError('Error de conexión verificando clave');
+            setError('Error verificando clave (revise conexión)');
         } finally {
             setLoading(false);
         }

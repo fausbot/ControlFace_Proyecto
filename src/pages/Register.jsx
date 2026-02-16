@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
-import { auth, db } from '../firebaseConfig';
+import { collection, addDoc, serverTimestamp, getDocs, query, orderBy, where, deleteDoc } from 'firebase/firestore';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
-import { collection, addDoc, serverTimestamp, getDocs, query, orderBy, where } from 'firebase/firestore';
+import { httpsCallable } from 'firebase/functions';
+import { auth, db, functions } from '../firebaseConfig';
 import DeleteEmployeeModal from '../components/DeleteEmployeeModal';
-import { Trash2, Download, UserPlus, LogOut, FileText, Loader2, Camera, UserCheck } from 'lucide-react';
+import { Trash2, UserPlus, LogOut, FileText, Loader2, Camera, UserCheck } from 'lucide-react';
 import * as faceapi from '@vladmandic/face-api';
 
 export default function Register() {
@@ -31,6 +32,16 @@ export default function Register() {
     useEffect(() => {
         const loadModels = async () => {
             try {
+                // Verificar si ya están cargados para evitar recarga
+                if (faceapi.nets.tinyFaceDetector.isLoaded &&
+                    faceapi.nets.faceLandmark68Net.isLoaded &&
+                    faceapi.nets.faceRecognitionNet.isLoaded) {
+                    console.log("Modelos ya cargados en memoria. Omitiendo descarga.");
+                    setModelsLoaded(true);
+                    return;
+                }
+
+                console.log("Descargando modelos...");
                 const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
                 await Promise.all([
                     faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
@@ -198,32 +209,26 @@ export default function Register() {
     const exportEmployeesToCSV = async () => {
         setExporting(true);
         try {
-            const q = query(collection(db, "employees"), orderBy("fechaCreacion", "desc"));
-            const querySnapshot = await getDocs(q);
-            const employees = querySnapshot.docs.map(doc => {
-                const data = doc.data();
-                const d = data.fechaCreacion?.toDate();
-                return {
-                    email: data.email,
-                    fecha: d ? d.toLocaleDateString('es-ES') : 'N/A',
-                    hora: d ? d.toLocaleTimeString('es-ES') : 'N/A'
-                };
-            });
+            const getUsersListFn = httpsCallable(functions, 'getUsersList');
+            const result = await getUsersListFn();
+            const employees = result.data.users;
 
-            if (employees.length === 0) {
+            if (!employees || employees.length === 0) {
                 alert('No hay empleados para exportar.');
                 return;
             }
 
-            // Headers sin tildes
-            const headers = ['Email/ID', 'Fecha de Creacion', 'Hora'];
+            // Headers
+            const headers = ['Email/ID', 'Fecha de Creacion', 'Ultimo Acceso', 'UID'];
             const csvRows = [headers.join(',')];
 
             employees.forEach(emp => {
-                csvRows.push(`${emp.email},${emp.fecha},${emp.hora}`);
+                const created = emp.creationTime ? new Date(emp.creationTime).toLocaleString('es-ES') : 'N/A';
+                const lastLogin = emp.lastSignInTime ? new Date(emp.lastSignInTime).toLocaleString('es-ES') : 'N/A';
+                csvRows.push(`${emp.email},"${created}","${lastLogin}",${emp.uid}`);
             });
 
-            // Añadir BOM (\ufeff) para que Excel reconozca UTF-8 (tildes/caracteres especiales si los hubiera)
+            // Añadir BOM (\ufeff) pa Excel
             const csvContent = "\ufeff" + csvRows.join('\n');
             const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
             const link = document.createElement('a');
@@ -238,7 +243,7 @@ export default function Register() {
             const timestamp = `${year}${month}${day}${hours}${minutes}`;
 
             link.setAttribute('href', url);
-            link.setAttribute('download', `empleados_${timestamp}.csv`);
+            link.setAttribute('download', `empleados_auth_${timestamp}.csv`);
             link.style.visibility = 'hidden';
             document.body.appendChild(link);
             link.click();
@@ -246,76 +251,13 @@ export default function Register() {
 
         } catch (err) {
             console.error("Error exportando empleados:", err);
-            alert("Error al exportar empleados.");
+            alert("Error al exportar empleados: " + err.message);
         } finally {
             setExporting(false);
         }
     };
 
-    const handleImportCSV = async (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
 
-        setLoading(true);
-        const reader = new FileReader();
-        reader.onload = async (event) => {
-            try {
-                const text = event.target.result;
-                const lines = text.split('\n').map(line => line.trim()).filter(line => line);
-
-                // Saltar encabezado si existe
-                const startIndex = lines[0].toLowerCase().includes('email') ? 1 : 0;
-                const emailsToRestore = lines.slice(startIndex).map(line => line.split(',')[0].trim().toLowerCase());
-
-                if (emailsToRestore.length === 0) {
-                    alert('No se encontraron correos válidos en el archivo.');
-                    setLoading(false);
-                    return;
-                }
-
-                // 1. Obtener empleados actuales para no duplicar
-                const currentSnap = await getDocs(collection(db, "employees"));
-                const currentEmails = new Set(currentSnap.docs.map(doc => doc.data().email.toLowerCase().trim()));
-
-                let count = 0;
-                const { writeBatch, doc, deleteDoc } = await import('firebase/firestore');
-                const batch = writeBatch(db);
-
-                for (const emailToRestore of emailsToRestore) {
-                    if (emailToRestore && !currentEmails.has(emailToRestore)) {
-                        const newDocRef = doc(collection(db, "employees"));
-                        batch.set(newDocRef, {
-                            email: emailToRestore,
-                            fechaCreacion: serverTimestamp(),
-                            recuperado: true
-                        });
-                        count++;
-
-                        // Intentar limpiar de la cola de borrado si está allí
-                        const qQueue = query(collection(db, "deletionQueue"), where("email", "==", emailToRestore));
-                        const snapQueue = await getDocs(qQueue);
-                        snapQueue.forEach((d) => {
-                            batch.delete(d.ref);
-                        });
-                    }
-                }
-
-                if (count > 0) {
-                    await batch.commit();
-                    alert(`Se han recuperado ${count} empleados exitosamente.`);
-                } else {
-                    alert('Todos los empleados del archivo ya están en la lista activa.');
-                }
-            } catch (err) {
-                console.error("Error al importar CSV:", err);
-                alert("Error al procesar el archivo CSV.");
-            } finally {
-                setLoading(false);
-                e.target.value = null; // Reset input
-            }
-        };
-        reader.readAsText(file);
-    };
 
     return (
         <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-green-500 to-teal-600 p-4">
@@ -451,22 +393,7 @@ export default function Register() {
                             </button>
                         </div>
 
-                        <input
-                            type="file"
-                            id="csv-upload"
-                            accept=".csv"
-                            onChange={handleImportCSV}
-                            className="hidden"
-                        />
-                        <button
-                            type="button"
-                            onClick={() => document.getElementById('csv-upload').click()}
-                            disabled={loading}
-                            className="flex items-center justify-center gap-2 py-2.5 px-4 bg-orange-500 text-white text-xs rounded-lg hover:bg-orange-600 font-bold transition shadow-sm disabled:opacity-50 border border-orange-400"
-                        >
-                            <Download size={16} className="rotate-180" />
-                            Recuperar desde CSV
-                        </button>
+
                     </div>
 
                     <div className="pt-4 border-t border-gray-100">
