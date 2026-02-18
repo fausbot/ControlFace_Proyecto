@@ -1,0 +1,27 @@
+C:\Users\fausb\Downloads\Control de entrada\functions>node generar-hash.cjs "miNuevaContraseña123"
+
+🔐 Generando hash bcrypt...
+
+Contraseña: "miNuevaContraseña123"
+Salt rounds: 10
+
+✅ Hash generado exitosamente:
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+$2b$10$dAVLUKMajpGeaeeICFWWEuZrA9SvLExNdqUXAVqSAIog06OqhXCsq
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📋 INSTRUCCIONES PARA ACTUALIZAR EN FIRESTORE:
+
+1. Ve a Firebase Console: https://console.firebase.google.com
+2. Selecciona tu proyecto: attendance-pwa-dev
+3. Ve a Firestore Database
+4. Navega a: settings → config
+5. Edita el campo "adminPassword"
+6. Pega el hash de arriba (todo el texto entre las líneas)
+7. Guarda los cambios
+
+⚠️  IMPORTANTE:
+   - Copia TODO el hash, incluyendo el "$2b$10$" del inicio
+   - NO agregues espacios ni saltos de línea
+   - Verifica que se guardó correctamente antes de cerrar

@@ -67,11 +67,7 @@ export default function Admin() {
             return;
         }
 
-        if (!currentUser) {
-            alert('Debes iniciar sesión primero como empleado antes de acceder al panel de administración.');
-            navigate('/login');
-            return;
-        }
+        // currentUser check removed to allow direct admin access without employee login
 
         fetchLogs();
         checkAndRestoreEmployees();

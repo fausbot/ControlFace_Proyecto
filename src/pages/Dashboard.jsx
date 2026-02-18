@@ -589,7 +589,7 @@ export default function Dashboard() {
             </div>
             {/* Version Indicator */}
             <div className="p-2 text-center flex flex-col items-center gap-1 opacity-50">
-                <span className="text-[10px] text-black font-mono px-2 py-0.5 rounded">v1.0.6</span>
+                <span className="text-[10px] text-black font-mono px-2 py-0.5 rounded">v1.1.0</span>
                 <button
                     onClick={clearAppCache}
                     className="text-[9px] text-blue-600 underline decoration-blue-300 hover:text-blue-800 transition pointer-events-auto"
