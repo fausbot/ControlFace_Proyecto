@@ -1,292 +1,170 @@
+// src/pages/Admin.jsx  (refactorizado)
+// Este componente ahora solo se encarga de mostrar la UI y manejar estado.
+// Toda la lógica de Firestore vive en /services.
+
 import React, { useEffect, useState } from 'react';
-import { db } from '../firebaseConfig';
-import { collection, query, orderBy, getDocs, limit, startAfter, deleteDoc, doc, writeBatch, where, serverTimestamp } from 'firebase/firestore';
 import { useNavigate } from 'react-router-dom';
 import { Download, Calendar, Trash2, ChevronLeft, ChevronRight, AlertTriangle, Lock } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
+// ✅ Importamos desde los servicios, no desde firebase directamente
+import {
+    getAllAttendanceLogs,
+    paginateLogs,
+    deleteAttendanceLog,
+    bulkDeleteByDateRange,
+    filterLogsByDateRange,
+    parseSpanishDate
+} from '../services/attendanceService';
+
+import {
+    getEmployeesMap,
+    checkAndRestoreEmployees
+} from '../services/employeeService';
+
+const PAGE_SIZE = 100;
+
 export default function Admin() {
     const [logs, setLogs] = useState([]);
+    const [allLogs, setAllLogs] = useState([]); // cache completo para paginación en cliente
     const [loading, setLoading] = useState(true);
     const [exporting, setExporting] = useState(false);
     const [deleting, setDeleting] = useState(false);
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
-    const [lastDoc, setLastDoc] = useState(null);
-    const [firstDoc, setFirstDoc] = useState(null);
     const [pageNumber, setPageNumber] = useState(1);
     const [hasMore, setHasMore] = useState(true);
+
     const navigate = useNavigate();
     const { isAdminAuthenticated, currentUser } = useAuth();
-    const PAGE_SIZE = 100;
 
-    const fetchLogs = async (direction = 'initial') => {
-        setLoading(true);
-        try {
-            // SOLUCIÓN: Traer todos los registros sin ordenamiento en servidor
-            // y ordenar en cliente para manejar registros con y sin timestamp
-            const snapshot = await getDocs(collection(db, "attendance"));
-
-            let allData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-
-            // Ordenar en cliente: priorizar timestamp, fallback a fecha/hora
-            allData.sort((a, b) => {
-                // Si ambos tienen timestamp, usar eso
-                if (a.timestamp && b.timestamp) {
-                    return b.timestamp.toMillis() - a.timestamp.toMillis();
-                }
-                // Si solo uno tiene timestamp, ese va primero
-                if (a.timestamp) return -1;
-                if (b.timestamp) return 1;
-
-                // Fallback: comparar por fecha y hora como strings
-                const dateTimeA = (a.fecha || '') + ' ' + (a.hora || '');
-                const dateTimeB = (b.fecha || '') + ' ' + (b.hora || '');
-                return dateTimeB.localeCompare(dateTimeA);
-            });
-
-            // Implementar paginación manual en cliente
-            const startIndex = (pageNumber - 1) * PAGE_SIZE;
-            const endIndex = startIndex + PAGE_SIZE;
-            const paginatedData = allData.slice(startIndex, endIndex);
-
-            setLogs(paginatedData);
-            setHasMore(endIndex < allData.length);
-
-        } catch (error) {
-            console.error("Error fetching logs:", error);
-            alert("Error al cargar registros. Revisa la consola.");
-        } finally {
-            setLoading(false);
-        }
-    };
-
+    // ─── Carga inicial ───────────────────────────────────────────────────────
     useEffect(() => {
         if (!isAdminAuthenticated) {
             navigate('/login');
             return;
         }
-
-        // currentUser check removed to allow direct admin access without employee login
-
-        fetchLogs();
-        checkAndRestoreEmployees();
+        loadLogs();
+        checkAndRestoreEmployees().catch(console.error);
     }, [isAdminAuthenticated, currentUser]);
 
-    const checkAndRestoreEmployees = async () => {
+    // ─── Recalcular página cuando cambia pageNumber ──────────────────────────
+    useEffect(() => {
+        if (allLogs.length === 0) return;
+        const { data, hasMore: more } = paginateLogs(allLogs, pageNumber, PAGE_SIZE);
+        setLogs(data);
+        setHasMore(more);
+    }, [pageNumber, allLogs]);
+
+    const loadLogs = async () => {
+        setLoading(true);
         try {
-            const empSnap = await getDocs(collection(db, "employees"));
-            if (empSnap.empty) {
-                console.log("Detectada lista de empleados vacía. Iniciando auto-restauración...");
-
-                // 1. Obtener correos en la cola de borrado para NO restaurarlos
-                const queueSnap = await getDocs(collection(db, "deletionQueue"));
-                const deletedEmails = new Set();
-                queueSnap.forEach(doc => {
-                    if (doc.data().email) deletedEmails.add(doc.data().email.toLowerCase().trim());
-                });
-
-                // 2. Obtener correos del historial de asistencia
-                const attSnap = await getDocs(collection(db, "attendance"));
-                const uniqueEmails = new Set();
-                attSnap.forEach(doc => {
-                    const email = doc.data().usuario?.toLowerCase().trim();
-                    if (email && !deletedEmails.has(email)) {
-                        uniqueEmails.add(email);
-                    }
-                });
-
-                if (uniqueEmails.size > 0) {
-                    const batch = writeBatch(db);
-                    uniqueEmails.forEach(email => {
-                        const newDocRef = doc(collection(db, "employees"));
-                        batch.set(newDocRef, {
-                            email: email,
-                            fechaCreacion: serverTimestamp(),
-                            estado: 'activo'
-                        });
-                    });
-                    await batch.commit();
-                    console.log(`Se han restaurado ${uniqueEmails.size} empleados desde la historia de asistencia (excluyendo borrados).`);
-                }
-            }
-        } catch (err) {
-            console.error("Error en auto-restauración:", err);
-        }
-    };
-
-    const handleDelete = async (id) => {
-        if (!window.confirm('¿Está seguro de que desea eliminar este registro permanentemente?')) return;
-
-        try {
-            await deleteDoc(doc(db, "attendance", id));
-            setLogs(logs.filter(log => log.id !== id));
+            const all = await getAllAttendanceLogs(); // ← servicio, no Firestore directo
+            setAllLogs(all);
+            const { data, hasMore: more } = paginateLogs(all, 1, PAGE_SIZE);
+            setLogs(data);
+            setHasMore(more);
+            setPageNumber(1);
         } catch (error) {
-            console.error("Error al borrar:", error);
-            alert("No se pudo borrar el registro.");
+            console.error('Error fetching logs:', error);
+            alert('Error al cargar registros. Revisa la consola.');
+        } finally {
+            setLoading(false);
         }
     };
 
+    // ─── Eliminar un registro ────────────────────────────────────────────────
+    const handleDelete = async (id) => {
+        if (!window.confirm('¿Eliminar este registro permanentemente?')) return;
+        try {
+            await deleteAttendanceLog(id); // ← servicio
+            setLogs(logs.filter(log => log.id !== id));
+            setAllLogs(allLogs.filter(log => log.id !== id));
+        } catch (error) {
+            console.error('Error al borrar:', error);
+            alert('No se pudo borrar el registro.');
+        }
+    };
+
+    // ─── Borrado masivo por rango de fechas ──────────────────────────────────
     const handleBulkDelete = async () => {
         if (!startDate || !endDate) {
-            alert('Por favor selecciona un rango de fechas para limpiar datos.');
+            alert('Selecciona un rango de fechas para limpiar datos.');
             return;
         }
-
-        if (!window.confirm(`⚠️ ¡ATENCION! Se borraran TODOS los registros entre el ${startDate} y el ${endDate}. Esta accion no se puede deshacer. ¿Desea continuar?`)) {
-            return;
-        }
+        if (!window.confirm(`⚠️ Se borrarán TODOS los registros entre ${startDate} y ${endDate}. ¿Continuar?`)) return;
 
         setDeleting(true);
         try {
-            // Traer todos los registros sin ordenamiento específico
-            const snapshot = await getDocs(collection(db, "attendance"));
-
-            const toDelete = snapshot.docs.filter(doc => {
-                const data = doc.data();
-                let logDate = null;
-                if (data.timestamp) {
-                    logDate = data.timestamp.toDate();
-                } else if (data.fecha) {
-                    logDate = parseSpanishDate(data.fecha);
-                }
-
-                if (!logDate) return false;
-                const start = new Date(startDate);
-                const end = new Date(endDate);
-                // Ajustar end al final del día
-                end.setHours(23, 59, 59, 999);
-
-                return logDate >= start && logDate <= end;
-            });
-
-
-            if (toDelete.length === 0) {
-                alert("No se encontraron registros en ese rango.");
+            const count = await bulkDeleteByDateRange(startDate, endDate); // ← servicio
+            if (count === 0) {
+                alert('No se encontraron registros en ese rango.');
                 return;
             }
-
-            const batch = writeBatch(db);
-            toDelete.forEach(docSnap => {
-                batch.delete(docSnap.ref);
-            });
-
-            await batch.commit();
-            alert(`Se han borrado ${toDelete.length} registros con éxito.`);
-            fetchLogs(); // Recargar
-
+            alert(`Se han borrado ${count} registros con éxito.`);
+            await loadLogs();
         } catch (error) {
-            console.error("Error en borrado masivo:", error);
-            alert("Error al realizar la limpieza.");
+            console.error('Error en borrado masivo:', error);
+            alert('Error al realizar la limpieza.');
         } finally {
             setDeleting(false);
         }
     };
 
-    const parseSpanishDate = (dateStr) => {
-        // Convierte "6/2/2026" a objeto Date
-        const parts = dateStr.split('/');
-        if (parts.length !== 3) return null;
-        const day = parseInt(parts[0]);
-        const month = parseInt(parts[1]) - 1; // Meses en JS son 0-indexed
-        const year = parseInt(parts[2]);
-        return new Date(year, month, day);
-    };
-
+    // ─── Exportar CSV ────────────────────────────────────────────────────────
     const exportToCSV = async () => {
         setExporting(true);
-
         try {
-            // 1. Filtrar por rango de fechas
-            let filteredLogs = logs;
+            // Filtrar logs según rango (sin ir a Firestore de nuevo)
+            const filtered = (startDate || endDate)
+                ? filterLogsByDateRange(allLogs, startDate, endDate) // ← servicio
+                : allLogs;
 
-            if (startDate || endDate) {
-                filteredLogs = logs.filter(log => {
-                    const logDate = parseSpanishDate(log.fecha);
-                    if (!logDate) return false;
-
-                    const start = startDate ? new Date(startDate) : null;
-                    const end = endDate ? new Date(endDate) : null;
-
-                    if (start && logDate < start) return false;
-                    if (end && logDate > end) return false;
-
-                    return true;
-                });
-            }
-
-            if (filteredLogs.length === 0) {
-                alert('No hay registros en el rango de fechas seleccionado.');
-                setExporting(false);
+            if (filtered.length === 0) {
+                alert('No hay registros en el rango seleccionado.');
                 return;
             }
 
-            // 2. Obtener datos de empleados para cruzar (Nombres y Apellidos)
-            const employeesSnap = await getDocs(collection(db, "employees"));
-            const employeesMap = {};
-            employeesSnap.forEach(doc => {
-                const data = doc.data();
-                if (data.email) {
-                    employeesMap[data.email.toLowerCase().trim()] = {
-                        firstName: data.firstName || '',
-                        lastName: data.lastName || ''
-                    };
-                }
-            });
+            const employeesMap = await getEmployeesMap(); // ← servicio
+            const dayFormatter = new Intl.DateTimeFormat('es-ES', { weekday: 'long' });
 
-            // 3. Crear CSV
-            // Campos requeridos: usuario, nombres, apellidos, dia, fecha, hora, localidad
             const headers = ['Usuario', 'Nombres', 'Apellidos', 'Dia', 'Fecha', 'Hora', 'Localidad'];
             const csvRows = [headers.join(',')];
 
-            const dayFormatter = new Intl.DateTimeFormat('es-ES', { weekday: 'long' });
-
-            filteredLogs.forEach(log => {
+            filtered.forEach(log => {
                 let diaNombre = 'N/A';
-                if (log.fecha) {
-                    const d = parseSpanishDate(log.fecha);
-                    if (d) {
-                        diaNombre = dayFormatter.format(d);
-                        // Capitalizar primera letra
-                        diaNombre = diaNombre.charAt(0).toUpperCase() + diaNombre.slice(1);
-                    }
+                const d = parseSpanishDate(log.fecha);
+                if (d) {
+                    diaNombre = dayFormatter.format(d);
+                    diaNombre = diaNombre.charAt(0).toUpperCase() + diaNombre.slice(1);
                 }
 
                 const emailKey = (log.usuario || '').toLowerCase().trim();
-                const empData = employeesMap[emailKey] || { firstName: '', lastName: '' };
+                const emp = employeesMap[emailKey] || { firstName: '', lastName: '' };
 
-                // Envolver en comillas para evitar problemas con comas en los datos
                 const row = [
                     log.usuario || '',
-                    `"${empData.firstName}"`,
-                    `"${empData.lastName}"`,
+                    `"${emp.firstName}"`,
+                    `"${emp.lastName}"`,
                     diaNombre,
                     log.fecha || '',
                     log.hora || '',
-                    `"${(log.localidad || '').replace(/"/g, '""')}"` // Escapar comillas dobles
+                    `"${(log.localidad || '').replace(/"/g, '""')}"`
                 ];
                 csvRows.push(row.join(','));
             });
 
-            // Añadir BOM para compatibilidad con Excel (tildes/UTF-8)
-            const csvContent = "\ufeff" + csvRows.join('\n');
-
-            // Descargar archivo
+            // BOM para compatibilidad con Excel
+            const csvContent = '\ufeff' + csvRows.join('\n');
             const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-            const link = document.createElement('a');
             const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
 
             const now = new Date();
-            const year = now.getFullYear();
-            const month = String(now.getMonth() + 1).padStart(2, '0');
-            const day = String(now.getDate()).padStart(2, '0');
-            const hours = String(now.getHours()).padStart(2, '0');
-            const minutes = String(now.getMinutes()).padStart(2, '0');
-            const timestamp = `${year}${month}${day}${hours}${minutes}`;
-
+            const ts = now.toISOString().slice(0, 16).replace(/[-:T]/g, '');
             const fileName = startDate && endDate
-                ? `asistencia_${startDate.replace(/-/g, '')}_${endDate.replace(/-/g, '')}_${timestamp}.csv`
-                : `asistencia_${timestamp}.csv`;
+                ? `asistencia_${startDate.replace(/-/g, '')}_${endDate.replace(/-/g, '')}_${ts}.csv`
+                : `asistencia_${ts}.csv`;
 
             link.setAttribute('href', url);
             link.setAttribute('download', fileName);
@@ -297,12 +175,13 @@ export default function Admin() {
 
         } catch (error) {
             console.error('Error exportando CSV:', error);
-            alert('Error al exportar. Por favor, intenta de nuevo.');
+            alert('Error al exportar. Intenta de nuevo.');
         } finally {
             setExporting(false);
         }
     };
 
+    // ─── Render ──────────────────────────────────────────────────────────────
     return (
         <div className="min-h-screen bg-gray-50 p-6">
             <div className="max-w-6xl mx-auto">
@@ -325,7 +204,7 @@ export default function Admin() {
                     </div>
                 </div>
 
-                {/* Sección de Exportación */}
+                {/* Exportación */}
                 <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
                     <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
                         <Download size={24} />
@@ -345,7 +224,6 @@ export default function Admin() {
                                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                             />
                         </div>
-
                         <div>
                             <label className="block text-sm font-medium text-gray-700 mb-2">
                                 <Calendar size={16} className="inline mr-1" />
@@ -358,7 +236,6 @@ export default function Admin() {
                                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                             />
                         </div>
-
                         <button
                             onClick={exportToCSV}
                             disabled={exporting}
@@ -382,7 +259,7 @@ export default function Admin() {
                         </h3>
                         <div className="flex items-center gap-4">
                             <p className="text-sm text-gray-600 flex-1">
-                                Borra permanentemente los registros del rango de fechas seleccionado arriba ({startDate || '...'} - {endDate || '...'}).
+                                Borra permanentemente los registros del rango seleccionado ({startDate || '...'} - {endDate || '...'}).
                             </p>
                             <button
                                 onClick={handleBulkDelete}
@@ -394,12 +271,9 @@ export default function Admin() {
                             </button>
                         </div>
                     </div>
-
-
                 </div>
 
-
-                {/* Tabla de Registros */}
+                {/* Tabla */}
                 <div className="bg-white rounded-xl shadow-lg overflow-hidden">
                     <div className="overflow-x-auto">
                         <table className="w-full text-left">
@@ -445,45 +319,37 @@ export default function Admin() {
                         </table>
                     </div>
 
-                    {/* Pagination Controls */}
+                    {/* Paginación */}
                     <div className="p-4 bg-gray-50 border-t border-gray-100 flex justify-between items-center">
                         <p className="text-sm text-gray-500">
                             Mostrando {logs.length} registros (Página {pageNumber})
                         </p>
                         <div className="flex gap-2">
                             <button
-                                onClick={() => {
-                                    setPageNumber(1);
-                                    fetchLogs('initial');
-                                }}
+                                onClick={() => setPageNumber(1)}
                                 disabled={loading || pageNumber === 1}
                                 className="px-4 py-2 text-sm bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition"
                             >
                                 Primera Página
                             </button>
                             <button
-                                onClick={() => {
-                                    setPageNumber(prev => Math.max(1, prev - 1));
-                                }}
+                                onClick={() => setPageNumber(p => Math.max(1, p - 1))}
                                 disabled={loading || pageNumber === 1}
                                 className="flex items-center gap-1 px-4 py-2 text-sm bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition"
                             >
-                                <ChevronLeft size={16} />
-                                Anterior
+                                <ChevronLeft size={16} /> Anterior
                             </button>
                             <button
-                                onClick={() => {
-                                    setPageNumber(prev => prev + 1);
-                                }}
+                                onClick={() => setPageNumber(p => p + 1)}
                                 disabled={loading || !hasMore}
                                 className="flex items-center gap-1 px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition font-bold"
                             >
-                                Siguiente
-                                <ChevronRight size={16} />
+                                Siguiente <ChevronRight size={16} />
                             </button>
                         </div>
                     </div>
                 </div>
+
             </div>
         </div>
     );
