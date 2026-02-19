@@ -7,12 +7,12 @@ import { getAnalytics } from "firebase/analytics";
 
 // Your web app's Firebase configuration
 const firebaseConfig = {
-    apiKey: "AIzaSyCknF4e08GbrAX3R7O6MSHrZLARQlsECl4",
-    authDomain: "attendance-pwa-dev.firebaseapp.com",
-    projectId: "attendance-pwa-dev",
-    storageBucket: "attendance-pwa-dev.firebasestorage.app",
-    messagingSenderId: "747910832076",
-    appId: "1:747910832076:web:835510de0a520c32994769"
+    apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+    storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+    appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
 // Initialize Firebase
