@@ -131,8 +131,17 @@ export default function Login() {
             />
 
             <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md backdrop-blur-sm bg-opacity-90 flex flex-col items-center">
-                <img src="/logo.jpg" alt="Logo" className="w-24 h-24 mb-4 rounded-xl object-contain" />
-                <h2 className="text-3xl font-bold text-center mb-6 text-gray-800 w-full">Acceso Empleados</h2>
+                <img
+                    src={import.meta.env.VITE_CLIENT_LOGO_URL || "/logo.jpg"}
+                    alt="Logo"
+                    className="w-24 h-24 mb-4 rounded-xl object-contain"
+                />
+                <h2 className="text-3xl font-bold text-center mb-2 text-gray-800 w-full">
+                    {import.meta.env.VITE_CLIENT_NAME || "Acceso Empleados"}
+                </h2>
+                <h3 className="text-sm text-gray-500 font-medium mb-6 uppercase tracking-wider">
+                    Panel de Acceso
+                </h3>
                 {error && <div className="bg-red-100 text-red-700 p-3 rounded mb-4 w-full">{error}</div>}
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div>

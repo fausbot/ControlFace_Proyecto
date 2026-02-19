@@ -3,8 +3,10 @@ service cloud.firestore {
   match /databases/{database}/documents {
     // Configuración: Bloqueado totalmente al cliente público.
     // Solo accesible vía Admin SDK (Cloud Functions) o consola de Firebase.
-    match /settings/config {
-      allow read, write: if false;
+    // Licencia: Lectura pública (crítico para verificar antes de login), escritura prohibida.
+    match /settings/license {
+      allow read: if true;
+      allow write: if false;
     }
     
     // Asistencia: Lectura pública (para Admin sin login), escritura solo autenticados

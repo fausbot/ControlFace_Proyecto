@@ -22,32 +22,46 @@ export const checkLicenseStatus = async () => {
             const now = new Date().getTime();
             // Si el caché es válido y reciente
             if (data.status === 'valid' && (now - data.timestamp) < CACHE_DURATION_MS) {
-                console.log("Licencia válida (desde caché).");
+                console.log("✅ Licencia válida (desde caché).");
                 return { valid: true };
+            } else {
+                console.log("⚠️ Caché expirado o inválido. Revalidando...");
+                localStorage.removeItem(CACHE_KEY);
             }
         } catch (e) {
-            localStorage.removeItem(CACHE_KEY); // Corrupto, borrar
+            console.error("❌ Error leyendo caché:", e);
+            localStorage.removeItem(CACHE_KEY);
         }
     }
 
     // 2. Si no hay caché válido, consultar Firebase
-    console.log("Verificando licencia en servidor...");
+    console.log("🔍 Verificando licencia en servidor Firebase...");
     try {
         const docRef = doc(db, 'settings', 'license');
         const docSnap = await getDoc(docRef);
 
         if (!docSnap.exists()) {
-            return { valid: false, message: "Licencia no encontrada." };
+            console.error("❌ Documento de licencia NO encontrado en Firestore.");
+            return { valid: false, message: "Licencia no instalada en el sistema." };
         }
 
         const token = docSnap.data().token;
         if (!token) {
+            console.error("❌ Campo 'token' vacío en la licencia.");
             return { valid: false, message: "Token de licencia vacío." };
         }
 
         // 3. Desencriptar
-        const bytes = CryptoJS.AES.decrypt(token, READ_KEY);
-        const decryptedData = JSON.parse(bytes.toString(CryptoJS.enc.Utf8));
+        let decryptedData;
+        try {
+            const bytes = CryptoJS.AES.decrypt(token, READ_KEY);
+            const text = bytes.toString(CryptoJS.enc.Utf8);
+            if (!text) throw new Error("Token inválido o clave incorrecta");
+            decryptedData = JSON.parse(text);
+        } catch (cryptoError) {
+            console.error("❌ Error desencriptando token:", cryptoError);
+            return { valid: false, message: "Licencia corrupta o manipulada." };
+        }
 
         const expirationDate = new Date(decryptedData.e); // 'e' es expires
         const today = new Date();
@@ -56,10 +70,12 @@ export const checkLicenseStatus = async () => {
         today.setHours(0, 0, 0, 0);
 
         if (expirationDate < today) {
+            console.error(`❌ Licencia expirada. Venció: ${decryptedData.e}`);
             return { valid: false, message: "Su licencia ha expirado el " + decryptedData.e };
         }
 
         // 4. Guardar en Caché si es válido
+        console.log("✅ Licencia válida verificada con servidor.");
         localStorage.setItem(CACHE_KEY, JSON.stringify({
             status: 'valid',
             timestamp: new Date().getTime()
@@ -68,7 +84,7 @@ export const checkLicenseStatus = async () => {
         return { valid: true };
 
     } catch (error) {
-        console.error("Error verificando licencia:", error);
-        return { valid: false, message: "Error de validación o licencia corrupta." };
+        console.error("❌ Error general verificando licencia:", error);
+        return { valid: false, message: "Error al conectar con el servidor de licencias." };
     }
 };
