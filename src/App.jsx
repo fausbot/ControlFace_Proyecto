@@ -2,6 +2,7 @@ import React, { Suspense } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './contexts/AuthContext';
 import { Loader2 } from 'lucide-react';
+import SubscriptionGuard from './components/SubscriptionGuard';
 
 // Lazy loading de páginas
 const Login = React.lazy(() => import('./pages/Login'));
@@ -28,18 +29,20 @@ const LoadingFallback = () => (
 function App() {
   return (
     <Suspense fallback={<LoadingFallback />}>
-      <Routes>
-        <Route path="/login" element={<Login />} />
-        <Route path="/registro" element={<Register />} />
-        <Route path="/dashboard" element={
-          <PrivateRoute>
-            <Dashboard />
-          </PrivateRoute>
-        } />
-        <Route path="/admin" element={<Admin />} />
-        <Route path="/cambiar-clave-admin" element={<ChangeAdminPassword />} />
-        <Route path="/" element={<Navigate to="/login" />} />
-      </Routes>
+      <SubscriptionGuard>
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route path="/registro" element={<Register />} />
+          <Route path="/dashboard" element={
+            <PrivateRoute>
+              <Dashboard />
+            </PrivateRoute>
+          } />
+          <Route path="/admin" element={<Admin />} />
+          <Route path="/cambiar-clave-admin" element={<ChangeAdminPassword />} />
+          <Route path="/" element={<Navigate to="/login" />} />
+        </Routes>
+      </SubscriptionGuard>
     </Suspense>
   );
 }
