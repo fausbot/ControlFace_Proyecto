@@ -7,7 +7,7 @@ import SubscriptionGuard from './components/SubscriptionGuard';
 // Lazy loading de páginas
 const Login = React.lazy(() => import('./pages/Login'));
 const Dashboard = React.lazy(() => import('./pages/Dashboard'));
-const Admin = React.lazy(() => import('./pages/Admin'));
+const Datos = React.lazy(() => import('./pages/Datos'));
 const Register = React.lazy(() => import('./pages/Register'));
 const ChangeAdminPassword = React.lazy(() => import('./pages/ChangeAdminPassword'));
 
@@ -38,7 +38,7 @@ function App() {
               <Dashboard />
             </PrivateRoute>
           } />
-          <Route path="/admin" element={<Admin />} />
+          <Route path="/datos" element={<Datos />} />
           <Route path="/cambiar-clave-admin" element={<ChangeAdminPassword />} />
           <Route path="/" element={<Navigate to="/login" />} />
         </Routes>

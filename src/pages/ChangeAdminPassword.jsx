@@ -54,7 +54,7 @@ export default function ChangeAdminPassword() {
 
                 // Redirigir después de 2 segundos
                 setTimeout(() => {
-                    navigate('/admin');
+                    navigate('/datos');
                 }, 2000);
             } else {
                 setError(result.data.error || 'Error al cambiar la contraseña.');
@@ -71,7 +71,7 @@ export default function ChangeAdminPassword() {
         <div className="min-h-screen bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center p-4">
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8">
                 <button
-                    onClick={() => navigate('/admin')}
+                    onClick={() => navigate('/datos')}
                     className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-6 transition"
                 >
                     <ArrowLeft size={20} />

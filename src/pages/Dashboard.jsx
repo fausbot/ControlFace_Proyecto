@@ -490,7 +490,7 @@ export default function Dashboard() {
                         <span className="text-[10px] uppercase">Registro</span>
                     </button>
                     <button
-                        onClick={() => { setAdminTarget('/admin'); setShowAdminModal(true); }}
+                        onClick={() => { setAdminTarget('/datos'); setShowAdminModal(true); }}
                         className="flex flex-col items-center gap-0.5 text-blue-600 font-bold border-2 border-blue-200 px-3 py-1.5 rounded-xl hover:bg-blue-50 transition"
                     >
                         <Settings size={18} />

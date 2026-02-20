@@ -1,4 +1,4 @@
-// src/pages/Admin.jsx  (refactorizado)
+// src/pages/Datos.jsx
 // Este componente ahora solo se encarga de mostrar la UI y manejar estado.
 // Toda la lógica de Firestore vive en /services.
 
@@ -27,7 +27,7 @@ import { db } from '../firebaseConfig';
 
 const PAGE_SIZE = 100;
 
-export default function Admin() {
+export default function Datos() {
     const [logs, setLogs] = useState([]);
     const [allLogs, setAllLogs] = useState([]); // cache completo para paginación en cliente
     const [loading, setLoading] = useState(true);
