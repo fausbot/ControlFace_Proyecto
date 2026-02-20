@@ -25,8 +25,10 @@ export const addWatermarkToImage = async (imageSrc, data) => {
                 // Draw original image
                 ctx.drawImage(img, 0, 0);
 
-                // --- Draw Mode Label (ENTRADA/SALIDA) at Top ---
-                const modeText = data.mode === 'entry' ? 'ENTRADA' : 'SALIDA';
+                // --- Draw Mode Label (ENTRADA/SALIDA/INCIDENTE) at Top ---
+                let modeText = 'ENTRADA';
+                if (data.mode === 'exit') modeText = 'SALIDA';
+                else if (data.mode === 'incident') modeText = 'INCIDENTE';
                 const modeFontSize = Math.max(40, img.width * 0.08); // Large font
                 ctx.font = `bold ${modeFontSize}px Arial`;
                 ctx.textAlign = 'center';
@@ -41,7 +43,10 @@ export const addWatermarkToImage = async (imageSrc, data) => {
                 const modeBoxY = 20;
 
                 // Background for mode label
-                ctx.fillStyle = data.mode === 'entry' ? 'rgba(34, 197, 94, 0.85)' : 'rgba(239, 68, 68, 0.85)'; // Green for entry, Red for exit
+                let modeColor = 'rgba(34, 197, 94, 0.85)'; // Green: entry
+                if (data.mode === 'exit') modeColor = 'rgba(239, 68, 68, 0.85)'; // Red: exit
+                else if (data.mode === 'incident') modeColor = 'rgba(234, 88, 12, 0.92)'; // Orange: incident
+                ctx.fillStyle = modeColor;
                 ctx.fillRect(modeBoxX, modeBoxY, modeBoxWidth, modeBoxHeight);
 
                 // Draw mode text

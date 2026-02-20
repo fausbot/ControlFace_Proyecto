@@ -17,9 +17,10 @@ export default function Dashboard() {
     const canvasRef = useRef(null);
     const streamRef = useRef(null);
 
-    const [mode, setMode] = useState(null); // 'entry' or 'exit'
-    const [allowedActions, setAllowedActions] = useState({ entry: true, exit: true }); // Control de botones
-    const [loadingState, setLoadingState] = useState(true); // Para no mostrar botones hasta saber el estado
+    const [mode, setMode] = useState(null); // 'entry', 'exit', 'incident'
+    const [allowedActions, setAllowedActions] = useState({ entry: true, exit: true });
+    const [loadingState, setLoadingState] = useState(true);
+    const [incidentDescription, setIncidentDescription] = useState(''); // Descripción del incidente
     const [step, setStep] = useState('idle'); // idle, camera, processing, success
     const [statusMessage, setStatusMessage] = useState('');
     const [isCapturing, setIsCapturing] = useState(false);
@@ -192,10 +193,10 @@ export default function Dashboard() {
         };
     }, [logout, currentUser]);
 
-    const startCamera = async () => {
+    const startCamera = async (facingMode = 'user') => {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({
-                video: { facingMode: 'user' },
+                video: { facingMode },
                 audio: false
             });
             streamRef.current = stream;
@@ -237,9 +238,11 @@ export default function Dashboard() {
         setMode(selectedMode);
         setStep('camera');
         setStatusMessage('');
+        setIncidentDescription('');
 
-        // Iniciamos la cámara; el useEffect se encargará de conectarla al videoRef
-        await startCamera();
+        // Cámara trasera para incidentes, frontal para asistencia
+        const facingMode = selectedMode === 'incident' ? 'environment' : 'user';
+        await startCamera(facingMode);
 
         if (!navigator.geolocation) {
             alert("Geolocalización no soportada en este navegador.");
@@ -348,21 +351,23 @@ export default function Dashboard() {
             });
 
             // STORE DATA FOR PREVIEW, DONT SAVE YET
-            // Preparar fechas separadas para Excel
             const now = new Date();
-            const dateStr = now.toLocaleDateString('es-ES'); // DD/MM/YYYY
-            const timeStr = now.toLocaleTimeString('es-ES'); // HH:MM:SS
+            const dateStr = now.toLocaleDateString('es-ES');
+            const timeStr = now.toLocaleTimeString('es-ES');
+
+            let tipoLabel = 'Entrada';
+            if (mode === 'exit') tipoLabel = 'Salida';
+            else if (mode === 'incident') tipoLabel = 'Incidente';
 
             setCapturedData({
                 image: watermarkedImage,
                 metadata: {
-                    // --- SOLO 5 ELEMENTOS (LIMPIO) ---
-                    usuario: currentUser.email, // 1. Quién
-                    tipo: mode === 'entry' ? 'Entrada' : 'Salida', // 2. Qué
-                    fecha: dateStr, // 3. Cuándo (Día)
-                    hora: timeStr, // 4. Cuándo (Hora)
-                    localidad: address, // 5. Dónde
-                    timestamp: serverTimestamp() // 6. Ordenamiento real
+                    usuario: currentUser.email,
+                    tipo: tipoLabel,
+                    fecha: dateStr,
+                    hora: timeStr,
+                    localidad: address,
+                    timestamp: serverTimestamp()
                 }
             });
 
@@ -411,20 +416,25 @@ export default function Dashboard() {
     };
 
     const saveRecord = async () => {
-        if (!capturedData) return;
+        if (!capturedData) return false;
         setStep('processing');
         setStatusMessage('Guardando registro...');
 
         try {
-            // 5. Save to Firestore (LIMPIO - Solo los metadatos)
-            await addDoc(collection(db, "attendance"), capturedData.metadata);
-
-            // NO mostrar éxito aquí, solo confirmar que se guardó
+            if (mode === 'incident') {
+                // Guardar en colección separada con descripción
+                await addDoc(collection(db, "incidents"), {
+                    ...capturedData.metadata,
+                    descripcion: incidentDescription.trim() || '(Sin descripción)',
+                });
+            } else {
+                await addDoc(collection(db, "attendance"), capturedData.metadata);
+            }
             return true;
         } catch (error) {
             console.error(error);
             alert(`Error guardando datos: ${error.message}`);
-            setStep('preview'); // Go back to preview if error
+            setStep('preview');
             return false;
         }
     };
@@ -526,23 +536,35 @@ export default function Dashboard() {
                                 <span className="text-[10px] text-gray-400 text-center">Debes marcar entrada primero</span>
                             </div>
                         )}
+                        {/* Botón INCIDENTE — siempre visible, sin restricción de ciclo */}
+                        {!loadingState && (
+                            <button
+                                onClick={() => handleStart('incident')}
+                                className="group relative flex flex-col items-center justify-center p-5 bg-gradient-to-tr from-orange-400 to-orange-600 rounded-2xl shadow-lg hover:shadow-xl transition transform hover:scale-105 active:scale-95 animate-fade-in"
+                            >
+                                <TriangleAlert className="w-8 h-8 text-white mb-1" />
+                                <span className="text-xl font-bold text-white">Reportar Incidente</span>
+                                <span className="text-xs text-orange-100 mt-1">Daño o accidente en el trabajo</span>
+                            </button>
+                        )}
                     </div>
                 )}
 
                 {step === 'camera' && (
                     <div className="w-full flex flex-col items-center animate-fade-in">
                         <h2 className="text-xl font-bold mb-4 capitalize text-gray-800">
-                            Registrando {mode === 'entry' ? 'Entrada' : 'Salida'}
+                            {mode === 'incident' ? '⚠️ Registrando Incidente' : `Registrando ${mode === 'entry' ? 'Entrada' : 'Salida'}`}
                         </h2>
 
                         {/* Native Video Element */}
                         <div className="relative rounded-2xl overflow-hidden shadow-2xl border-4 border-white bg-black w-full aspect-[3/4] max-w-[280px]">
+                            {/* Overflow: mirror solo para cámara frontal */}
                             <video
                                 ref={videoRef}
                                 autoPlay
                                 playsInline
                                 muted
-                                className="w-full h-full object-cover transform scale-x-[-1]" // Mirror effect
+                                className={`w-full h-full object-cover ${mode !== 'incident' ? 'transform scale-x-[-1]' : ''}`}
                             />
 
                             {/* Hidden canvas for capture */}
@@ -553,7 +575,10 @@ export default function Dashboard() {
                             {/* Overlay info */}
                             <div className="absolute bottom-4 left-4 right-4 bg-black/50 backdrop-blur text-white p-2 rounded text-xs">
                                 <div className="flex items-center gap-1"><MapPin size={12} /> Buscando GPS...</div>
-                                <div className="flex items-center gap-1"><Camera size={12} /> Rostro visible requerido</div>
+                                {mode === 'incident'
+                                    ? <div className="flex items-center gap-1"><TriangleAlert size={12} /> Fotografía el área afectada</div>
+                                    : <div className="flex items-center gap-1"><Camera size={12} /> Rostro visible requerido</div>
+                                }
                             </div>
                         </div>
 
@@ -584,26 +609,29 @@ export default function Dashboard() {
 
                 {step === 'preview' && capturedData && (
                     <div className="w-full flex flex-col items-center animate-fade-in">
-                        <h2 className="text-xl font-bold mb-2 text-gray-800">Vista Previa</h2>
+                        <h2 className="text-xl font-bold mb-2 text-gray-800">
+                            {mode === 'incident' ? '⚠️ Vista Previa del Incidente' : 'Vista Previa'}
+                        </h2>
                         <p className="text-sm text-gray-500 mb-4 text-center">
-                            {faceVerified
-                                ? 'Identidad verificada correctamente. Comparte esta imagen como evidencia.'
-                                : 'No se pudo verificar tu identidad facial.'}
+                            {mode === 'incident'
+                                ? 'Describe el incidente antes de guardar.'
+                                : faceVerified
+                                    ? 'Identidad verificada correctamente. Comparte esta imagen como evidencia.'
+                                    : 'No se pudo verificar tu identidad facial.'}
                         </p>
 
-                        {!faceVerified && faceError && (
+                        {!faceVerified && faceError && mode !== 'incident' && (
                             <div className="bg-red-100 text-red-700 p-3 rounded-lg flex items-center gap-2 mb-4 w-full max-w-sm">
                                 <ShieldAlert size={20} />
                                 <span className="text-xs font-bold">{faceError}</span>
                             </div>
                         )}
 
-                        <div className="relative rounded-2xl overflow-hidden shadow-2xl border-4 bg-gray-900 w-full max-w-sm mb-6"
-                            style={{ borderColor: faceVerified ? '#22c55e' : '#ef4444' }}>
+                        <div className="relative rounded-2xl overflow-hidden shadow-2xl border-4 bg-gray-900 w-full max-w-sm mb-4"
+                            style={{ borderColor: mode === 'incident' ? '#ea580c' : faceVerified ? '#22c55e' : '#ef4444' }}>
                             <img src={capturedData.image} alt="Capture" className="w-full h-auto" />
 
-                            {/* Botón REPETIR FOTO sobre la imagen */}
-                            {!faceVerified && (
+                            {!faceVerified && mode !== 'incident' && (
                                 <button
                                     onClick={handleStopCamera}
                                     className="absolute top-4 left-4 flex items-center gap-2 px-4 py-2 bg-red-600 text-white font-bold rounded-lg shadow-lg hover:bg-red-700 transition transform hover:scale-105"
@@ -613,40 +641,63 @@ export default function Dashboard() {
                                 </button>
                             )}
 
-                            {faceVerified && (
-                                <div className="absolute top-4 right-4 bg-green-500 text-white p-1 rounded-full shadow-lg">
-                                    <UserCheck size={24} />
+                            {(faceVerified || mode === 'incident') && (
+                                <div className={`absolute top-4 right-4 p-1 rounded-full shadow-lg ${mode === 'incident' ? 'bg-orange-500' : 'bg-green-500'} text-white`}>
+                                    {mode === 'incident' ? <TriangleAlert size={24} /> : <UserCheck size={24} />}
                                 </div>
                             )}
                         </div>
 
+                        {/* Campo de descripción SOLO para incidentes */}
+                        {mode === 'incident' && (
+                            <div className="w-full max-w-sm mb-4">
+                                <label className="block text-sm font-bold text-orange-700 mb-1">📝 Descripción del incidente *</label>
+                                <textarea
+                                    value={incidentDescription}
+                                    onChange={(e) => setIncidentDescription(e.target.value)}
+                                    placeholder="Describe detalladamente lo que ocurrió, el área afectada y el tipo de daño..."
+                                    rows={4}
+                                    className="w-full border-2 border-orange-300 rounded-xl p-3 text-sm focus:outline-none focus:border-orange-500 resize-none"
+                                />
+                            </div>
+                        )}
+
                         <div className="flex flex-col gap-3 w-full max-w-xs">
                             <button
                                 onClick={async () => {
-                                    if (!faceVerified) {
+                                    if (mode !== 'incident' && !faceVerified) {
                                         alert("Verificación facial fallida. No se puede guardar el registro.");
                                         return;
                                     }
+                                    if (mode === 'incident' && !incidentDescription.trim()) {
+                                        alert("Por favor describe el incidente antes de guardar.");
+                                        return;
+                                    }
 
-                                    // 1. GUARDAR EN BASE DE DATOS (Obligatorio)
                                     const saved = await saveRecord();
-                                    if (!saved) return; // Si falla, no continuar
+                                    if (!saved) return;
 
-                                    // 2. COMPARTIR IMAGEN (Esperar a que termine)
                                     await shareImage();
 
-                                    // 3. MOSTRAR ÉXITO DESPUÉS DE COMPARTIR
                                     setStep('success');
                                     setStatusMessage('¡Registro Exitoso!');
                                     setTimeout(() => {
-                                        // Seguridad: Logout automático tras finalizar
                                         logout();
                                     }, 3000);
                                 }}
-                                className="w-full flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-green-600 text-white font-bold shadow-lg hover:bg-green-700 transition"
+                                className={`w-full flex items-center justify-center gap-2 px-6 py-3 rounded-xl text-white font-bold shadow-lg transition ${mode === 'incident'
+                                    ? 'bg-orange-500 hover:bg-orange-600'
+                                    : 'bg-green-600 hover:bg-green-700'
+                                    }`}
                             >
                                 <CheckCircle size={20} />
-                                Guardar y Compartir
+                                {mode === 'incident' ? 'Guardar Incidente y Compartir' : 'Guardar y Compartir'}
+                            </button>
+                            <button
+                                onClick={() => { stopCamera(); setStep('idle'); setMode(null); }}
+                                className="w-full flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-gray-100 text-gray-600 font-bold hover:bg-gray-200 transition"
+                            >
+                                Cancelar
                             </button>
                         </div>
                     </div>
