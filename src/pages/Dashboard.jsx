@@ -3,7 +3,7 @@ import Webcam from 'react-webcam';
 import { useAuth } from '../contexts/AuthContext';
 import { addWatermarkToImage, fetchServerTime, fetchLocationName } from '../utils/watermark';
 import { db } from '../firebaseConfig';
-import { collection, addDoc, query, where, getDocs, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, query, where, getDocs, serverTimestamp, orderBy, limit } from 'firebase/firestore';
 import { Camera, MapPin, Search, CheckCircle, AlertCircle, LogOut, LogIn, Share2, Settings, UserCheck, ShieldAlert } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import AdminPasswordModal from '../components/AdminPasswordModal';
@@ -18,6 +18,8 @@ export default function Dashboard() {
     const streamRef = useRef(null);
 
     const [mode, setMode] = useState(null); // 'entry' or 'exit'
+    const [allowedActions, setAllowedActions] = useState({ entry: true, exit: true }); // Control de botones
+    const [loadingState, setLoadingState] = useState(true); // Para no mostrar botones hasta saber el estado
     const [step, setStep] = useState('idle'); // idle, camera, processing, success
     const [statusMessage, setStatusMessage] = useState('');
     const [isCapturing, setIsCapturing] = useState(false);
@@ -128,6 +130,54 @@ export default function Dashboard() {
         };
 
         checkAccess();
+
+        // Verificar ESTADO DEL USUARIO (Entrada/Salida)
+        const checkLastStatus = async () => {
+            if (!currentUser) return;
+            try {
+                const q = query(
+                    collection(db, "attendance"),
+                    where("usuario", "==", currentUser.email),
+                    orderBy("timestamp", "desc"),
+                    limit(1)
+                );
+                const snap = await getDocs(q);
+
+                if (snap.empty) {
+                    // Nunca ha marcado -> Solo Entrada permitida
+                    setAllowedActions({ entry: true, exit: false });
+                } else {
+                    const lastRecord = snap.docs[0].data();
+                    const lastType = lastRecord.tipo; // 'Entrada' o 'Salida'
+
+                    if (lastType === 'Salida') {
+                        // Ya salió -> Toca Entrar
+                        setAllowedActions({ entry: true, exit: false });
+                    } else {
+                        // Última fue Entrada -> Analizar tiempo
+                        const lastTime = lastRecord.timestamp ? lastRecord.timestamp.toDate() : new Date();
+                        const now = new Date();
+                        const diffHours = (now - lastTime) / (1000 * 60 * 60);
+
+                        if (diffHours > 20) {
+                            // Pasaron más de 20 horas -> Se le olvidó salir. Reiniciar ciclo.
+                            console.log("Ciclo reiniciado por tiempo (>20h sin salida)");
+                            setAllowedActions({ entry: true, exit: false });
+                        } else {
+                            // Ciclo normal -> Toca Salir
+                            setAllowedActions({ entry: false, exit: true });
+                        }
+                    }
+                }
+                setLoadingState(false);
+            } catch (err) {
+                console.error("Error verificando estado:", err);
+                // Fallback: permitir todo si falla la red para no bloquear
+                setAllowedActions({ entry: true, exit: true });
+                setLoadingState(false);
+            }
+        };
+        checkLastStatus();
 
         const handleUnload = () => {
             logout();
@@ -434,24 +484,48 @@ export default function Dashboard() {
                     <div className="grid grid-cols-1 gap-6 w-full">
                         <div className="bg-white p-6 rounded-xl shadow-lg text-center">
                             <h2 className="text-lg font-medium text-gray-600 mb-2">Bienvenido, {currentUser.email}</h2>
-                            <p className="text-sm text-gray-400">Seleccione una acción para registrar.</p>
+                            {loadingState ? (
+                                <p className="text-sm text-blue-500 animate-pulse">Verificando estado de asistencia...</p>
+                            ) : (
+                                <p className="text-sm text-gray-400">
+                                    {allowedActions.entry ? 'Es momento de registrar tu ENTRADA.' : 'Tienes una entrada pendiente. Registra tu SALIDA.'}
+                                </p>
+                            )}
                         </div>
 
-                        <button
-                            onClick={() => handleStart('entry')}
-                            className="group relative flex flex-col items-center justify-center p-8 bg-gradient-to-tr from-green-400 to-green-600 rounded-2xl shadow-lg hover:shadow-xl transition transform hover:scale-105 active:scale-95"
-                        >
-                            <LogIn className="w-12 h-12 text-white mb-2" />
-                            <span className="text-2xl font-bold text-white">Registrar Entrada</span>
-                        </button>
+                        {!loadingState && allowedActions.entry && (
+                            <button
+                                onClick={() => handleStart('entry')}
+                                className="group relative flex flex-col items-center justify-center p-8 bg-gradient-to-tr from-green-400 to-green-600 rounded-2xl shadow-lg hover:shadow-xl transition transform hover:scale-105 active:scale-95 animate-fade-in"
+                            >
+                                <LogIn className="w-12 h-12 text-white mb-2" />
+                                <span className="text-2xl font-bold text-white">Registrar Entrada</span>
+                            </button>
+                        )}
 
-                        <button
-                            onClick={() => handleStart('exit')}
-                            className="group relative flex flex-col items-center justify-center p-8 bg-gradient-to-tr from-red-400 to-red-600 rounded-2xl shadow-lg hover:shadow-xl transition transform hover:scale-105 active:scale-95"
-                        >
-                            <LogOut className="w-12 h-12 text-white mb-2" />
-                            <span className="text-2xl font-bold text-white">Registrar Salida</span>
-                        </button>
+                        {!loadingState && allowedActions.exit && (
+                            <button
+                                onClick={() => handleStart('exit')}
+                                className="group relative flex flex-col items-center justify-center p-8 bg-gradient-to-tr from-red-400 to-red-600 rounded-2xl shadow-lg hover:shadow-xl transition transform hover:scale-105 active:scale-95 animate-fade-in"
+                            >
+                                <LogOut className="w-12 h-12 text-white mb-2" />
+                                <span className="text-2xl font-bold text-white">Registrar Salida</span>
+                            </button>
+                        )}
+
+                        {/* Mensaje visual de bloqueo si uno está deshabilitado */}
+                        {!loadingState && !allowedActions.entry && (
+                            <div className="opacity-40 grayscale flex flex-col items-center justify-center p-4 border-2 border-dashed border-gray-300 rounded-xl">
+                                <span className="text-gray-400 font-bold block mb-1">Entrada Bloqueada</span>
+                                <span className="text-[10px] text-gray-400 text-center">Debes marcar salida primero o esperar 20h</span>
+                            </div>
+                        )}
+                        {!loadingState && !allowedActions.exit && (
+                            <div className="opacity-40 grayscale flex flex-col items-center justify-center p-4 border-2 border-dashed border-gray-300 rounded-xl">
+                                <span className="text-gray-400 font-bold block mb-1">Salida Bloqueada</span>
+                                <span className="text-[10px] text-gray-400 text-center">Debes marcar entrada primero</span>
+                            </div>
+                        )}
                     </div>
                 )}
 

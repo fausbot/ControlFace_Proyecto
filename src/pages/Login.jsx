@@ -65,20 +65,19 @@ export default function Login() {
         }
     };
 
+    useEffect(() => {
+        const savedEmail = localStorage.getItem('saved_email');
+        const savedPass = localStorage.getItem('saved_password');
+        if (savedEmail) setEmail(savedEmail);
+        if (savedPass) setPassword(atob(savedPass)); // Decodificar simple
+    }, []);
+
     const handleSubmit = async (e) => {
         e.preventDefault();
         try {
             setError('');
-            // Auto-append domain removed as per user request
             let emailToUse = email.trim().toLowerCase();
-            // Si el usuario no escribe @, podríamos asumir un defecto, pero la instrucción fue "quitar el autocompletado"
-            // así que dejaremos que falle si no es un email válido, o el navegador lo validará.
-            if (!emailToUse.includes('@')) {
-                // Opción: agregar @usuario.com si se desea mantener un default, pero "quitar autocompletado" sugiere inputs limpios.
-                // Sin embargo, para mantener consistencia con el registro (donde agregué @usuario.com si falta), haré lo mismo aquí
-                // O mejor, dejo que el usuario escriba todo. El prompt dice "nuevo@usiuario.com", lo que implica escribir todo.
-                // Voy a dejarlo limpio.
-            }
+
             const userCredential = await login(emailToUse, password);
             const user = userCredential.user;
 
@@ -94,6 +93,10 @@ export default function Login() {
                 setError('Acceso denegado: Usuario no autorizado o dado de baja.');
                 return;
             }
+
+            // GUARDAR CREDENCIALES SI EL LOGIN ES EXITOSO
+            localStorage.setItem('saved_email', emailToUse);
+            localStorage.setItem('saved_password', btoa(password)); // Codificar simple para evitar texto plano obvio
 
             navigate('/dashboard');
         } catch (err) {
