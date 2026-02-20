@@ -403,11 +403,27 @@ export default function Dashboard() {
             // Convert DataURL to Blob
             const response = await fetch(capturedData.image);
             const blob = await response.blob();
-            const file = new File([blob], "asistencia_evidencia.jpg", { type: "image/jpeg" });
+
+            // Nombre del archivo según el modo
+            const fileName = mode === 'incident' ? 'incidente_evidencia.jpg' : 'asistencia_evidencia.jpg';
+            const file = new File([blob], fileName, { type: "image/jpeg" });
+
+            // Texto base
+            let shareText;
+
+            if (mode === 'incident') {
+                const desc = incidentDescription.trim();
+                shareText = `⚠️ INCIDENTE`;
+                if (desc) {
+                    shareText += `\n📝 ${desc}`;
+                }
+            } else {
+                shareText = `Usuario: ${capturedData.metadata.usuario}\nFecha: ${capturedData.metadata.fecha} ${capturedData.metadata.hora}\nAcción: ${capturedData.metadata.tipo}`;
+            }
 
             const shareData = {
-                title: 'Registro de Asistencia',
-                text: `Usuario: ${capturedData.metadata.usuario}\nFecha: ${capturedData.metadata.fecha} ${capturedData.metadata.hora}\nAcción: ${capturedData.metadata.tipo}`,
+                title: mode === 'incident' ? '⚠️ Reporte de Incidente' : 'Registro de Asistencia',
+                text: shareText,
                 files: [file]
             };
 
@@ -418,7 +434,7 @@ export default function Dashboard() {
                 // Fallback: descargar imagen
                 const link = document.createElement('a');
                 link.href = capturedData.image;
-                link.download = `asistencia_${capturedData.metadata.fecha.replace(/\//g, '-')}_${capturedData.metadata.hora.replace(/:/g, '-')}.jpg`;
+                link.download = `${mode === 'incident' ? 'incidente' : 'asistencia'}_${capturedData.metadata.fecha.replace(/\//g, '-')}_${capturedData.metadata.hora.replace(/:/g, '-')}.jpg`;
                 link.click();
             }
         } catch (error) {
@@ -427,6 +443,7 @@ export default function Dashboard() {
             // Los datos ya están guardados
         }
     };
+
 
     const saveRecord = async () => {
         if (!capturedData) return false;
