@@ -496,6 +496,13 @@ export default function Dashboard() {
                         <Settings size={18} />
                         <span className="text-[10px] uppercase">Datos</span>
                     </button>
+                    <button
+                        onClick={() => { setAdminTarget('/configuracion'); setShowAdminModal(true); }}
+                        className="flex flex-col items-center gap-0.5 text-purple-600 font-bold border-2 border-purple-200 px-3 py-1.5 rounded-xl hover:bg-purple-50 transition"
+                    >
+                        <Settings size={18} />
+                        <span className="text-[10px] uppercase">Config</span>
+                    </button>
                 </div>
                 <h1 className="text-lg font-bold text-gray-800 flex-1 text-center truncate">Control Asistencia</h1>
                 <button onClick={() => logout()} className="text-red-500 text-xs font-semibold hover:text-red-700 shrink-0">Salir</button>

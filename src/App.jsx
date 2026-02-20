@@ -10,6 +10,7 @@ const Dashboard = React.lazy(() => import('./pages/Dashboard'));
 const Datos = React.lazy(() => import('./pages/Datos'));
 const Register = React.lazy(() => import('./pages/Register'));
 const ChangeAdminPassword = React.lazy(() => import('./pages/ChangeAdminPassword'));
+const Configuracion = React.lazy(() => import('./pages/Configuracion'));
 
 function PrivateRoute({ children }) {
   const { currentUser } = useAuth();
@@ -40,6 +41,7 @@ function App() {
           } />
           <Route path="/datos" element={<Datos />} />
           <Route path="/cambiar-clave-admin" element={<ChangeAdminPassword />} />
+          <Route path="/configuracion" element={<Configuracion />} />
           <Route path="/" element={<Navigate to="/login" />} />
         </Routes>
       </SubscriptionGuard>

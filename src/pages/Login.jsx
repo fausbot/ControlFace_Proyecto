@@ -122,6 +122,13 @@ export default function Login() {
                     <Settings size={14} />
                     DATOS
                 </button>
+                <button
+                    onClick={() => { setAdminTarget('/configuracion'); setShowAdminModal(true); }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-500/80 hover:bg-purple-600/80 text-white rounded-lg border border-purple-300/50 backdrop-blur-sm transition text-xs font-bold"
+                >
+                    <Settings size={14} />
+                    CONFIG
+                </button>
             </div>
 
             <AdminPasswordModal

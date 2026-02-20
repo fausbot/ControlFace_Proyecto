@@ -4,7 +4,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Download, Calendar, Trash2, ChevronLeft, ChevronRight, AlertTriangle, Lock, TriangleAlert } from 'lucide-react';
+import { Download, Calendar, Trash2, ChevronLeft, ChevronRight, AlertTriangle, TriangleAlert } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
 // ✅ Importamos desde los servicios, no desde firebase directamente
@@ -340,13 +340,6 @@ export default function Datos() {
                 <div className="flex justify-between items-center mb-8">
                     <h1 className="text-3xl font-bold text-gray-800">Centro de Datos</h1>
                     <div className="flex gap-3">
-                        <button
-                            onClick={() => navigate('/cambiar-clave-admin')}
-                            className="px-4 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 font-bold transition flex items-center gap-2"
-                        >
-                            <Lock size={18} />
-                            Cambiar Contraseña
-                        </button>
                         <button
                             onClick={() => navigate('/dashboard')}
                             className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300"
