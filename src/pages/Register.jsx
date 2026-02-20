@@ -49,6 +49,7 @@ export default function Register() {
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
     const [exporting, setExporting] = useState(false);
+    const [filterEmail, setFilterEmail] = useState('');
     const [showDeleteModal, setShowDeleteModal] = useState(false);
     const [faceDescriptor, setFaceDescriptor] = useState(null);
     const [isCameraOpen, setIsCameraOpen] = useState(false);
@@ -240,8 +241,21 @@ export default function Register() {
         try {
             const getUsersListFn = httpsCallable(functions, 'getUsersList');
             const result = await getUsersListFn();
-            const employees = result.data.users;
+            let employees = result.data.users;
             if (!employees || employees.length === 0) { alert('No hay empleados para exportar.'); return; }
+
+            // Filtrar por email si se especificó uno
+            if (filterEmail.trim()) {
+                const needle = filterEmail.trim().toLowerCase();
+                employees = employees.filter(emp =>
+                    (emp.email || '').toLowerCase().includes(needle)
+                );
+                if (employees.length === 0) {
+                    alert(`No se encontró ningún empleado con el correo "${filterEmail.trim()}".`);
+                    return;
+                }
+            }
+
             const headers = ['Email/ID', 'Fecha de Creacion', 'Ultimo Acceso', 'UID'];
             const csvRows = [headers.join(',')];
             employees.forEach(emp => {
@@ -402,6 +416,17 @@ export default function Register() {
                     </button>
 
                     <div className="grid grid-cols-2 gap-3 mt-4">
+                        {/* Filtro por email para la exportación */}
+                        <div className="col-span-2">
+                            <label className="block text-xs font-medium text-gray-500 mb-1">Filtrar exportación por correo (opcional)</label>
+                            <input
+                                type="text"
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                                placeholder="Ej: juan.perez — vacío exporta todos"
+                                value={filterEmail}
+                                onChange={(e) => setFilterEmail(e.target.value)}
+                            />
+                        </div>
                         <button type="button" onClick={() => setShowDeleteModal(true)}
                             className="flex items-center justify-center gap-2 py-2.5 px-4 bg-blue-600 text-white text-xs rounded-lg hover:bg-blue-700 font-bold transition shadow-sm">
                             <Trash2 size={16} /> Borrar Empleado
