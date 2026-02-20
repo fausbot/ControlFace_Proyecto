@@ -239,30 +239,66 @@ export default function Register() {
     const exportEmployeesToCSV = async () => {
         setExporting(true);
         try {
+            // 1. Obtener usuarios de Firebase Auth
             const getUsersListFn = httpsCallable(functions, 'getUsersList');
             const result = await getUsersListFn();
-            let employees = result.data.users;
-            if (!employees || employees.length === 0) { alert('No hay empleados para exportar.'); return; }
+            let authUsers = result.data.users;
+            if (!authUsers || authUsers.length === 0) { alert('No hay empleados para exportar.'); return; }
 
-            // Filtrar por email si se especificó uno
+            // 2. Filtrar por email si se especificó uno
             if (filterEmail.trim()) {
                 const needle = filterEmail.trim().toLowerCase();
-                employees = employees.filter(emp =>
+                authUsers = authUsers.filter(emp =>
                     (emp.email || '').toLowerCase().includes(needle)
                 );
-                if (employees.length === 0) {
+                if (authUsers.length === 0) {
                     alert(`No se encontró ningún empleado con el correo "${filterEmail.trim()}".`);
                     return;
                 }
             }
 
-            const headers = ['Email/ID', 'Fecha de Creacion', 'Ultimo Acceso', 'UID'];
+            // 3. Obtener datos adicionales de Firestore (nombre, apellido y campos opcionales)
+            const fsSnap = await getDocs(collection(db, 'employees'));
+            const fsMap = {};
+            fsSnap.forEach(d => {
+                const data = d.data();
+                if (data.email) fsMap[data.email.toLowerCase()] = data;
+            });
+
+            // 4. Determinar qué campos opcionales tienen datos en al menos un empleado
+            const activeOptionalKeys = FIELD_DEFS
+                .filter(({ key }) => authUsers.some(u => {
+                    const fs = fsMap[(u.email || '').toLowerCase()];
+                    return fs && fs[key] !== undefined && fs[key] !== '';
+                }))
+                .map(({ key, label }) => ({ key, label }));
+
+            // 5. Construir cabecera dinámica
+            const headers = [
+                'Email/ID', 'Nombres', 'Apellidos',
+                'Fecha de Creacion', 'Ultimo Acceso', 'UID',
+                ...activeOptionalKeys.map(f => f.label),
+            ];
+
+            // 6. Construir filas
+            const escape = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
             const csvRows = [headers.join(',')];
-            employees.forEach(emp => {
+            authUsers.forEach(emp => {
+                const fs = fsMap[(emp.email || '').toLowerCase()] || {};
                 const created = emp.creationTime ? new Date(emp.creationTime).toLocaleString('es-ES') : 'N/A';
                 const lastLogin = emp.lastSignInTime ? new Date(emp.lastSignInTime).toLocaleString('es-ES') : 'N/A';
-                csvRows.push(`${emp.email},"${created}","${lastLogin}",${emp.uid}`);
+                const row = [
+                    escape(emp.email),
+                    escape(fs.firstName || ''),
+                    escape(fs.lastName || ''),
+                    escape(created),
+                    escape(lastLogin),
+                    escape(emp.uid),
+                    ...activeOptionalKeys.map(({ key }) => escape(fs[key] || '')),
+                ];
+                csvRows.push(row.join(','));
             });
+
             const now = new Date();
             const ts = now.toISOString().slice(0, 16).replace(/[-:T]/g, '');
             const blob = new Blob(['\ufeff' + csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
