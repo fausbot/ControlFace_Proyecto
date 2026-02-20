@@ -4,7 +4,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Download, Calendar, Trash2, ChevronLeft, ChevronRight, AlertTriangle, Lock } from 'lucide-react';
+import { Download, Calendar, Trash2, ChevronLeft, ChevronRight, AlertTriangle, Lock, TriangleAlert } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
 // ✅ Importamos desde los servicios, no desde firebase directamente
@@ -22,6 +22,9 @@ import {
     checkAndRestoreEmployees
 } from '../services/employeeService';
 
+import { collection, getDocs, query, where, orderBy } from 'firebase/firestore';
+import { db } from '../firebaseConfig';
+
 const PAGE_SIZE = 100;
 
 export default function Admin() {
@@ -34,6 +37,10 @@ export default function Admin() {
     const [endDate, setEndDate] = useState('');
     const [pageNumber, setPageNumber] = useState(1);
     const [hasMore, setHasMore] = useState(true);
+    // Incidentes export
+    const [exportingIncidents, setExportingIncidents] = useState(false);
+    const [incidentStartDate, setIncidentStartDate] = useState('');
+    const [incidentEndDate, setIncidentEndDate] = useState('');
 
     const navigate = useNavigate();
     const { isAdminAuthenticated, currentUser } = useAuth();
@@ -111,13 +118,13 @@ export default function Admin() {
         }
     };
 
-    // ─── Exportar CSV ────────────────────────────────────────────────────────
+    // ─── Exportar CSV (por turno: entrada+salida en una fila) ─────────────────
     const exportToCSV = async () => {
         setExporting(true);
         try {
-            // Filtrar logs según rango (sin ir a Firestore de nuevo)
+            // 1. Obtener registros en el rango seleccionado
             const filtered = (startDate || endDate)
-                ? filterLogsByDateRange(allLogs, startDate, endDate) // ← servicio
+                ? filterLogsByDateRange(allLogs, startDate, endDate)
                 : allLogs;
 
             if (filtered.length === 0) {
@@ -125,31 +132,113 @@ export default function Admin() {
                 return;
             }
 
-            const employeesMap = await getEmployeesMap(); // ← servicio
+            const employeesMap = await getEmployeesMap();
             const dayFormatter = new Intl.DateTimeFormat('es-ES', { weekday: 'long' });
 
-            const headers = ['Usuario', 'Nombres', 'Apellidos', 'Dia', 'Fecha', 'Hora', 'Localidad'];
+            // 2. Ordenar todos los registros de más antiguo a más reciente
+            const sorted = [...filtered].sort((a, b) => {
+                const tA = (a.timestamp && a.timestamp.toMillis) ? a.timestamp.toMillis() : 0;
+                const tB = (b.timestamp && b.timestamp.toMillis) ? b.timestamp.toMillis() : 0;
+                return tA - tB;
+            });
+
+            // 3. Agrupar registros por usuario
+            const byUser = {};
+            sorted.forEach(log => {
+                const key = (log.usuario || '').toLowerCase().trim();
+                if (!byUser[key]) byUser[key] = [];
+                byUser[key].push(log);
+            });
+
+            // 4. Emparejar entradas con salidas por usuario
+            const shifts = [];
+            Object.entries(byUser).forEach(([email, records]) => {
+                let pendingEntry = null;
+                records.forEach(rec => {
+                    if (rec.tipo === 'Entrada') {
+                        if (pendingEntry) {
+                            // Entrada sin salida previa → turno incompleto
+                            shifts.push({ entry: pendingEntry, exit: null, email });
+                        }
+                        pendingEntry = rec;
+                    } else if (rec.tipo === 'Salida') {
+                        if (pendingEntry) {
+                            shifts.push({ entry: pendingEntry, exit: rec, email });
+                            pendingEntry = null;
+                        } else {
+                            // Salida huérfana (sin entrada previa)
+                            shifts.push({ entry: null, exit: rec, email });
+                        }
+                    }
+                });
+                if (pendingEntry) {
+                    // Entrada al final sin salida registrada
+                    shifts.push({ entry: pendingEntry, exit: null, email });
+                }
+            });
+
+            // 5. Ordenar turnos por timestamp de referencia (entrada o salida)
+            shifts.sort((a, b) => {
+                const recA = a.entry || a.exit;
+                const recB = b.entry || b.exit;
+                const tA = (recA?.timestamp?.toMillis) ? recA.timestamp.toMillis() : 0;
+                const tB = (recB?.timestamp?.toMillis) ? recB.timestamp.toMillis() : 0;
+                return tA - tB;
+            });
+
+            // 6. Construir filas del CSV
+            const headers = [
+                'Usuario', 'Nombres', 'Apellidos',
+                'Dia Entrada', 'Fecha Entrada', 'Hora Entrada', 'Localidad Entrada',
+                'Fecha Salida', 'Hora Salida', 'Localidad Salida',
+                'Horas Trabajadas'
+            ];
             const csvRows = [headers.join(',')];
 
-            filtered.forEach(log => {
-                let diaNombre = 'N/A';
-                const d = parseSpanishDate(log.fecha);
-                if (d) {
-                    diaNombre = dayFormatter.format(d);
-                    diaNombre = diaNombre.charAt(0).toUpperCase() + diaNombre.slice(1);
-                }
-
-                const emailKey = (log.usuario || '').toLowerCase().trim();
+            shifts.forEach(({ entry, exit, email }) => {
+                const emailKey = email || '';
                 const emp = employeesMap[emailKey] || { firstName: '', lastName: '' };
 
+                // Día de la semana basado en la entrada (o salida si no hay entrada)
+                let diaNombre = 'N/A';
+                const refRec = entry || exit;
+                if (refRec?.fecha) {
+                    const d = parseSpanishDate(refRec.fecha);
+                    if (d) {
+                        diaNombre = dayFormatter.format(d);
+                        diaNombre = diaNombre.charAt(0).toUpperCase() + diaNombre.slice(1);
+                    }
+                }
+
+                // Calcular horas trabajadas usando Timestamps reales (maneja cruces de medianoche)
+                let horasTrabajadas = 'Pendiente';
+                if (entry && exit && entry.timestamp?.toMillis && exit.timestamp?.toMillis) {
+                    const diffMs = exit.timestamp.toMillis() - entry.timestamp.toMillis();
+                    if (diffMs >= 0) {
+                        const totalSec = Math.floor(diffMs / 1000);
+                        const hh = Math.floor(totalSec / 3600).toString().padStart(2, '0');
+                        const mm = Math.floor((totalSec % 3600) / 60).toString().padStart(2, '0');
+                        const ss = (totalSec % 60).toString().padStart(2, '0');
+                        horasTrabajadas = `${hh}:${mm}:${ss}`;
+                    } else {
+                        horasTrabajadas = 'Error';
+                    }
+                } else if (!entry) {
+                    horasTrabajadas = 'Sin Entrada';
+                }
+
                 const row = [
-                    log.usuario || '',
+                    refRec?.usuario || '',
                     `"${emp.firstName}"`,
                     `"${emp.lastName}"`,
                     diaNombre,
-                    log.fecha || '',
-                    log.hora || '',
-                    `"${(log.localidad || '').replace(/"/g, '""')}"`
+                    entry?.fecha || '-',
+                    entry?.hora || '-',
+                    `"${(entry?.localidad || '-').replace(/"/g, '""')}"`,
+                    exit?.fecha || '-',
+                    exit?.hora || '-',
+                    `"${(exit?.localidad || '-').replace(/"/g, '""')}"`,
+                    horasTrabajadas
                 ];
                 csvRows.push(row.join(','));
             });
@@ -163,8 +252,8 @@ export default function Admin() {
             const now = new Date();
             const ts = now.toISOString().slice(0, 16).replace(/[-:T]/g, '');
             const fileName = startDate && endDate
-                ? `asistencia_${startDate.replace(/-/g, '')}_${endDate.replace(/-/g, '')}_${ts}.csv`
-                : `asistencia_${ts}.csv`;
+                ? `turnos_${startDate.replace(/-/g, '')}_${endDate.replace(/-/g, '')}_${ts}.csv`
+                : `turnos_${ts}.csv`;
 
             link.setAttribute('href', url);
             link.setAttribute('download', fileName);
@@ -178,6 +267,69 @@ export default function Admin() {
             alert('Error al exportar. Intenta de nuevo.');
         } finally {
             setExporting(false);
+        }
+    };
+
+
+    // ─── Exportar Incidentes CSV ─────────────────────────────────────────────
+    const exportIncidentsToCSV = async () => {
+        setExportingIncidents(true);
+        try {
+            const snap = await getDocs(query(collection(db, 'incidents'), orderBy('timestamp', 'asc')));
+            let incidents = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+            // Filtrar por rango si se especificaron fechas
+            if (incidentStartDate || incidentEndDate) {
+                incidents = incidents.filter(inc => {
+                    if (!inc.fecha) return true;
+                    const d = parseSpanishDate(inc.fecha);
+                    if (!d) return true;
+                    const t = d.getTime();
+                    const start = incidentStartDate ? new Date(incidentStartDate + 'T00:00:00').getTime() : 0;
+                    const end = incidentEndDate ? new Date(incidentEndDate + 'T23:59:59').getTime() : Infinity;
+                    return t >= start && t <= end;
+                });
+            }
+
+            if (incidents.length === 0) {
+                alert('No hay incidentes en el rango seleccionado.');
+                return;
+            }
+
+            const headers = ['Usuario', 'Fecha', 'Hora', 'Localidad', 'Descripcion'];
+            const csvRows = [headers.join(',')];
+
+            incidents.forEach(inc => {
+                const row = [
+                    inc.usuario || '',
+                    inc.fecha || '',
+                    inc.hora || '',
+                    `"${(inc.localidad || '').replace(/"/g, '""')}"`,
+                    `"${(inc.descripcion || '').replace(/"/g, '""')}"`,
+                ];
+                csvRows.push(row.join(','));
+            });
+
+            const csvContent = '\ufeff' + csvRows.join('\n');
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            const now = new Date();
+            const ts = now.toISOString().slice(0, 16).replace(/[-:T]/g, '');
+            const fileName = incidentStartDate && incidentEndDate
+                ? `incidentes_${incidentStartDate.replace(/-/g, '')}_${incidentEndDate.replace(/-/g, '')}_${ts}.csv`
+                : `incidentes_${ts}.csv`;
+            link.setAttribute('href', url);
+            link.setAttribute('download', fileName);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        } catch (error) {
+            console.error('Error exportando incidentes:', error);
+            alert('Error al exportar incidentes. Intenta de nuevo.');
+        } finally {
+            setExportingIncidents(false);
         }
     };
 
@@ -205,10 +357,10 @@ export default function Admin() {
                 </div>
 
                 {/* Exportación */}
-                <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
+                <div className="bg-white rounded-xl shadow-lg p-6 mb-6 border-l-4 border-green-500">
                     <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
                         <Download size={24} />
-                        Exportar Registros a CSV
+                        Exportar Registros de Entrada y Salida a CSV
                     </h2>
 
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
@@ -271,6 +423,55 @@ export default function Admin() {
                             </button>
                         </div>
                     </div>
+                </div>
+
+                {/* Exportación de Incidentes */}
+                <div className="bg-white rounded-xl shadow-lg p-6 mb-6 border-l-4 border-orange-400">
+                    <h2 className="text-xl font-bold text-orange-700 mb-4 flex items-center gap-2">
+                        <TriangleAlert size={24} />
+                        Exportar Registro de Incidentes a CSV
+                    </h2>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                <Calendar size={16} className="inline mr-1" />
+                                Fecha Inicio
+                            </label>
+                            <input
+                                type="date"
+                                value={incidentStartDate}
+                                onChange={(e) => setIncidentStartDate(e.target.value)}
+                                className="w-full px-4 py-2 border border-orange-300 rounded-lg focus:ring-2 focus:ring-orange-400 focus:border-transparent"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                <Calendar size={16} className="inline mr-1" />
+                                Fecha Fin
+                            </label>
+                            <input
+                                type="date"
+                                value={incidentEndDate}
+                                onChange={(e) => setIncidentEndDate(e.target.value)}
+                                className="w-full px-4 py-2 border border-orange-300 rounded-lg focus:ring-2 focus:ring-orange-400 focus:border-transparent"
+                            />
+                        </div>
+                        <button
+                            onClick={exportIncidentsToCSV}
+                            disabled={exportingIncidents}
+                            className="px-6 py-2 bg-orange-500 text-white font-bold rounded-lg hover:bg-orange-600 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition"
+                        >
+                            <Download size={20} />
+                            {exportingIncidents ? 'Exportando...' : 'Exportar CSV'}
+                        </button>
+                    </div>
+
+                    <p className="text-sm text-gray-500 mt-3">
+                        {incidentStartDate || incidentEndDate
+                            ? `Exportará incidentes ${incidentStartDate ? `desde ${incidentStartDate}` : ''} ${incidentEndDate ? `hasta ${incidentEndDate}` : ''}`
+                            : 'Exportará todos los incidentes disponibles'}
+                    </p>
                 </div>
 
                 {/* Tabla */}
@@ -350,7 +551,7 @@ export default function Admin() {
                     </div>
                 </div>
 
-            </div>
-        </div>
+            </div >
+        </div >
     );
 }

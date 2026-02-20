@@ -4,7 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { addWatermarkToImage, fetchServerTime, fetchLocationName } from '../utils/watermark';
 import { db } from '../firebaseConfig';
 import { collection, addDoc, query, where, getDocs, serverTimestamp, orderBy, limit } from 'firebase/firestore';
-import { Camera, MapPin, Search, CheckCircle, AlertCircle, LogOut, LogIn, Share2, Settings, UserCheck, ShieldAlert } from 'lucide-react';
+import { Camera, MapPin, Search, CheckCircle, AlertCircle, LogOut, LogIn, Share2, Settings, UserCheck, ShieldAlert, TriangleAlert } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import AdminPasswordModal from '../components/AdminPasswordModal';
 import * as faceapi from '@vladmandic/face-api';
@@ -133,52 +133,65 @@ export default function Dashboard() {
         checkAccess();
 
         // Verificar ESTADO DEL USUARIO (Entrada/Salida)
+        // Sin orderBy para no requerir índice compuesto — ordenamos en el cliente
         const checkLastStatus = async () => {
-            if (!currentUser) return;
+            if (!currentUser) {
+                setLoadingState(false);
+                return;
+            }
             try {
+                // Solo WHERE sin orderBy = no necesita índice compuesto
                 const q = query(
                     collection(db, "attendance"),
-                    where("usuario", "==", currentUser.email),
-                    orderBy("timestamp", "desc"),
-                    limit(1)
+                    where("usuario", "==", currentUser.email)
                 );
                 const snap = await getDocs(q);
 
                 if (snap.empty) {
-                    // Nunca ha marcado -> Solo Entrada permitida
                     setAllowedActions({ entry: true, exit: false });
                 } else {
-                    const lastRecord = snap.docs[0].data();
-                    const lastType = lastRecord.tipo; // 'Entrada' o 'Salida'
+                    const docs = snap.docs.map(d => d.data());
+
+                    // Ordenar del más reciente al más antiguo (manejo seguro si timestamp es null)
+                    docs.sort((a, b) => {
+                        const tA = (a.timestamp && a.timestamp.toMillis) ? a.timestamp.toMillis() : 0;
+                        const tB = (b.timestamp && b.timestamp.toMillis) ? b.timestamp.toMillis() : 0;
+                        return tB - tA;
+                    });
+
+                    const lastRecord = docs[0];
+                    const lastType = lastRecord.tipo;
+                    console.log(`✅ Último registro: tipo=${lastType}`);
 
                     if (lastType === 'Salida') {
-                        // Ya salió -> Toca Entrar
                         setAllowedActions({ entry: true, exit: false });
-                    } else {
-                        // Última fue Entrada -> Analizar tiempo
-                        const lastTime = lastRecord.timestamp ? lastRecord.timestamp.toDate() : new Date();
-                        const now = new Date();
-                        const diffHours = (now - lastTime) / (1000 * 60 * 60);
+                    } else if (lastType === 'Entrada') {
+                        const lastTime = (lastRecord.timestamp && lastRecord.timestamp.toDate)
+                            ? lastRecord.timestamp.toDate()
+                            : new Date(0); // Si no hay timestamp, forzar reinicio
+
+                        const diffHours = (new Date() - lastTime) / (1000 * 60 * 60);
 
                         if (diffHours > 20) {
-                            // Pasaron más de 20 horas -> Se le olvidó salir. Reiniciar ciclo.
-                            console.log("Ciclo reiniciado por tiempo (>20h sin salida)");
+                            console.log("⚠️ Ciclo reiniciado por tiempo (>20h)");
                             setAllowedActions({ entry: true, exit: false });
                         } else {
-                            // Ciclo normal -> Toca Salir
                             setAllowedActions({ entry: false, exit: true });
                         }
+                    } else {
+                        // Tipo desconocido o incidente -> permitir entrada
+                        setAllowedActions({ entry: true, exit: false });
                     }
                 }
-                setLoadingState(false);
             } catch (err) {
-                console.error("Error verificando estado:", err);
-                // Fallback: permitir todo si falla la red para no bloquear
-                setAllowedActions({ entry: true, exit: true });
-                setLoadingState(false);
+                console.error("❌ Error verificando estado:", err);
+                setAllowedActions({ entry: true, exit: false }); // Fallback seguro
+            } finally {
+                setLoadingState(false); // SIEMPRE - pase lo que pase
             }
         };
         checkLastStatus();
+
 
         const handleUnload = () => {
             logout();
