@@ -1,9 +1,9 @@
 // src/services/storageService.js
 // Maneja subida y descarga de fotos en Firebase Storage.
 // • Las fotos se comprimen antes de subir (Canvas, configurable vía .env)
-// • Los metadatos se guardan en Firestore colección 'fotos' para evitar
-//   problemas de CORS que tiene el método listAll() de Firebase Storage.
-// • Para descargar se usa getBlob() del SDK (sin CORS) en vez de fetch().
+// • Los metadatos se guardan en Firestore colección 'fotos' (Modo Rápido / Sin CORS)
+// • Búsqueda Híbrida: Busca en Firestore y hace fallback a listAll() para fotos antiguas.
+// • Descarga vía getBlob() del SDK (sin CORS) para máxima compatibilidad.
 
 import { storage, db } from '../firebaseConfig';
 import {
@@ -11,6 +11,7 @@ import {
     uploadBytes,
     getDownloadURL,
     getBlob,
+    listAll,
 } from 'firebase/storage';
 import {
     collection,
@@ -39,10 +40,6 @@ const buildPath = (tipo, year, month, email, fecha, hora) => {
 };
 
 // ─── Compresión Canvas ────────────────────────────────────────────────────────
-/**
- * Redimensiona a máx MAX_PHOTO_WIDTH px y comprime a PHOTO_QUALITY JPEG.
- * Devuelve un Blob listo para subir.
- */
 export const compressImage = (imageDataUrl) =>
     new Promise((resolve, reject) => {
         const img = new Image();
@@ -67,13 +64,6 @@ export const compressImage = (imageDataUrl) =>
     });
 
 // ─── Subir foto + guardar metadatos en Firestore ──────────────────────────────
-/**
- * Comprime, sube a Storage y guarda metadatos en Firestore colección 'fotos'.
- * Guardar en Firestore permite listar sin depender de listAll() (que tiene
- * problemas de CORS en algunos navegadores).
- *
- * @returns {Promise<string>} URL de descarga
- */
 export const uploadPhoto = async (imageDataUrl, tipo, email, fecha, hora) => {
     const now = new Date();
     const year = String(now.getFullYear());
@@ -91,7 +81,7 @@ export const uploadPhoto = async (imageDataUrl, tipo, email, fecha, hora) => {
     await uploadBytes(storageRef, blob, metadata);
     const url = await getDownloadURL(storageRef);
 
-    // Guardar metadatos en Firestore para listado posterior sin CORS issues
+    // Guardar metadatos en Firestore para listado posterior rápido y sin CORS
     const carpeta = tipo === 'incidente' ? 'incidentes' : 'asistencia';
     try {
         await addDoc(collection(db, 'fotos'), {
@@ -102,33 +92,22 @@ export const uploadPhoto = async (imageDataUrl, tipo, email, fecha, hora) => {
         });
     } catch (firestoreErr) {
         console.warn('⚠️ No se pudo guardar metadatos en Firestore:', firestoreErr);
-        // No es bloqueante — la foto ya está en Storage
     }
 
     console.log(`✅ Foto subida: ${storagePath} (${Math.round(blob.size / 1024)} KB)`);
     return url;
 };
 
-// ─── Listar fotos por filtro (desde Firestore) ────────────────────────────────
+// ─── Listar fotos por filtro (Modo Híbrido: Firestore + Storage) ──────────────
 /**
- * Consulta la colección 'fotos' en Firestore filtrando por:
- *   - tipo ('asistencia' | 'incidentes' | 'ambos')
- *   - rango de fechas (mes/año)
- *   - email completo o dominio (@empresa.com)
- *
- * @param {Object} opts
- * @param {string} opts.tipo        'asistencia' | 'incidentes' | 'ambos'
- * @param {Date}   opts.desde       Fecha inicio
- * @param {Date}   opts.hasta       Fecha fin
- * @param {string} opts.filtroUsuario  Email completo o @dominio
- * @returns {Promise<Array<{name, path, ref}>>}
+ * Busca fotos en el registro de Firestore y también intenta listAll() en Storage
+ * para encontrar fotos antiguas que no tengan registro en la base de datos.
  */
 export const listPhotosByFilter = async ({ tipo, desde, hasta, filtroUsuario }) => {
     const carpetas = tipo === 'ambos'
         ? ['asistencia', 'incidentes']
         : [tipo === 'incidentes' ? 'incidentes' : 'asistencia'];
 
-    // Construir combinaciones de año/mes en el rango
     const periodos = [];
     const cursor = new Date(desde.getFullYear(), desde.getMonth(), 1);
     const fin = new Date(hasta.getFullYear(), hasta.getMonth(), 1);
@@ -142,10 +121,21 @@ export const listPhotosByFilter = async ({ tipo, desde, hasta, filtroUsuario }) 
 
     const filtroNorm = (filtroUsuario || '').trim().toLowerCase();
     const esDominio = filtroNorm.startsWith('@');
+    // Para el caso de listAll (antiguo), necesitamos el nombre sanitizado igual que en buildPath
+    const dominioSanitized = esDominio
+        ? filtroNorm.replace('@', '_').replace(/\./g, '-')
+        : null;
+    const emailSanitized = !esDominio && filtroNorm
+        ? sanitizeEmail(filtroNorm)
+        : null;
 
-    const results = [];
+    const resultsMap = new Map(); // Usamos Map para evitar duplicados por path
+
     for (const { year, month } of periodos) {
         for (const carpeta of carpetas) {
+            const prefijo = `${carpeta}/${year}/${month}`;
+
+            // 1. INTENTAR FIRESTORE (Nuevo sistema)
             try {
                 const q = query(
                     collection(db, 'fotos'),
@@ -154,51 +144,68 @@ export const listPhotosByFilter = async ({ tipo, desde, hasta, filtroUsuario }) 
                     where('carpeta', '==', carpeta),
                 );
                 const snap = await getDocs(q);
-
                 snap.docs.forEach(docSnap => {
                     const data = docSnap.data();
                     const emailLow = (data.email || '').toLowerCase();
-
-                    // Filtro por dominio (@empresa.com)
                     if (esDominio && !emailLow.endsWith(filtroNorm)) return;
-                    // Filtro por email exacto
                     if (!esDominio && filtroNorm && emailLow !== filtroNorm) return;
 
-                    results.push({
+                    resultsMap.set(data.path, {
                         name: data.path.split('/').pop(),
                         path: data.path,
                         ref: ref(storage, data.path),
+                        source: 'firestore'
                     });
                 });
             } catch (err) {
-                console.error(`Error consultando fotos (${carpeta}/${year}/${month}):`, err);
+                console.warn(`Firestore search failed for ${prefijo}:`, err);
+            }
+
+            // 2. INTENTAR STORAGE listAll (Sistema antiguo / Legacy)
+            // Esto permite encontrar fotos subidas antes del registro en Firestore.
+            try {
+                const folderRef = ref(storage, prefijo);
+                const listaResult = await listAll(folderRef);
+
+                for (const item of listaResult.items) {
+                    if (resultsMap.has(item.fullPath)) continue; // Ya lo tenemos de Firestore
+
+                    const name = item.name.toLowerCase();
+                    // El filtrado manual es necesario para listAll
+                    if (esDominio && !name.includes(dominioSanitized)) continue;
+                    if (emailSanitized && !name.includes(emailSanitized)) continue;
+
+                    resultsMap.set(item.fullPath, {
+                        name: item.name,
+                        path: item.fullPath,
+                        ref: item,
+                        source: 'storage'
+                    });
+                }
+            } catch (err) {
+                // Probablemente error de CORS o carpeta inexistente
+                console.warn(`Storage listAll fallback failed for ${prefijo} (Legacy mode ignored):`, err);
             }
         }
     }
-    return results;
+
+    const finalResults = Array.from(resultsMap.values());
+    console.log(`🔍 Búsqueda finalizada. Encontradas ${finalResults.length} fotos.`);
+    return finalResults;
 };
 
 // ─── Descargar fotos como ZIP ─────────────────────────────────────────────────
-/**
- * Descarga todos los archivos de la lista y los empaqueta en un ZIP.
- * Usa getBlob() del SDK de Firebase en vez de fetch(downloadURL)
- * para evitar problemas de CORS al descargar.
- *
- * @param {Array}    fileList   — resultado de listPhotosByFilter
- * @param {Function} onProgress — callback(current, total)
- * @returns {Blob} ZIP blob
- */
 export const downloadPhotosAsZip = async (fileList, onProgress) => {
     const zip = new JSZip();
     let done = 0;
 
     for (const file of fileList) {
         try {
-            // getBlob() descarga a través del SDK (no tiene CORS issues)
+            // getBlob() es directo del SDK, no suele tener problemas de CORS
             const blob = await getBlob(file.ref);
             zip.file(file.path, blob);
         } catch (err) {
-            console.warn(`⚠️ No se pudo descargar ${file.name}:`, err);
+            console.warn(`⚠️ Error descargando ${file.name}:`, err);
         }
         done++;
         if (onProgress) onProgress(done, fileList.length);
