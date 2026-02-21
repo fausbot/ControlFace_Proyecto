@@ -23,7 +23,7 @@ import {
     checkAndRestoreEmployees
 } from '../services/employeeService';
 
-import { collection, getDocs, query, where, orderBy } from 'firebase/firestore';
+import { collection, getDocs, query, where, orderBy, getDoc, doc } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 
 const PAGE_SIZE = 100;
@@ -42,6 +42,10 @@ export default function Datos() {
     const [exportingIncidents, setExportingIncidents] = useState(false);
     const [incidentStartDate, setIncidentStartDate] = useState('');
     const [incidentEndDate, setIncidentEndDate] = useState('');
+    const [incidentCsvUserFilter, setIncidentCsvUserFilter] = useState('');
+
+    // CSV Asistencia export
+    const [csvUserFilter, setCsvUserFilter] = useState('');
 
     // Descargador de fotos
     const [photoTipo, setPhotoTipo] = useState('ambos');
@@ -188,12 +192,18 @@ export default function Datos() {
         setExporting(true);
         try {
             // 1. Obtener registros en el rango seleccionado
-            const filtered = (startDate || endDate)
+            let filtered = (startDate || endDate)
                 ? filterLogsByDateRange(allLogs, startDate, endDate)
                 : allLogs;
 
+            // 1.5 Aplicar filtro de usuario/dominio si existe
+            if (csvUserFilter.trim() !== '') {
+                const searchStr = csvUserFilter.trim().toLowerCase();
+                filtered = filtered.filter(log => (log.usuario || '').toLowerCase().includes(searchStr));
+            }
+
             if (filtered.length === 0) {
-                alert('No hay registros en el rango seleccionado.');
+                alert('No hay registros con esos filtros.');
                 return;
             }
 
@@ -316,9 +326,10 @@ export default function Datos() {
 
             const now = new Date();
             const ts = now.toISOString().slice(0, 16).replace(/[-:T]/g, '');
+            const filterPart = csvUserFilter ? `_${csvUserFilter.replace(/[@.]/g, '')}` : '';
             const fileName = startDate && endDate
-                ? `turnos_${startDate.replace(/-/g, '')}_${endDate.replace(/-/g, '')}_${ts}.csv`
-                : `turnos_${ts}.csv`;
+                ? `turnos_${startDate.replace(/-/g, '')}_${endDate.replace(/-/g, '')}${filterPart}_${ts}.csv`
+                : `turnos${filterPart}_${ts}.csv`;
 
             link.setAttribute('href', url);
             link.setAttribute('download', fileName);
@@ -356,8 +367,14 @@ export default function Datos() {
                 });
             }
 
+            // Filtrar por usuario/dominio
+            if (incidentCsvUserFilter.trim() !== '') {
+                const searchStr = incidentCsvUserFilter.trim().toLowerCase();
+                incidents = incidents.filter(inc => (inc.usuario || '').toLowerCase().includes(searchStr));
+            }
+
             if (incidents.length === 0) {
-                alert('No hay incidentes en el rango seleccionado.');
+                alert('No hay incidentes con esos filtros.');
                 return;
             }
 
@@ -381,9 +398,10 @@ export default function Datos() {
             const link = document.createElement('a');
             const now = new Date();
             const ts = now.toISOString().slice(0, 16).replace(/[-:T]/g, '');
+            const filterPart = incidentCsvUserFilter ? `_${incidentCsvUserFilter.replace(/[@.]/g, '')}` : '';
             const fileName = incidentStartDate && incidentEndDate
-                ? `incidentes_${incidentStartDate.replace(/-/g, '')}_${incidentEndDate.replace(/-/g, '')}_${ts}.csv`
-                : `incidentes_${ts}.csv`;
+                ? `incidentes_${incidentStartDate.replace(/-/g, '')}_${incidentEndDate.replace(/-/g, '')}${filterPart}_${ts}.csv`
+                : `incidentes${filterPart}_${ts}.csv`;
             link.setAttribute('href', url);
             link.setAttribute('download', fileName);
             link.style.visibility = 'hidden';
@@ -405,7 +423,7 @@ export default function Datos() {
                 <div className="flex justify-between items-center mb-8">
                     <h1 className="text-3xl font-bold text-gray-800 flex items-baseline gap-2">
                         Centro de Datos
-                        <span className="text-sm font-normal text-gray-500 bg-gray-200 px-2 py-0.5 rounded-full">v1.3.0</span>
+                        <span className="text-sm font-normal text-gray-500 bg-gray-200 px-2 py-0.5 rounded-full">v1.3.1</span>
                     </h1>
                     <div className="flex gap-3">
                         <button
@@ -681,7 +699,7 @@ export default function Datos() {
                         Exportar Registros de Entrada y Salida a CSV
                     </h2>
 
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end mb-2">
                         <div>
                             <label className="block text-sm font-medium text-gray-700 mb-2">
                                 <Calendar size={16} className="inline mr-1" />
@@ -706,10 +724,20 @@ export default function Datos() {
                                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                             />
                         </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Usuario o Dominio</label>
+                            <input
+                                type="text"
+                                placeholder="Filtro opcional"
+                                value={csvUserFilter}
+                                onChange={e => setCsvUserFilter(e.target.value)}
+                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            />
+                        </div>
                         <button
                             onClick={exportToCSV}
                             disabled={exporting}
-                            className="px-6 py-2 bg-green-600 text-white font-bold rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition"
+                            className="px-6 py-2 h-[42px] bg-green-600 text-white font-bold rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition"
                         >
                             <Download size={20} />
                             {exporting ? 'Exportando...' : 'Exportar CSV'}
@@ -717,8 +745,8 @@ export default function Datos() {
                     </div>
 
                     <p className="text-sm text-gray-500 mt-3">
-                        {startDate || endDate
-                            ? `Exportará registros ${startDate ? `desde ${startDate}` : ''} ${endDate ? `hasta ${endDate}` : ''}`
+                        {startDate || endDate || csvUserFilter
+                            ? `Exportará registros ${startDate ? `desde ${startDate}` : ''} ${endDate ? `hasta ${endDate}` : ''} ${csvUserFilter ? `(Contiene: ${csvUserFilter})` : ''}`
                             : 'Exportará todos los registros disponibles'}
                     </p>
 
@@ -750,7 +778,7 @@ export default function Datos() {
                         Exportar Registro de Incidentes a CSV
                     </h2>
 
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
                         <div>
                             <label className="block text-sm font-medium text-gray-700 mb-2">
                                 <Calendar size={16} className="inline mr-1" />
@@ -760,7 +788,7 @@ export default function Datos() {
                                 type="date"
                                 value={incidentStartDate}
                                 onChange={(e) => setIncidentStartDate(e.target.value)}
-                                className="w-full px-4 py-2 border border-orange-300 rounded-lg focus:ring-2 focus:ring-orange-400 focus:border-transparent"
+                                className="w-full px-4 py-2 border border-orange-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
                             />
                         </div>
                         <div>
@@ -772,13 +800,23 @@ export default function Datos() {
                                 type="date"
                                 value={incidentEndDate}
                                 onChange={(e) => setIncidentEndDate(e.target.value)}
-                                className="w-full px-4 py-2 border border-orange-300 rounded-lg focus:ring-2 focus:ring-orange-400 focus:border-transparent"
+                                className="w-full px-4 py-2 border border-orange-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Usuario o Dominio</label>
+                            <input
+                                type="text"
+                                placeholder="Filtro opcional"
+                                value={incidentCsvUserFilter}
+                                onChange={e => setIncidentCsvUserFilter(e.target.value)}
+                                className="w-full px-4 py-2 border border-orange-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
                             />
                         </div>
                         <button
                             onClick={exportIncidentsToCSV}
                             disabled={exportingIncidents}
-                            className="px-6 py-2 bg-orange-500 text-white font-bold rounded-lg hover:bg-orange-600 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition"
+                            className="px-6 py-2 h-[42px] bg-orange-600 text-white font-bold rounded-lg hover:bg-orange-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition"
                         >
                             <Download size={20} />
                             {exportingIncidents ? 'Exportando...' : 'Exportar CSV'}
@@ -786,8 +824,8 @@ export default function Datos() {
                     </div>
 
                     <p className="text-sm text-gray-500 mt-3">
-                        {incidentStartDate || incidentEndDate
-                            ? `Exportará incidentes ${incidentStartDate ? `desde ${incidentStartDate}` : ''} ${incidentEndDate ? `hasta ${incidentEndDate}` : ''}`
+                        {incidentStartDate || incidentEndDate || incidentCsvUserFilter
+                            ? `Exportará incidentes ${incidentStartDate ? `desde ${incidentStartDate}` : ''} ${incidentEndDate ? `hasta ${incidentEndDate}` : ''} ${incidentCsvUserFilter ? `(Contiene: ${incidentCsvUserFilter})` : ''}`
                             : 'Exportará todos los incidentes disponibles'}
                     </p>
                 </div>
