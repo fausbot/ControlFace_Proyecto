@@ -220,18 +220,40 @@ export const downloadPhotosAsZip = async (fileList, onProgress) => {
     const zip = new JSZip();
     let done = 0;
 
+    console.log(`📦 Iniciando empaquetado de ${fileList.length} fotos...`);
+
     for (const file of fileList) {
+        console.log(`⬇️ Descargando (${done + 1}/${fileList.length}): ${file.path}`);
         try {
-            // getBlob() es directo del SDK, no suele tener problemas de CORS
-            const blob = await getBlob(file.ref);
+            // timeout de 15 segundos por foto
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+            // Intentar getBlob() primero
+            let blob;
+            try {
+                blob = await getBlob(file.ref);
+            } catch (blobErr) {
+                console.warn(`Fallback a getDownloadURL para ${file.name} debido a:`, blobErr.message);
+                // Fallback a downloadURL + fetch (puede fallar por CORS pero es un intento extra)
+                const url = await getDownloadURL(file.ref);
+                const resp = await fetch(url, { signal: controller.signal });
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                blob = await resp.blob();
+            }
+
+            clearTimeout(timeoutId);
             zip.file(file.path, blob);
+            console.log(`✅ ${file.name} lista.`);
         } catch (err) {
-            console.warn(`⚠️ Error descargando ${file.name}:`, err);
+            console.error(`❌ Error descargando ${file.name}:`, err);
+            // alert(`No se pudo descargar una foto: ${file.name}\nError: ${err.message}`);
         }
         done++;
         if (onProgress) onProgress(done, fileList.length);
     }
 
+    console.log("🤐 Generando archivo ZIP final...");
     return await zip.generateAsync({
         type: 'blob',
         compression: 'DEFLATE',
