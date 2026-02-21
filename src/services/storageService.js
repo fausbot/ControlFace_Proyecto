@@ -225,22 +225,24 @@ export const downloadPhotosAsZip = async (fileList, onProgress) => {
     console.log(`📦 Iniciando descarga de ${fileList.length} fotos...`);
 
     const downloadOne = async (file) => {
+        const fullPath = file.ref?.fullPath || 'ruta desconocida';
         try {
+            console.log(`📡 Intentando bajar: ${fullPath}`);
             const blob = await Promise.race([
                 getBlob(file.ref),
-                new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout 20s')), 20000))
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout 60s')), 60000))
             ]);
 
             if (blob && blob.size > 0) {
                 const fileName = file.path.split('/').pop();
                 zip.file(fileName, blob);
                 addedCount++;
-                console.log(`✅ [${addedCount}] ${fileName} (${(blob.size / 1024).toFixed(1)} KB)`);
+                console.log(`✅ [${addedCount}/${fileList.length}] ${fileName} (${(blob.size / 1024).toFixed(1)} KB)`);
             } else {
-                throw new Error("Blob vacío del servidor");
+                throw new Error("Blob vacío");
             }
         } catch (err) {
-            console.error(`❌ Error en ${file.name}:`, err.message);
+            console.error(`❌ Error en ${fullPath}:`, err.message);
             if (!firstError) firstError = `${file.name}: ${err.message}`;
 
             // Fallback FETCH
@@ -252,10 +254,10 @@ export const downloadPhotosAsZip = async (fileList, onProgress) => {
                     const fileName = file.path.split('/').pop();
                     zip.file(fileName, blob);
                     addedCount++;
-                    console.log(`✅ [${addedCount}] ${fileName} (vía Fetch)`);
+                    console.log(`✅ [${addedCount}] ${fileName} (vía Fetch extra)`);
                 }
             } catch (e) {
-                console.warn(`Fallo total en ${file.name}`);
+                console.warn(`Fallo definitivo en ${file.name}`);
             }
         } finally {
             done++;
@@ -263,13 +265,15 @@ export const downloadPhotosAsZip = async (fileList, onProgress) => {
         }
     };
 
+    // Descarga en paralelo
     await Promise.all(fileList.map(item => downloadOne(item)));
 
+    console.log(`🤐 Finalizado. Fotos en ZIP: ${addedCount}/${fileList.length}`);
+
     if (addedCount === 0) {
-        throw new Error(`No se pudo descargar ninguna de las ${fileList.length} fotos. Error principal: ${firstError || 'Desconocido'}`);
+        throw new Error(`No se pudo bajar nada (0/${fileList.length}). Último error: ${firstError}`);
     }
 
-    console.log(`🤐 Comprimiendo ZIP con ${addedCount} archivos...`);
     return await zip.generateAsync({
         type: 'blob',
         compression: 'DEFLATE',
