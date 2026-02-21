@@ -250,9 +250,6 @@ export const downloadPhotosAsZip = async (fileList, onProgress) => {
             } catch (e) {
                 console.warn(`Error irrecuperable en ${fullPath}`);
             }
-        } finally {
-            done++;
-            if (onProgress) onProgress(done, fileList.length);
         }
     };
 
@@ -261,7 +258,11 @@ export const downloadPhotosAsZip = async (fileList, onProgress) => {
     for (let i = 0; i < fileList.length; i += 3) chunks.push(fileList.slice(i, i + 3));
 
     for (const chunk of chunks) {
-        await Promise.all(chunk.map(file => downloadWithRetry(file)));
+        await Promise.all(chunk.map(async file => {
+            await downloadWithRetry(file);
+            done++;
+            if (onProgress) onProgress(done, fileList.length);
+        }));
     }
 
     if (addedCount === 0) {
