@@ -127,35 +127,46 @@ export const listPhotosByFilter = async ({ tipo, desde, hasta, filtroUsuario }) 
         let storageCount = 0;
 
         // 1. Búsqueda en Firestore (Motor Principal)
-        const q = query(
-            collection(db, 'fotos'),
-            where('timestamp', '>=', Timestamp.fromDate(desde)),
-            where('timestamp', '<=', Timestamp.fromDate(hasta))
-        );
+        try {
+            const q = query(
+                collection(db, 'fotos'),
+                where('timestamp', '>=', Timestamp.fromDate(desde)),
+                where('timestamp', '<=', Timestamp.fromDate(hasta))
+            );
 
-        const snap = await getDocs(q);
-        snap.forEach(docSnap => {
-            const data = docSnap.data();
-            const emailLow = (data.email || '').toLowerCase();
-            const filtroNorm = (filtroUsuario || '').trim().toLowerCase();
+            const snap = await getDocs(q);
+            for (const docSnap of snap.docs) {
+                const data = docSnap.data();
+                const emailLow = (data.email || '').toLowerCase();
+                const filtroNorm = (filtroUsuario || '').trim().toLowerCase();
 
-            if (filtroNorm) {
-                if (filtroNorm.startsWith('@')) {
-                    if (!emailLow.endsWith(filtroNorm)) return;
-                } else if (emailLow !== filtroNorm) return;
+                if (filtroNorm) {
+                    if (filtroNorm.startsWith('@')) {
+                        if (!emailLow.endsWith(filtroNorm)) continue;
+                    } else if (emailLow !== filtroNorm) continue;
+                }
+
+                if (!resultsMap.has(data.path)) {
+                    const sRef = ref(storage, data.path);
+                    let directUrl = data.url || null;
+                    if (!directUrl) {
+                        try { directUrl = await getDownloadURL(sRef); } catch (e) { /* ignore */ }
+                    }
+
+                    resultsMap.set(data.path, {
+                        name: data.fileName || data.path.split('/').pop(),
+                        path: data.path,
+                        ref: sRef,
+                        url: directUrl,
+                        date: data.timestamp?.toDate() || new Date(),
+                        source: 'firestore'
+                    });
+                    firestoreCount++;
+                }
             }
-
-            if (!resultsMap.has(data.path)) {
-                resultsMap.set(data.path, {
-                    name: data.fileName || data.path.split('/').pop(),
-                    path: data.path,
-                    ref: ref(storage, data.path),
-                    date: data.timestamp?.toDate() || new Date(),
-                    source: 'firestore'
-                });
-                firestoreCount++;
-            }
-        });
+        } catch (err) {
+            console.warn("⚠️ Firestore restricted, using storage fallback", err.message);
+        }
 
         // 2. Búsqueda en Storage (Fallback para fotos antiguas)
         const year = String(desde.getFullYear());
@@ -175,19 +186,23 @@ export const listPhotosByFilter = async ({ tipo, desde, hasta, filtroUsuario }) 
             try {
                 const folderRef = ref(storage, prefijo);
                 const res = await listAll(folderRef);
-                res.items.forEach(item => {
-                    if (resultsMap.has(item.fullPath)) return;
-                    if (emailFilter && !item.name.toLowerCase().includes(emailFilter)) return;
+                for (const item of res.items) {
+                    if (resultsMap.has(item.fullPath)) continue;
+                    if (emailFilter && !item.name.toLowerCase().includes(emailFilter)) continue;
+
+                    let directUrl = null;
+                    try { directUrl = await getDownloadURL(item); } catch (e) { /* skip */ }
 
                     resultsMap.set(item.fullPath, {
                         name: item.name,
                         path: item.fullPath,
                         ref: item,
+                        url: directUrl,
                         date: desde,
                         source: 'storage'
                     });
                     storageCount++;
-                });
+                }
             } catch (err) { console.warn(`Error Storage ${prefijo}:`, err.message); }
         }
 

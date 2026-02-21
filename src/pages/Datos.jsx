@@ -51,6 +51,7 @@ export default function Datos() {
     const [photoSearching, setPhotoSearching] = useState(false);
     const [photoProgress, setPhotoProgress] = useState({ current: 0, total: 0 });
     const [photoMsg, setPhotoMsg] = useState('');
+    const [foundPhotos, setFoundPhotos] = useState([]); // Nueva lista de resultados
 
     const navigate = useNavigate();
     const { isAdminAuthenticated, currentUser } = useAuth();
@@ -493,11 +494,12 @@ export default function Datos() {
                                         setPhotoMsg('No se encontraron fotos con esos filtros.');
                                         return;
                                     }
-                                    setPhotoMsg(`Encontradas ${lista.length} fotos. Preparando ZIP...`);
+                                    setPhotoMsg(`Encontradas ${lista.length} fotos.`);
+                                    setFoundPhotos(lista); // Guardar para descarga directa
                                     setPhotoProgress({ current: 0, total: lista.length });
-                                    const zipBlob = await downloadPhotosAsZip(lista, (cur, tot) => {
-                                        setPhotoProgress({ current: cur, total: tot });
-                                    });
+
+                                    // OPCIONAL: Iniciar ZIP automáticamente o dejarlo manual
+                                    // Por ahora, dejamos que el usuario decida si bajar todo o uno por uno
                                     const nombre = `fotos_${photoTipo}_${photoDesde}_al_${photoHasta}${photoFiltroUser ? '_' + photoFiltroUser.replace('@', '').replace(/\./g, '-') : ''}.zip`;
                                     const url = URL.createObjectURL(zipBlob);
                                     const link = document.createElement('a');
@@ -564,11 +566,75 @@ export default function Datos() {
                     )}
 
                     {/* Mensaje */}
-                    <p className="text-sm text-gray-500 mt-1">
+                    <p className="text-sm text-gray-600 mt-2 font-medium">
                         {photoMsg || (photoDesde || photoHasta
-                            ? `Exportará fotos ${photoDesde ? `desde ${photoDesde}` : ''} ${photoHasta ? `hasta ${photoHasta}` : ''}`
-                            : 'Exportará todas las fotos disponibles en el rango seleccionado')}
+                            ? `Buscará fotos ${photoDesde ? `desde ${photoDesde}` : ''} ${photoHasta ? `hasta ${photoHasta}` : ''}`
+                            : 'Selecciona un rango para buscar fotos')}
                     </p>
+
+                    {/* Resultados de búsqueda (Descarga Directa) */}
+                    {foundPhotos.length > 0 && (
+                        <div className="mt-6 border-t border-gray-100 pt-4">
+                            <div className="flex justify-between items-center mb-4">
+                                <h3 className="font-bold text-gray-700 flex items-center gap-2">
+                                    <Image size={18} className="text-blue-500" />
+                                    Fotos encontradas ({foundPhotos.length})
+                                </h3>
+                                <button
+                                    onClick={async () => {
+                                        setPhotoSearching(true);
+                                        setPhotoMsg('Generando ZIP...');
+                                        try {
+                                            const zipBlob = await downloadPhotosAsZip(foundPhotos, (cur, tot) => {
+                                                setPhotoProgress({ current: cur, total: tot });
+                                            });
+                                            const nombre = `fotos_backup_${photoDesde}_al_${photoHasta}.zip`;
+                                            const url = URL.createObjectURL(zipBlob);
+                                            const link = document.createElement('a');
+                                            link.href = url;
+                                            link.download = nombre;
+                                            link.click();
+                                            URL.revokeObjectURL(url);
+                                            setPhotoMsg(`✅ ZIP descargado con éxito`);
+                                        } catch (e) {
+                                            setPhotoMsg('❌ Error ZIP: ' + e.message);
+                                        } finally {
+                                            setPhotoSearching(false);
+                                        }
+                                    }}
+                                    disabled={photoSearching}
+                                    className="text-xs bg-blue-50 text-blue-600 px-3 py-1.5 rounded-lg border border-blue-200 hover:bg-blue-100 font-bold flex items-center gap-1 transition"
+                                >
+                                    <Download size={14} /> Descargar todo (ZIP)
+                                </button>
+                            </div>
+
+                            <div className="max-h-60 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
+                                {foundPhotos.map((photo, idx) => (
+                                    <div key={idx} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-100 hover:border-blue-200 transition">
+                                        <div className="flex flex-col">
+                                            <span className="text-xs font-bold text-gray-700 truncate max-w-[200px] md:max-w-md">
+                                                {photo.name}
+                                            </span>
+                                            <span className="text-[10px] text-gray-500">
+                                                {photo.source === 'firestore' ? '✅ Registro OK' : '☁️ Solo Storage'} • {photo.path.split('/')[0]}
+                                            </span>
+                                        </div>
+                                        <a
+                                            href={photo.url}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            download={photo.name}
+                                            className="p-2 bg-white text-blue-600 rounded-lg border border-blue-100 hover:bg-blue-50 transition shadow-sm"
+                                            title="Descargar Foto Directa"
+                                        >
+                                            <Download size={16} />
+                                        </a>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 {/* Exportación */}
