@@ -4,7 +4,8 @@
 
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Download, Calendar, Trash2, ChevronLeft, ChevronRight, AlertTriangle, TriangleAlert } from 'lucide-react';
+import { Download, Calendar, Trash2, ChevronLeft, ChevronRight, AlertTriangle, TriangleAlert, Image, Loader2 } from 'lucide-react';
+import { listPhotosByFilter, downloadPhotosAsZip } from '../services/storageService';
 import { useAuth } from '../contexts/AuthContext';
 
 // ✅ Importamos desde los servicios, no desde firebase directamente
@@ -41,6 +42,15 @@ export default function Datos() {
     const [exportingIncidents, setExportingIncidents] = useState(false);
     const [incidentStartDate, setIncidentStartDate] = useState('');
     const [incidentEndDate, setIncidentEndDate] = useState('');
+
+    // Descargador de fotos
+    const [photoTipo, setPhotoTipo] = useState('ambos');
+    const [photoDesde, setPhotoDesde] = useState('');
+    const [photoHasta, setPhotoHasta] = useState('');
+    const [photoFiltroUser, setPhotoFiltroUser] = useState('');
+    const [photoSearching, setPhotoSearching] = useState(false);
+    const [photoProgress, setPhotoProgress] = useState({ current: 0, total: 0 });
+    const [photoMsg, setPhotoMsg] = useState('');
 
     const navigate = useNavigate();
     const { isAdminAuthenticated, currentUser } = useAuth();
@@ -541,6 +551,141 @@ export default function Datos() {
                                 Siguiente <ChevronRight size={16} />
                             </button>
                         </div>
+                    </div>
+                </div>
+
+                {/* ═══ DESCARGADOR DE FOTOS ════════════════════════════════════════ */}
+                <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+                    <div className="p-4 border-b border-gray-100 flex items-center gap-2">
+                        <Image size={18} className="text-purple-600" />
+                        <h2 className="font-bold text-gray-800">Descargar Fotos</h2>
+                        <span className="ml-auto text-xs text-gray-400">Se descarga un archivo .zip</span>
+                    </div>
+
+                    <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                        {/* Tipo */}
+                        <div className="flex flex-col gap-1">
+                            <label className="text-xs font-semibold text-gray-500 uppercase">Tipo</label>
+                            <select
+                                value={photoTipo}
+                                onChange={e => setPhotoTipo(e.target.value)}
+                                className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"
+                            >
+                                <option value="ambos">Asistencia + Incidentes</option>
+                                <option value="asistencia">Solo Asistencia</option>
+                                <option value="incidentes">Solo Incidentes</option>
+                            </select>
+                        </div>
+
+                        {/* Desde */}
+                        <div className="flex flex-col gap-1">
+                            <label className="text-xs font-semibold text-gray-500 uppercase">Desde</label>
+                            <input
+                                type="date"
+                                value={photoDesde}
+                                onChange={e => setPhotoDesde(e.target.value)}
+                                className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"
+                            />
+                        </div>
+
+                        {/* Hasta */}
+                        <div className="flex flex-col gap-1">
+                            <label className="text-xs font-semibold text-gray-500 uppercase">Hasta</label>
+                            <input
+                                type="date"
+                                value={photoHasta}
+                                onChange={e => setPhotoHasta(e.target.value)}
+                                className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"
+                            />
+                        </div>
+
+                        {/* Filtro usuario */}
+                        <div className="flex flex-col gap-1">
+                            <label className="text-xs font-semibold text-gray-500 uppercase">Usuario / Dominio</label>
+                            <input
+                                type="text"
+                                placeholder="juan@empresa.com  ó  @empresa.com"
+                                value={photoFiltroUser}
+                                onChange={e => setPhotoFiltroUser(e.target.value)}
+                                className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"
+                            />
+                        </div>
+                    </div>
+
+                    {/* Barra de progreso */}
+                    {photoSearching && photoProgress.total > 0 && (
+                        <div className="px-4 pb-2">
+                            <div className="w-full bg-gray-100 rounded-full h-2">
+                                <div
+                                    className="bg-purple-500 h-2 rounded-full transition-all"
+                                    style={{ width: `${Math.round((photoProgress.current / photoProgress.total) * 100)}%` }}
+                                />
+                            </div>
+                            <p className="text-xs text-gray-500 mt-1 text-center">
+                                Descargando {photoProgress.current} / {photoProgress.total} fotos...
+                            </p>
+                        </div>
+                    )}
+
+                    {/* Mensaje de resultado */}
+                    {photoMsg && (
+                        <p className="px-4 pb-2 text-sm text-center text-gray-600">{photoMsg}</p>
+                    )}
+
+                    {/* Botón */}
+                    <div className="px-4 pb-4">
+                        <button
+                            id="btn-descargar-fotos"
+                            disabled={photoSearching || !photoDesde || !photoHasta}
+                            onClick={async () => {
+                                if (!photoDesde || !photoHasta) {
+                                    setPhotoMsg('⚠️ Selecciona el rango de fechas.');
+                                    return;
+                                }
+                                setPhotoSearching(true);
+                                setPhotoMsg('Buscando fotos...');
+                                setPhotoProgress({ current: 0, total: 0 });
+                                try {
+                                    const desde = new Date(photoDesde + 'T00:00:00');
+                                    const hasta = new Date(photoHasta + 'T23:59:59');
+                                    const lista = await listPhotosByFilter({
+                                        tipo: photoTipo,
+                                        desde,
+                                        hasta,
+                                        filtroUsuario: photoFiltroUser,
+                                    });
+                                    if (lista.length === 0) {
+                                        setPhotoMsg('No se encontraron fotos con esos filtros.');
+                                        return;
+                                    }
+                                    setPhotoMsg(`Encontradas ${lista.length} fotos. Preparando ZIP...`);
+                                    setPhotoProgress({ current: 0, total: lista.length });
+                                    const zipBlob = await downloadPhotosAsZip(lista, (cur, tot) => {
+                                        setPhotoProgress({ current: cur, total: tot });
+                                    });
+                                    // Generar nombre del archivo
+                                    const nombre = `fotos_${photoTipo}_${photoDesde}_al_${photoHasta}${photoFiltroUser ? '_' + photoFiltroUser.replace('@', '').replace(/\./g, '-') : ''}.zip`;
+                                    const url = URL.createObjectURL(zipBlob);
+                                    const link = document.createElement('a');
+                                    link.href = url;
+                                    link.download = nombre;
+                                    link.click();
+                                    URL.revokeObjectURL(url);
+                                    setPhotoMsg(`✅ ZIP descargado: ${lista.length} fotos`);
+                                } catch (err) {
+                                    console.error(err);
+                                    setPhotoMsg('❌ Error al descargar las fotos: ' + err.message);
+                                } finally {
+                                    setPhotoSearching(false);
+                                }
+                            }}
+                            className="w-full flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold shadow transition disabled:opacity-50"
+                        >
+                            {photoSearching
+                                ? <><Loader2 size={18} className="animate-spin" /> Procesando...</>
+                                : <><Download size={18} /> Descargar fotos .zip</>
+                            }
+                        </button>
                     </div>
                 </div>
 

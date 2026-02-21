@@ -13,6 +13,7 @@
     "@vladmandic/face-api": "^1.7.15",
     "crypto-js": "^4.2.0",
     "firebase": "^12.7.0",
+    "jszip": "^3.10.1",
     "lucide-react": "^0.562.0",
     "react": "^19.2.1",
     "react-dom": "^19.2.1",

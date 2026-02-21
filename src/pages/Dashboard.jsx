@@ -8,6 +8,7 @@ import { Camera, MapPin, Search, CheckCircle, AlertCircle, LogOut, LogIn, Share2
 import { useNavigate } from 'react-router-dom';
 import AdminPasswordModal from '../components/AdminPasswordModal';
 import * as faceapi from '@vladmandic/face-api';
+import { uploadPhoto } from '../services/storageService';
 
 export default function Dashboard() {
     const { currentUser, logout } = useAuth();
@@ -713,6 +714,20 @@ export default function Dashboard() {
 
                                     const saved = await saveRecord();
                                     if (!saved) return;
+
+                                    // Subir foto a Firebase Storage (comprimida)
+                                    try {
+                                        setStatusMessage('Guardando foto...');
+                                        await uploadPhoto(
+                                            capturedData.image,
+                                            mode === 'incident' ? 'incidente' : capturedData.metadata.tipo,
+                                            capturedData.metadata.usuario,
+                                            capturedData.metadata.fecha,
+                                            capturedData.metadata.hora,
+                                        );
+                                    } catch (storageErr) {
+                                        console.error('Storage upload failed (non-blocking):', storageErr);
+                                    }
 
                                     await shareImage();
 
