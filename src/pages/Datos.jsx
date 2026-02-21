@@ -1,4 +1,4 @@
-// src/pages/Datos.jsx
+﻿// src/pages/Datos.jsx
 // Este componente ahora solo se encarga de mostrar la UI y manejar estado.
 // Toda la lógica de Firestore vive en /services.
 
@@ -554,88 +554,41 @@ export default function Datos() {
                     </div>
                 </div>
 
-                {/* ═══ DESCARGADOR DE FOTOS ════════════════════════════════════════ */}
-                <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
-                    <div className="p-4 border-b border-gray-100 flex items-center gap-2">
-                        <Image size={18} className="text-purple-600" />
-                        <h2 className="font-bold text-gray-800">Descargar Fotos</h2>
-                        <span className="ml-auto text-xs text-gray-400">Se descarga un archivo .zip</span>
-                    </div>
+                {/* Exportar Fotos */}
+                <div className="bg-white rounded-xl shadow-lg p-6 mb-6 border-l-4 border-blue-500">
+                    <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+                        <Image size={24} />
+                        Exportar Fotos de Asistencia e Incidentes
+                    </h2>
 
-                    <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                        {/* Tipo */}
-                        <div className="flex flex-col gap-1">
-                            <label className="text-xs font-semibold text-gray-500 uppercase">Tipo</label>
-                            <select
-                                value={photoTipo}
-                                onChange={e => setPhotoTipo(e.target.value)}
-                                className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"
-                            >
-                                <option value="ambos">Asistencia + Incidentes</option>
-                                <option value="asistencia">Solo Asistencia</option>
-                                <option value="incidentes">Solo Incidentes</option>
-                            </select>
-                        </div>
-
-                        {/* Desde */}
-                        <div className="flex flex-col gap-1">
-                            <label className="text-xs font-semibold text-gray-500 uppercase">Desde</label>
+                    {/* Fila 1: Fecha Inicio, Fecha Fin, Botón */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end mb-4">
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                <Calendar size={16} className="inline mr-1" />
+                                Fecha Inicio
+                            </label>
                             <input
                                 type="date"
                                 value={photoDesde}
                                 onChange={e => setPhotoDesde(e.target.value)}
-                                className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"
+                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                             />
                         </div>
-
-                        {/* Hasta */}
-                        <div className="flex flex-col gap-1">
-                            <label className="text-xs font-semibold text-gray-500 uppercase">Hasta</label>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                <Calendar size={16} className="inline mr-1" />
+                                Fecha Fin
+                            </label>
                             <input
                                 type="date"
                                 value={photoHasta}
                                 onChange={e => setPhotoHasta(e.target.value)}
-                                className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"
+                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                             />
                         </div>
-
-                        {/* Filtro usuario */}
-                        <div className="flex flex-col gap-1">
-                            <label className="text-xs font-semibold text-gray-500 uppercase">Usuario / Dominio</label>
-                            <input
-                                type="text"
-                                placeholder="juan@empresa.com  ó  @empresa.com"
-                                value={photoFiltroUser}
-                                onChange={e => setPhotoFiltroUser(e.target.value)}
-                                className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"
-                            />
-                        </div>
-                    </div>
-
-                    {/* Barra de progreso */}
-                    {photoSearching && photoProgress.total > 0 && (
-                        <div className="px-4 pb-2">
-                            <div className="w-full bg-gray-100 rounded-full h-2">
-                                <div
-                                    className="bg-purple-500 h-2 rounded-full transition-all"
-                                    style={{ width: `${Math.round((photoProgress.current / photoProgress.total) * 100)}%` }}
-                                />
-                            </div>
-                            <p className="text-xs text-gray-500 mt-1 text-center">
-                                Descargando {photoProgress.current} / {photoProgress.total} fotos...
-                            </p>
-                        </div>
-                    )}
-
-                    {/* Mensaje de resultado */}
-                    {photoMsg && (
-                        <p className="px-4 pb-2 text-sm text-center text-gray-600">{photoMsg}</p>
-                    )}
-
-                    {/* Botón */}
-                    <div className="px-4 pb-4">
                         <button
-                            id="btn-descargar-fotos"
+                            id="btn-exportar-fotos"
                             disabled={photoSearching || !photoDesde || !photoHasta}
                             onClick={async () => {
                                 if (!photoDesde || !photoHasta) {
@@ -663,7 +616,6 @@ export default function Datos() {
                                     const zipBlob = await downloadPhotosAsZip(lista, (cur, tot) => {
                                         setPhotoProgress({ current: cur, total: tot });
                                     });
-                                    // Generar nombre del archivo
                                     const nombre = `fotos_${photoTipo}_${photoDesde}_al_${photoHasta}${photoFiltroUser ? '_' + photoFiltroUser.replace('@', '').replace(/\./g, '-') : ''}.zip`;
                                     const url = URL.createObjectURL(zipBlob);
                                     const link = document.createElement('a');
@@ -674,22 +626,71 @@ export default function Datos() {
                                     setPhotoMsg(`✅ ZIP descargado: ${lista.length} fotos`);
                                 } catch (err) {
                                     console.error(err);
-                                    setPhotoMsg('❌ Error al descargar las fotos: ' + err.message);
+                                    setPhotoMsg('❌ Error: ' + err.message);
                                 } finally {
                                     setPhotoSearching(false);
                                 }
                             }}
-                            className="w-full flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold shadow transition disabled:opacity-50"
+                            className="px-6 py-2 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition"
                         >
                             {photoSearching
-                                ? <><Loader2 size={18} className="animate-spin" /> Procesando...</>
-                                : <><Download size={18} /> Descargar fotos .zip</>
+                                ? <><Loader2 size={20} className="animate-spin" /> Exportando...</>
+                                : <><Download size={20} /> Exportar Fotos</>
                             }
                         </button>
                     </div>
+
+                    {/* Fila 2: Tipo + Usuario/Dominio */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-3">
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Tipo de foto</label>
+                            <select
+                                value={photoTipo}
+                                onChange={e => setPhotoTipo(e.target.value)}
+                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            >
+                                <option value="ambos">Asistencia + Incidentes</option>
+                                <option value="asistencia">Solo Asistencia</option>
+                                <option value="incidentes">Solo Incidentes</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Usuario o Dominio</label>
+                            <input
+                                type="text"
+                                placeholder="juan@empresa.com  ó  @empresa.com"
+                                value={photoFiltroUser}
+                                onChange={e => setPhotoFiltroUser(e.target.value)}
+                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            />
+                        </div>
+                    </div>
+
+                    {/* Barra de progreso */}
+                    {photoSearching && photoProgress.total > 0 && (
+                        <div className="mt-2 mb-1">
+                            <div className="w-full bg-gray-100 rounded-full h-2">
+                                <div
+                                    className="bg-blue-500 h-2 rounded-full transition-all"
+                                    style={{ width: `${Math.round((photoProgress.current / photoProgress.total) * 100)}%` }}
+                                />
+                            </div>
+                            <p className="text-xs text-gray-500 mt-1">
+                                Descargando {photoProgress.current} / {photoProgress.total} fotos...
+                            </p>
+                        </div>
+                    )}
+
+                    {/* Mensaje */}
+                    <p className="text-sm text-gray-500 mt-1">
+                        {photoMsg || (photoDesde || photoHasta
+                            ? `Exportará fotos ${photoDesde ? `desde ${photoDesde}` : ''} ${photoHasta ? `hasta ${photoHasta}` : ''}`
+                            : 'Exportará todas las fotos disponibles en el rango seleccionado')}
+                    </p>
                 </div>
 
             </div >
         </div >
     );
 }
+
