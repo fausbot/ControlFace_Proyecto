@@ -168,16 +168,19 @@ export const listPhotosByFilter = async ({ tipo, desde, hasta, filtroUsuario }) 
             console.warn("⚠️ Firestore restricted, using storage fallback", err.message);
         }
 
-        // 2. Búsqueda en Storage (Fallback para fotos antiguas / sin registro)
+        // 2. Búsqueda en Storage (Fallback para fotos antiguas)
         const year = String(desde.getFullYear());
         const month = String(desde.getMonth() + 1).padStart(2, '0');
         const folders = [];
-        // Añadimos múltiples variantes por si acaso
-        folders.push(`asistencia/${year}/${month}`);
-        folders.push(`asistencias/${year}/${month}`);
-        folders.push(`asistencia-backup/${year}/${month}`);
+        if (tipo === 'asistencia' || tipo === 'ambos') {
+            folders.push(`asistencia/${year}/${month}`);
+            folders.push(`asistencias/${year}/${month}`);
+        }
+        if (tipo === 'incidente' || tipo === 'ambos') {
+            folders.push(`incidentes/${year}/${month}`);
+        }
 
-        const emailFilter = (filtroUsuario || '').trim().toLowerCase();
+        const emailFilter = (filtroUsuario || '').trim().toLowerCase().replace(/[@.]/g, '-');
 
         for (const prefijo of folders) {
             try {
@@ -185,14 +188,7 @@ export const listPhotosByFilter = async ({ tipo, desde, hasta, filtroUsuario }) 
                 const res = await listAll(folderRef);
                 for (const item of res.items) {
                     if (resultsMap.has(item.fullPath)) continue;
-
-                    // Filtrado más flexible en el nombre por si el email tiene puntos o guiones
-                    if (emailFilter) {
-                        const nameLow = item.name.toLowerCase();
-                        const parts = emailFilter.split('@');
-                        const userPart = parts[0].replace(/\./g, '-');
-                        if (!nameLow.includes(userPart)) continue;
-                    }
+                    if (emailFilter && !item.name.toLowerCase().includes(emailFilter)) continue;
 
                     let directUrl = null;
                     try { directUrl = await getDownloadURL(item); } catch (e) { /* skip */ }
@@ -207,7 +203,7 @@ export const listPhotosByFilter = async ({ tipo, desde, hasta, filtroUsuario }) 
                     });
                     storageCount++;
                 }
-            } catch (err) { /* Silencio si no existe la carpeta */ }
+            } catch (err) { console.warn(`Error Storage ${prefijo}:`, err.message); }
         }
 
         const finalResults = Array.from(resultsMap.values());
@@ -228,53 +224,60 @@ export const downloadPhotosAsZip = async (fileList, onProgress) => {
 
     console.log(`📦 Preparando descarga de ${fileList.length} fotos...`);
 
-    const downloadWithRetry = async (file, retries = 2) => {
+    const downloadWithRetry = async (file, retries = 1) => {
         const fullPath = file.ref?.fullPath || file.path;
         try {
-            // Intentar getBytes() (suele ser más robusto ante hangs de getBlob)
-            const buffer = await Promise.race([
-                getBytes(file.ref),
-                new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 45000))
-            ]);
+            // 1. Obtener la URL de descarga directa primero
+            const url = file.url || await getDownloadURL(file.ref);
 
-            if (buffer && buffer.byteLength > 0) {
+            // 2. Forzar la descarga mediante XMLHttpRequest (XHR) o Fetch
+            // En navegadores, XHR suele ser más estable para blobs grandes que getBytes() del SDK
+            const blob = await new Promise((resolve, reject) => {
+                const xhr = new XMLHttpRequest();
+                xhr.responseType = 'blob';
+                xhr.onload = (event) => {
+                    const blob = xhr.response;
+                    if (xhr.status === 200) {
+                        resolve(blob);
+                    } else {
+                        reject(new Error(`HTTP Error ${xhr.status} fetching blob`));
+                    }
+                };
+                xhr.onerror = () => reject(new Error('Network Error fetching blob'));
+                xhr.open('GET', url);
+                xhr.send();
+            });
+
+            if (blob && blob.size > 0) {
                 const fileName = fullPath.split('/').pop();
-                zip.file(fileName, buffer);
+                zip.file(fileName, blob);
                 addedCount++;
                 console.log(`✅ [${addedCount}] ${fileName} OK`);
             } else {
-                throw new Error("Bytes vacíos");
+                throw new Error("Blob vacío");
             }
+
         } catch (err) {
+            // Si el error es object-not-found, NO reintentamos. El archivo fue borrado.
+            if (err.code === 'storage/object-not-found' || err.message.includes('not found')) {
+                console.warn(`🛑 Archivo no existe físicamente: ${fullPath}. Saltando...`);
+                return; // Salir silenciosamente para no detener el ZIP
+            }
+
             if (retries > 0) {
                 console.warn(`🔄 Reintentando ${fullPath} (${retries} restantes)...`);
-                await new Promise(r => setTimeout(r, 2000));
+                await new Promise(r => setTimeout(r, 1000));
                 return downloadWithRetry(file, retries - 1);
             }
 
-            console.error(`❌ Falló ${fullPath}:`, err.message);
+            console.error(`❌ Falló definitivamente ${fullPath}:`, err.message);
             if (!firstError) firstError = `${fullPath}: ${err.message}`;
-
-            // Fallback desesperado: getDownloadURL + Fetch
-            try {
-                const url = await getDownloadURL(file.ref);
-                const resp = await fetch(url);
-                const blob = await resp.blob();
-                if (blob.size > 0) {
-                    const fileName = fullPath.split('/').pop();
-                    zip.file(fileName, blob);
-                    addedCount++;
-                    console.log(`✅ [${addedCount}] ${fileName} (vía URL)`);
-                }
-            } catch (e) {
-                console.warn(`Error irrecuperable en ${fullPath}`);
-            }
         }
     };
 
-    // Procesar en tandas de 3 para no saturar si hay muchas
+    // Procesar en tandas de 5 para acelerar la red sin saturarla
     const chunks = [];
-    for (let i = 0; i < fileList.length; i += 3) chunks.push(fileList.slice(i, i + 3));
+    for (let i = 0; i < fileList.length; i += 5) chunks.push(fileList.slice(i, i + 5));
 
     for (const chunk of chunks) {
         await Promise.all(chunk.map(async file => {
@@ -285,7 +288,7 @@ export const downloadPhotosAsZip = async (fileList, onProgress) => {
     }
 
     if (addedCount === 0) {
-        throw new Error(`¡Descarga fallida! 0/${fileList.length} obtenidas. Error: ${firstError}`);
+        throw new Error(`¡Descarga fallida! 0/${fileList.length} obtenidas. Revisa permisos o si los archivos existen realmente.`);
     }
 
     console.log(`🤐 Finalizado. Fotos: ${addedCount}`);
