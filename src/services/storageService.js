@@ -158,7 +158,10 @@ export const listPhotosByFilter = async ({ tipo, desde, hasta, filtroUsuario }) 
                     });
                 });
             } catch (err) {
-                console.warn(`Firestore search failed for ${prefijo}:`, err);
+                console.error(`Firestore search failed for ${prefijo}:`, err);
+                if (err.message && err.message.includes('index')) {
+                    alert(`⚠️ Firestore requiere un índice para buscar fotos. Por favor abre este link en tu navegador (logueado en Firebase Console):\n\n${err.message.split('at ')[1] || 'Revisa la consola'}`);
+                }
             }
 
             // 2. INTENTAR STORAGE listAll (Sistema antiguo / Legacy)
@@ -183,8 +186,10 @@ export const listPhotosByFilter = async ({ tipo, desde, hasta, filtroUsuario }) 
                     });
                 }
             } catch (err) {
-                // Probablemente error de CORS o carpeta inexistente
                 console.warn(`Storage listAll fallback failed for ${prefijo} (Legacy mode ignored):`, err);
+                if (err.code === 'storage/unauthorized' || err.code === 'storage/retry-limit-exceeded') {
+                    console.log('Posible error de CORS o permisos en listAll');
+                }
             }
         }
     }
