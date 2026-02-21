@@ -715,19 +715,15 @@ export default function Dashboard() {
                                     const saved = await saveRecord();
                                     if (!saved) return;
 
-                                    // Subir foto a Firebase Storage (comprimida)
-                                    try {
-                                        setStatusMessage('Guardando foto...');
-                                        await uploadPhoto(
-                                            capturedData.image,
-                                            mode === 'incident' ? 'incidente' : capturedData.metadata.tipo,
-                                            capturedData.metadata.usuario,
-                                            capturedData.metadata.fecha,
-                                            capturedData.metadata.hora,
-                                        );
-                                    } catch (storageErr) {
-                                        console.error('Storage upload failed (non-blocking):', storageErr);
-                                    }
+                                    // Subir foto a Storage en segundo plano (sin await)
+                                    // para no bloquear el selector de WhatsApp (navigator.share requiere gesto directo)
+                                    uploadPhoto(
+                                        capturedData.image,
+                                        mode === 'incident' ? 'incidente' : capturedData.metadata.tipo,
+                                        capturedData.metadata.usuario,
+                                        capturedData.metadata.fecha,
+                                        capturedData.metadata.hora,
+                                    ).catch(err => console.error('Storage upload failed:', err));
 
                                     await shareImage();
 
