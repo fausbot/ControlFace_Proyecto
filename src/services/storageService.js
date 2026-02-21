@@ -65,37 +65,45 @@ export const compressImage = (imageDataUrl) =>
 
 // ─── Subir foto + guardar metadatos en Firestore ──────────────────────────────
 export const uploadPhoto = async (imageDataUrl, tipo, email, fecha, hora) => {
-    const now = new Date();
-    const year = String(now.getFullYear());
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-
-    const blob = await compressImage(imageDataUrl);
-    const storagePath = buildPath(tipo, year, month, email, fecha, hora);
-    const storageRef = ref(storage, storagePath);
-
-    const metadata = {
-        contentType: 'image/jpeg',
-        customMetadata: { tipo, email, fecha, hora, year, month },
-    };
-
-    await uploadBytes(storageRef, blob, metadata);
-    const url = await getDownloadURL(storageRef);
-
-    // Guardar metadatos en Firestore para listado posterior rápido y sin CORS
-    const carpeta = tipo === 'incidente' ? 'incidentes' : 'asistencia';
     try {
-        await addDoc(collection(db, 'fotos'), {
-            tipo, email, fecha, hora, year, month, carpeta,
-            path: storagePath,
-            url,
-            timestamp: serverTimestamp(),
-        });
-    } catch (firestoreErr) {
-        console.warn('⚠️ No se pudo guardar metadatos en Firestore:', firestoreErr);
-    }
+        const now = new Date();
+        const year = String(now.getFullYear());
+        const month = String(now.getMonth() + 1).padStart(2, '0');
 
-    console.log(`✅ Foto subida: ${storagePath} (${Math.round(blob.size / 1024)} KB)`);
-    return url;
+        const blob = await compressImage(imageDataUrl);
+        const storagePath = buildPath(tipo, year, month, email, fecha, hora);
+        const storageRef = ref(storage, storagePath);
+
+        const metadata = {
+            contentType: 'image/jpeg',
+            customMetadata: { tipo, email, fecha, hora, year, month },
+        };
+
+        await uploadBytes(storageRef, blob, metadata);
+        const url = await getDownloadURL(storageRef);
+        console.log("Storage upload OK");
+
+        // Guardar metadatos en Firestore para listado posterior rápido y sin CORS
+        const carpeta = tipo === 'incidente' ? 'incidentes' : 'asistencia';
+        try {
+            const docRef = await addDoc(collection(db, 'fotos'), {
+                tipo, email, fecha, hora, year, month, carpeta,
+                path: storagePath,
+                url,
+                timestamp: serverTimestamp(),
+            });
+            console.log("Firestore metadata OK:", docRef.id);
+            // alert("DEBUG: Foto registrada en Firestore correctamente.");
+        } catch (firestoreErr) {
+            alert("❌ Error registrando metadatos en Firestore: " + firestoreErr.message);
+        }
+
+        console.log(`✅ Foto subida: ${storagePath} (${Math.round(blob.size / 1024)} KB)`);
+        return url;
+    } catch (err) {
+        alert("❌ Error subiendo foto a Storage: " + err.message);
+        throw err;
+    }
 };
 
 // ─── Listar fotos por filtro (Modo Híbrido: Firestore + Storage) ──────────────
@@ -130,6 +138,8 @@ export const listPhotosByFilter = async ({ tipo, desde, hasta, filtroUsuario }) 
         : null;
 
     const resultsMap = new Map(); // Usamos Map para evitar duplicados por path
+    let firestoreCount = 0;
+    let storageCount = 0;
 
     for (const { year, month } of periodos) {
         for (const carpeta of carpetas) {
@@ -150,17 +160,20 @@ export const listPhotosByFilter = async ({ tipo, desde, hasta, filtroUsuario }) 
                     if (esDominio && !emailLow.endsWith(filtroNorm)) return;
                     if (!esDominio && filtroNorm && emailLow !== filtroNorm) return;
 
-                    resultsMap.set(data.path, {
-                        name: data.path.split('/').pop(),
-                        path: data.path,
-                        ref: ref(storage, data.path),
-                        source: 'firestore'
-                    });
+                    if (!resultsMap.has(data.path)) {
+                        resultsMap.set(data.path, {
+                            name: data.path.split('/').pop(),
+                            path: data.path,
+                            ref: ref(storage, data.path),
+                            source: 'firestore'
+                        });
+                        firestoreCount++;
+                    }
                 });
             } catch (err) {
-                console.error(`Firestore search failed for ${prefijo}:`, err);
+                console.error("Firestore error:", err);
                 if (err.message && err.message.includes('index')) {
-                    alert(`⚠️ Firestore requiere un índice para buscar fotos. Por favor abre este link en tu navegador (logueado en Firebase Console):\n\n${err.message.split('at ')[1] || 'Revisa la consola'}`);
+                    alert("⚠️ Firestore requiere un índice. Link: " + err.message);
                 }
             }
 
@@ -184,9 +197,10 @@ export const listPhotosByFilter = async ({ tipo, desde, hasta, filtroUsuario }) 
                         ref: item,
                         source: 'storage'
                     });
+                    storageCount++;
                 }
             } catch (err) {
-                console.warn(`Storage listAll fallback failed for ${prefijo} (Legacy mode ignored):`, err);
+                console.warn("Storage listAll failed:", err);
                 if (err.code === 'storage/unauthorized' || err.code === 'storage/retry-limit-exceeded') {
                     console.log('Posible error de CORS o permisos en listAll');
                 }
@@ -194,6 +208,8 @@ export const listPhotosByFilter = async ({ tipo, desde, hasta, filtroUsuario }) 
         }
     }
 
+    const total = resultsMap.size;
+    // alert(`DEBUG: Encontradas ${total} fotos (Firestore: ${firestoreCount}, Storage: ${storageCount})`);
     const finalResults = Array.from(resultsMap.values());
     console.log(`🔍 Búsqueda finalizada. Encontradas ${finalResults.length} fotos.`);
     return finalResults;
