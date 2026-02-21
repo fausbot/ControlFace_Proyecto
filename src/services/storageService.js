@@ -219,29 +219,31 @@ export const listPhotosByFilter = async ({ tipo, desde, hasta, filtroUsuario }) 
 export const downloadPhotosAsZip = async (fileList, onProgress) => {
     const zip = new JSZip();
     let done = 0;
+    let addedCount = 0;
+    let firstError = null;
 
-    console.log(`📦 Iniciando descarga paralela de ${fileList.length} fotos...`);
+    console.log(`📦 Iniciando descarga de ${fileList.length} fotos...`);
 
-    // Función interna para descargar una sola foto
     const downloadOne = async (file) => {
         try {
-            // Intentar getBlob() del SDK con race para timeout
             const blob = await Promise.race([
                 getBlob(file.ref),
-                new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout SDK')), 20000))
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout 20s')), 20000))
             ]);
 
             if (blob && blob.size > 0) {
-                // Usamos solo el nombre del archivo para evitar problemas de carpetas anidadas en el ZIP
                 const fileName = file.path.split('/').pop();
                 zip.file(fileName, blob);
-                console.log(`✅ Agregado al ZIP: ${fileName} (${Math.round(blob.size / 1024)} KB)`);
+                addedCount++;
+                console.log(`✅ [${addedCount}] ${fileName} (${(blob.size / 1024).toFixed(1)} KB)`);
             } else {
-                throw new Error("Blob vacío");
+                throw new Error("Blob vacío del servidor");
             }
         } catch (err) {
-            console.error(`❌ Fallo en ${file.name}:`, err.message);
-            // Fallback sutil a fetch si getBlob falló
+            console.error(`❌ Error en ${file.name}:`, err.message);
+            if (!firstError) firstError = `${file.name}: ${err.message}`;
+
+            // Fallback FETCH
             try {
                 const url = await getDownloadURL(file.ref);
                 const resp = await fetch(url);
@@ -249,9 +251,11 @@ export const downloadPhotosAsZip = async (fileList, onProgress) => {
                 if (blob.size > 0) {
                     const fileName = file.path.split('/').pop();
                     zip.file(fileName, blob);
+                    addedCount++;
+                    console.log(`✅ [${addedCount}] ${fileName} (vía Fetch)`);
                 }
             } catch (e) {
-                console.warn("Fallo definitivo en", file.name);
+                console.warn(`Fallo total en ${file.name}`);
             }
         } finally {
             done++;
@@ -259,13 +263,16 @@ export const downloadPhotosAsZip = async (fileList, onProgress) => {
         }
     };
 
-    // Descarga paralela
     await Promise.all(fileList.map(item => downloadOne(item)));
 
-    console.log("🤐 Comprimiendo ZIP final...");
+    if (addedCount === 0) {
+        throw new Error(`No se pudo descargar ninguna de las ${fileList.length} fotos. Error principal: ${firstError || 'Desconocido'}`);
+    }
+
+    console.log(`🤐 Comprimiendo ZIP con ${addedCount} archivos...`);
     return await zip.generateAsync({
         type: 'blob',
         compression: 'DEFLATE',
-        compressionOptions: { level: 1 }, // Nivel 1 para mayor velocidad
+        compressionOptions: { level: 1 },
     });
 };

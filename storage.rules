@@ -2,7 +2,7 @@ rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
     // Solo usuarios autenticados pueden leer y escribir fotos
-    match /asistencia/{year}/{month}/{fileName} {
+    match /asistencias/{year}/{month}/{fileName} {
       allow write: if request.auth != null;
       allow read:  if request.auth != null;
     }
