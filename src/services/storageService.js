@@ -11,6 +11,7 @@ import {
     uploadBytes,
     getDownloadURL,
     getBlob,
+    getBytes,
     listAll,
 } from 'firebase/storage';
 import {
@@ -20,6 +21,7 @@ import {
     query,
     where,
     serverTimestamp,
+    Timestamp,
 } from 'firebase/firestore';
 import JSZip from 'jszip';
 
@@ -32,11 +34,14 @@ const sanitizeEmail = (email) =>
     (email || 'sin-email').replace('@', '_').replace(/\./g, '-');
 
 const buildPath = (tipo, year, month, email, fecha, hora) => {
-    const carpeta = tipo === 'incidente' ? 'incidentes' : 'asistencia';
+    // Normalizar carpeta: Entrada/Salida/asistencia van a 'asistencia'
+    const isAsistencia = tipo === 'asistencia' || tipo === 'Entrada' || tipo === 'Salida';
+    const folder = isAsistencia ? 'asistencia' : 'incidentes';
+
     const safeEmail = sanitizeEmail(email);
     const safeDate = (fecha || '').replace(/\//g, '-');
     const safeTime = (hora || '').replace(/:/g, '-').substring(0, 5);
-    return `${carpeta}/${year}/${month}/${tipo}_${safeEmail}_${safeDate}_${safeTime}.jpg`;
+    return `${folder}/${year}/${month}/${tipo}_${safeEmail}_${safeDate}_${safeTime}.jpg`;
 };
 
 // ─── Compresión Canvas ────────────────────────────────────────────────────────
@@ -83,19 +88,22 @@ export const uploadPhoto = async (imageDataUrl, tipo, email, fecha, hora) => {
         const url = await getDownloadURL(storageRef);
         console.log("Storage upload OK");
 
-        // Guardar metadatos en Firestore para listado posterior rápido y sin CORS
-        const carpeta = tipo === 'incidente' ? 'incidentes' : 'asistencia';
+        // Guardar metadatos en Firestore
+        const isAsistencia = tipo === 'asistencia' || tipo === 'Entrada' || tipo === 'Salida';
+        const carpeta = isAsistencia ? 'asistencia' : 'incidentes';
+
         try {
             const docRef = await addDoc(collection(db, 'fotos'), {
-                tipo, email, fecha, hora, year, month, carpeta,
+                tipo: isAsistencia ? 'asistencia' : 'incidente',
+                tipoOriginal: tipo,
+                email, fecha, hora, year, month, carpeta,
                 path: storagePath,
                 url,
                 timestamp: serverTimestamp(),
             });
             console.log("Firestore metadata OK:", docRef.id);
-            // alert("DEBUG: Foto registrada en Firestore correctamente.");
         } catch (firestoreErr) {
-            alert("❌ Error registrando metadatos en Firestore: " + firestoreErr.message);
+            console.error("Error registrando en Firestore:", firestoreErr);
         }
 
         console.log(`✅ Foto subida: ${storagePath} (${Math.round(blob.size / 1024)} KB)`);
@@ -112,107 +120,84 @@ export const uploadPhoto = async (imageDataUrl, tipo, email, fecha, hora) => {
  * para encontrar fotos antiguas que no tengan registro en la base de datos.
  */
 export const listPhotosByFilter = async ({ tipo, desde, hasta, filtroUsuario }) => {
-    const carpetas = tipo === 'ambos'
-        ? ['asistencia', 'incidentes']
-        : [tipo === 'incidentes' ? 'incidentes' : 'asistencia'];
+    try {
+        console.log(`🔍 Buscando fotos: ${tipo} (${desde.toLocaleDateString()} al ${hasta.toLocaleDateString()})`);
+        const resultsMap = new Map();
+        let firestoreCount = 0;
+        let storageCount = 0;
 
-    const periodos = [];
-    const cursor = new Date(desde.getFullYear(), desde.getMonth(), 1);
-    const fin = new Date(hasta.getFullYear(), hasta.getMonth(), 1);
-    while (cursor <= fin) {
-        periodos.push({
-            year: String(cursor.getFullYear()),
-            month: String(cursor.getMonth() + 1).padStart(2, '0'),
-        });
-        cursor.setMonth(cursor.getMonth() + 1);
-    }
+        // 1. Búsqueda en Firestore (Motor Principal)
+        const q = query(
+            collection(db, 'fotos'),
+            where('timestamp', '>=', Timestamp.fromDate(desde)),
+            where('timestamp', '<=', Timestamp.fromDate(hasta))
+        );
 
-    const filtroNorm = (filtroUsuario || '').trim().toLowerCase();
-    const esDominio = filtroNorm.startsWith('@');
-    // Para el caso de listAll (antiguo), necesitamos el nombre sanitizado igual que en buildPath
-    const dominioSanitized = esDominio
-        ? filtroNorm.replace('@', '_').replace(/\./g, '-')
-        : null;
-    const emailSanitized = !esDominio && filtroNorm
-        ? sanitizeEmail(filtroNorm)
-        : null;
+        const snap = await getDocs(q);
+        snap.forEach(docSnap => {
+            const data = docSnap.data();
+            const emailLow = (data.email || '').toLowerCase();
+            const filtroNorm = (filtroUsuario || '').trim().toLowerCase();
 
-    const resultsMap = new Map(); // Usamos Map para evitar duplicados por path
-    let firestoreCount = 0;
-    let storageCount = 0;
-
-    for (const { year, month } of periodos) {
-        for (const carpeta of carpetas) {
-            const prefijo = `${carpeta}/${year}/${month}`;
-
-            // 1. INTENTAR FIRESTORE (Nuevo sistema)
-            try {
-                const q = query(
-                    collection(db, 'fotos'),
-                    where('year', '==', year),
-                    where('month', '==', month),
-                    where('carpeta', '==', carpeta),
-                );
-                const snap = await getDocs(q);
-                snap.docs.forEach(docSnap => {
-                    const data = docSnap.data();
-                    const emailLow = (data.email || '').toLowerCase();
-                    if (esDominio && !emailLow.endsWith(filtroNorm)) return;
-                    if (!esDominio && filtroNorm && emailLow !== filtroNorm) return;
-
-                    if (!resultsMap.has(data.path)) {
-                        resultsMap.set(data.path, {
-                            name: data.path.split('/').pop(),
-                            path: data.path,
-                            ref: ref(storage, data.path),
-                            source: 'firestore'
-                        });
-                        firestoreCount++;
-                    }
-                });
-            } catch (err) {
-                console.error("Firestore error:", err);
-                if (err.message && err.message.includes('index')) {
-                    alert("⚠️ Firestore requiere un índice. Link: " + err.message);
-                }
+            if (filtroNorm) {
+                if (filtroNorm.startsWith('@')) {
+                    if (!emailLow.endsWith(filtroNorm)) return;
+                } else if (emailLow !== filtroNorm) return;
             }
 
-            // 2. INTENTAR STORAGE listAll (Sistema antiguo / Legacy)
-            // Esto permite encontrar fotos subidas antes del registro en Firestore.
+            if (!resultsMap.has(data.path)) {
+                resultsMap.set(data.path, {
+                    name: data.fileName || data.path.split('/').pop(),
+                    path: data.path,
+                    ref: ref(storage, data.path),
+                    date: data.timestamp?.toDate() || new Date(),
+                    source: 'firestore'
+                });
+                firestoreCount++;
+            }
+        });
+
+        // 2. Búsqueda en Storage (Fallback para fotos antiguas)
+        const year = String(desde.getFullYear());
+        const month = String(desde.getMonth() + 1).padStart(2, '0');
+        const folders = [];
+        if (tipo === 'asistencia' || tipo === 'ambos') {
+            folders.push(`asistencia/${year}/${month}`);
+            folders.push(`asistencias/${year}/${month}`);
+        }
+        if (tipo === 'incidente' || tipo === 'ambos') {
+            folders.push(`incidentes/${year}/${month}`);
+        }
+
+        const emailFilter = (filtroUsuario || '').trim().toLowerCase().replace(/[@.]/g, '-');
+
+        for (const prefijo of folders) {
             try {
                 const folderRef = ref(storage, prefijo);
-                const listaResult = await listAll(folderRef);
-
-                for (const item of listaResult.items) {
-                    if (resultsMap.has(item.fullPath)) continue; // Ya lo tenemos de Firestore
-
-                    const name = item.name.toLowerCase();
-                    // El filtrado manual es necesario para listAll
-                    if (esDominio && !name.includes(dominioSanitized)) continue;
-                    if (emailSanitized && !name.includes(emailSanitized)) continue;
+                const res = await listAll(folderRef);
+                res.items.forEach(item => {
+                    if (resultsMap.has(item.fullPath)) return;
+                    if (emailFilter && !item.name.toLowerCase().includes(emailFilter)) return;
 
                     resultsMap.set(item.fullPath, {
                         name: item.name,
                         path: item.fullPath,
                         ref: item,
+                        date: desde,
                         source: 'storage'
                     });
                     storageCount++;
-                }
-            } catch (err) {
-                console.warn("Storage listAll failed:", err);
-                if (err.code === 'storage/unauthorized' || err.code === 'storage/retry-limit-exceeded') {
-                    console.log('Posible error de CORS o permisos en listAll');
-                }
-            }
+                });
+            } catch (err) { console.warn(`Error Storage ${prefijo}:`, err.message); }
         }
-    }
 
-    const total = resultsMap.size;
-    // alert(`DEBUG: Encontradas ${total} fotos (Firestore: ${firestoreCount}, Storage: ${storageCount})`);
-    const finalResults = Array.from(resultsMap.values());
-    console.log(`🔍 Búsqueda finalizada. Encontradas ${finalResults.length} fotos.`);
-    return finalResults;
+        const finalResults = Array.from(resultsMap.values());
+        console.log(`📊 Total: ${finalResults.length} (Firestore: ${firestoreCount}, Storage: ${storageCount})`);
+        return finalResults;
+    } catch (err) {
+        console.error("❌ Error listando fotos:", err);
+        throw err;
+    }
 };
 
 // ─── Descargar fotos como ZIP ─────────────────────────────────────────────────
@@ -222,42 +207,48 @@ export const downloadPhotosAsZip = async (fileList, onProgress) => {
     let addedCount = 0;
     let firstError = null;
 
-    console.log(`📦 Iniciando descarga de ${fileList.length} fotos...`);
+    console.log(`📦 Preparando descarga de ${fileList.length} fotos...`);
 
-    const downloadOne = async (file) => {
-        const fullPath = file.ref?.fullPath || 'ruta desconocida';
+    const downloadWithRetry = async (file, retries = 2) => {
+        const fullPath = file.ref?.fullPath || file.path;
         try {
-            console.log(`📡 Intentando bajar: ${fullPath}`);
-            const blob = await Promise.race([
-                getBlob(file.ref),
-                new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout 60s')), 60000))
+            // Intentar getBytes() (suele ser más robusto ante hangs de getBlob)
+            const buffer = await Promise.race([
+                getBytes(file.ref),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 45000))
             ]);
 
-            if (blob && blob.size > 0) {
-                const fileName = file.path.split('/').pop();
-                zip.file(fileName, blob);
+            if (buffer && buffer.byteLength > 0) {
+                const fileName = fullPath.split('/').pop();
+                zip.file(fileName, buffer);
                 addedCount++;
-                console.log(`✅ [${addedCount}/${fileList.length}] ${fileName} (${(blob.size / 1024).toFixed(1)} KB)`);
+                console.log(`✅ [${addedCount}] ${fileName} OK`);
             } else {
-                throw new Error("Blob vacío");
+                throw new Error("Bytes vacíos");
             }
         } catch (err) {
-            console.error(`❌ Error en ${fullPath}:`, err.message);
-            if (!firstError) firstError = `${file.name}: ${err.message}`;
+            if (retries > 0) {
+                console.warn(`🔄 Reintentando ${fullPath} (${retries} restantes)...`);
+                await new Promise(r => setTimeout(r, 2000));
+                return downloadWithRetry(file, retries - 1);
+            }
 
-            // Fallback FETCH
+            console.error(`❌ Falló ${fullPath}:`, err.message);
+            if (!firstError) firstError = `${fullPath}: ${err.message}`;
+
+            // Fallback desesperado: getDownloadURL + Fetch
             try {
                 const url = await getDownloadURL(file.ref);
                 const resp = await fetch(url);
                 const blob = await resp.blob();
                 if (blob.size > 0) {
-                    const fileName = file.path.split('/').pop();
+                    const fileName = fullPath.split('/').pop();
                     zip.file(fileName, blob);
                     addedCount++;
-                    console.log(`✅ [${addedCount}] ${fileName} (vía Fetch extra)`);
+                    console.log(`✅ [${addedCount}] ${fileName} (vía URL)`);
                 }
             } catch (e) {
-                console.warn(`Fallo definitivo en ${file.name}`);
+                console.warn(`Error irrecuperable en ${fullPath}`);
             }
         } finally {
             done++;
@@ -265,18 +256,21 @@ export const downloadPhotosAsZip = async (fileList, onProgress) => {
         }
     };
 
-    // Descarga en paralelo
-    await Promise.all(fileList.map(item => downloadOne(item)));
+    // Procesar en tandas de 3 para no saturar si hay muchas
+    const chunks = [];
+    for (let i = 0; i < fileList.length; i += 3) chunks.push(fileList.slice(i, i + 3));
 
-    console.log(`🤐 Finalizado. Fotos en ZIP: ${addedCount}/${fileList.length}`);
-
-    if (addedCount === 0) {
-        throw new Error(`No se pudo bajar nada (0/${fileList.length}). Último error: ${firstError}`);
+    for (const chunk of chunks) {
+        await Promise.all(chunk.map(file => downloadWithRetry(file)));
     }
 
+    if (addedCount === 0) {
+        throw new Error(`¡Descarga fallida! 0/${fileList.length} obtenidas. Error: ${firstError}`);
+    }
+
+    console.log(`🤐 Finalizado. Fotos: ${addedCount}`);
     return await zip.generateAsync({
         type: 'blob',
-        compression: 'DEFLATE',
-        compressionOptions: { level: 1 },
+        compression: 'STORE', // JPGs ya están comprimidos, STORE es más rápido
     });
 };
