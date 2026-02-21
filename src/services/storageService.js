@@ -220,40 +220,44 @@ export const downloadPhotosAsZip = async (fileList, onProgress) => {
     const zip = new JSZip();
     let done = 0;
 
-    console.log(`📦 Iniciando empaquetado de ${fileList.length} fotos...`);
+    console.log(`📦 Iniciando descarga paralela de ${fileList.length} fotos...`);
 
-    for (const file of fileList) {
-        console.log(`⬇️ Descargando (${done + 1}/${fileList.length}): ${file.path}`);
+    // Función interna para descargar una sola foto con timeout y protección
+    const downloadOne = async (file) => {
         try {
-            // timeout de 15 segundos por foto
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 15000);
+            // Intentar getBlob() del SDK (más seguro contra CORS)
+            const blob = await Promise.race([
+                getBlob(file.ref),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout SDK')), 20000))
+            ]);
 
-            // Intentar getBlob() primero
-            let blob;
-            try {
-                blob = await getBlob(file.ref);
-            } catch (blobErr) {
-                console.warn(`Fallback a getDownloadURL para ${file.name} debido a:`, blobErr.message);
-                // Fallback a downloadURL + fetch (puede fallar por CORS pero es un intento extra)
-                const url = await getDownloadURL(file.ref);
-                const resp = await fetch(url, { signal: controller.signal });
-                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-                blob = await resp.blob();
-            }
-
-            clearTimeout(timeoutId);
             zip.file(file.path, blob);
-            console.log(`✅ ${file.name} lista.`);
+            console.log(`✅ Descargado: ${file.name}`);
         } catch (err) {
-            console.error(`❌ Error descargando ${file.name}:`, err);
-            // alert(`No se pudo descargar una foto: ${file.name}\nError: ${err.message}`);
+            console.error(`❌ Fallo en ${file.name}:`, err.message);
+            // Intentar un segundo método vía URL (fallback de emergencia)
+            try {
+                const url = await getDownloadURL(file.ref);
+                const resp = await fetch(url);
+                if (!resp.ok) throw new Error();
+                const blob = await resp.blob();
+                zip.file(file.path, blob);
+                console.log(`✅ Descargado (vía fallback): ${file.name}`);
+            } catch (fallbackErr) {
+                console.error(`❌ Fallo total: ${file.name}`);
+            }
+        } finally {
+            done++;
+            if (onProgress) onProgress(done, fileList.length);
         }
-        done++;
-        if (onProgress) onProgress(done, fileList.length);
-    }
+    };
 
-    console.log("🤐 Generando archivo ZIP final...");
+    // Lanzar todas las descargas al mismo tiempo
+    // Para listas muy grandes (>50) se debería usar una cola, 
+    // pero para 8-20 fotos, paralelo total es lo más rápido.
+    await Promise.all(fileList.map(item => downloadOne(item)));
+
+    console.log("🤐 Comprimiendo ZIP final...");
     return await zip.generateAsync({
         type: 'blob',
         compression: 'DEFLATE',
