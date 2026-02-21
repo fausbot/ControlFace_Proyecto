@@ -168,19 +168,16 @@ export const listPhotosByFilter = async ({ tipo, desde, hasta, filtroUsuario }) 
             console.warn("⚠️ Firestore restricted, using storage fallback", err.message);
         }
 
-        // 2. Búsqueda en Storage (Fallback para fotos antiguas)
+        // 2. Búsqueda en Storage (Fallback para fotos antiguas / sin registro)
         const year = String(desde.getFullYear());
         const month = String(desde.getMonth() + 1).padStart(2, '0');
         const folders = [];
-        if (tipo === 'asistencia' || tipo === 'ambos') {
-            folders.push(`asistencia/${year}/${month}`);
-            folders.push(`asistencias/${year}/${month}`);
-        }
-        if (tipo === 'incidente' || tipo === 'ambos') {
-            folders.push(`incidentes/${year}/${month}`);
-        }
+        // Añadimos múltiples variantes por si acaso
+        folders.push(`asistencia/${year}/${month}`);
+        folders.push(`asistencias/${year}/${month}`);
+        folders.push(`asistencia-backup/${year}/${month}`);
 
-        const emailFilter = (filtroUsuario || '').trim().toLowerCase().replace(/[@.]/g, '-');
+        const emailFilter = (filtroUsuario || '').trim().toLowerCase();
 
         for (const prefijo of folders) {
             try {
@@ -188,7 +185,14 @@ export const listPhotosByFilter = async ({ tipo, desde, hasta, filtroUsuario }) 
                 const res = await listAll(folderRef);
                 for (const item of res.items) {
                     if (resultsMap.has(item.fullPath)) continue;
-                    if (emailFilter && !item.name.toLowerCase().includes(emailFilter)) continue;
+
+                    // Filtrado más flexible en el nombre por si el email tiene puntos o guiones
+                    if (emailFilter) {
+                        const nameLow = item.name.toLowerCase();
+                        const parts = emailFilter.split('@');
+                        const userPart = parts[0].replace(/\./g, '-');
+                        if (!nameLow.includes(userPart)) continue;
+                    }
 
                     let directUrl = null;
                     try { directUrl = await getDownloadURL(item); } catch (e) { /* skip */ }
@@ -203,7 +207,7 @@ export const listPhotosByFilter = async ({ tipo, desde, hasta, filtroUsuario }) 
                     });
                     storageCount++;
                 }
-            } catch (err) { console.warn(`Error Storage ${prefijo}:`, err.message); }
+            } catch (err) { /* Silencio si no existe la carpeta */ }
         }
 
         const finalResults = Array.from(resultsMap.values());
