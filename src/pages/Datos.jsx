@@ -359,124 +359,6 @@ export default function Datos() {
                     </div>
                 </div>
 
-                {/* Exportación */}
-                <div className="bg-white rounded-xl shadow-lg p-6 mb-6 border-l-4 border-green-500">
-                    <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
-                        <Download size={24} />
-                        Exportar Registros de Entrada y Salida a CSV
-                    </h2>
-
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                                <Calendar size={16} className="inline mr-1" />
-                                Fecha Inicio
-                            </label>
-                            <input
-                                type="date"
-                                value={startDate}
-                                onChange={(e) => setStartDate(e.target.value)}
-                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                                <Calendar size={16} className="inline mr-1" />
-                                Fecha Fin
-                            </label>
-                            <input
-                                type="date"
-                                value={endDate}
-                                onChange={(e) => setEndDate(e.target.value)}
-                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            />
-                        </div>
-                        <button
-                            onClick={exportToCSV}
-                            disabled={exporting}
-                            className="px-6 py-2 bg-green-600 text-white font-bold rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition"
-                        >
-                            <Download size={20} />
-                            {exporting ? 'Exportando...' : 'Exportar CSV'}
-                        </button>
-                    </div>
-
-                    <p className="text-sm text-gray-500 mt-3">
-                        {startDate || endDate
-                            ? `Exportará registros ${startDate ? `desde ${startDate}` : ''} ${endDate ? `hasta ${endDate}` : ''}`
-                            : 'Exportará todos los registros disponibles'}
-                    </p>
-
-                    <div className="mt-8 pt-6 border-t border-red-100">
-                        <h3 className="text-red-600 font-bold flex items-center gap-2 mb-4">
-                            <AlertTriangle size={20} />
-                            Zona de Peligro: Limpieza de Base de Datos
-                        </h3>
-                        <div className="flex items-center gap-4">
-                            <p className="text-sm text-gray-600 flex-1">
-                                Borra permanentemente los registros del rango seleccionado ({startDate || '...'} - {endDate || '...'}).
-                            </p>
-                            <button
-                                onClick={handleBulkDelete}
-                                disabled={deleting || !startDate || !endDate}
-                                className="px-4 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 font-bold transition flex items-center gap-2 disabled:opacity-50"
-                            >
-                                <Trash2 size={18} />
-                                {deleting ? 'Borrando...' : 'Borrar Rango'}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-
-                {/* Exportación de Incidentes */}
-                <div className="bg-white rounded-xl shadow-lg p-6 mb-6 border-l-4 border-orange-400">
-                    <h2 className="text-xl font-bold text-orange-700 mb-4 flex items-center gap-2">
-                        <TriangleAlert size={24} />
-                        Exportar Registro de Incidentes a CSV
-                    </h2>
-
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                                <Calendar size={16} className="inline mr-1" />
-                                Fecha Inicio
-                            </label>
-                            <input
-                                type="date"
-                                value={incidentStartDate}
-                                onChange={(e) => setIncidentStartDate(e.target.value)}
-                                className="w-full px-4 py-2 border border-orange-300 rounded-lg focus:ring-2 focus:ring-orange-400 focus:border-transparent"
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                                <Calendar size={16} className="inline mr-1" />
-                                Fecha Fin
-                            </label>
-                            <input
-                                type="date"
-                                value={incidentEndDate}
-                                onChange={(e) => setIncidentEndDate(e.target.value)}
-                                className="w-full px-4 py-2 border border-orange-300 rounded-lg focus:ring-2 focus:ring-orange-400 focus:border-transparent"
-                            />
-                        </div>
-                        <button
-                            onClick={exportIncidentsToCSV}
-                            disabled={exportingIncidents}
-                            className="px-6 py-2 bg-orange-500 text-white font-bold rounded-lg hover:bg-orange-600 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition"
-                        >
-                            <Download size={20} />
-                            {exportingIncidents ? 'Exportando...' : 'Exportar CSV'}
-                        </button>
-                    </div>
-
-                    <p className="text-sm text-gray-500 mt-3">
-                        {incidentStartDate || incidentEndDate
-                            ? `Exportará incidentes ${incidentStartDate ? `desde ${incidentStartDate}` : ''} ${incidentEndDate ? `hasta ${incidentEndDate}` : ''}`
-                            : 'Exportará todos los incidentes disponibles'}
-                    </p>
-                </div>
-
                 {/* Tabla */}
                 <div className="bg-white rounded-xl shadow-lg overflow-hidden">
                     <div className="overflow-x-auto">
@@ -686,6 +568,124 @@ export default function Datos() {
                         {photoMsg || (photoDesde || photoHasta
                             ? `Exportará fotos ${photoDesde ? `desde ${photoDesde}` : ''} ${photoHasta ? `hasta ${photoHasta}` : ''}`
                             : 'Exportará todas las fotos disponibles en el rango seleccionado')}
+                    </p>
+                </div>
+
+                {/* Exportación */}
+                <div className="bg-white rounded-xl shadow-lg p-6 mb-6 border-l-4 border-green-500">
+                    <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+                        <Download size={24} />
+                        Exportar Registros de Entrada y Salida a CSV
+                    </h2>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                <Calendar size={16} className="inline mr-1" />
+                                Fecha Inicio
+                            </label>
+                            <input
+                                type="date"
+                                value={startDate}
+                                onChange={(e) => setStartDate(e.target.value)}
+                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                <Calendar size={16} className="inline mr-1" />
+                                Fecha Fin
+                            </label>
+                            <input
+                                type="date"
+                                value={endDate}
+                                onChange={(e) => setEndDate(e.target.value)}
+                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            />
+                        </div>
+                        <button
+                            onClick={exportToCSV}
+                            disabled={exporting}
+                            className="px-6 py-2 bg-green-600 text-white font-bold rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition"
+                        >
+                            <Download size={20} />
+                            {exporting ? 'Exportando...' : 'Exportar CSV'}
+                        </button>
+                    </div>
+
+                    <p className="text-sm text-gray-500 mt-3">
+                        {startDate || endDate
+                            ? `Exportará registros ${startDate ? `desde ${startDate}` : ''} ${endDate ? `hasta ${endDate}` : ''}`
+                            : 'Exportará todos los registros disponibles'}
+                    </p>
+
+                    <div className="mt-8 pt-6 border-t border-red-100">
+                        <h3 className="text-red-600 font-bold flex items-center gap-2 mb-4">
+                            <AlertTriangle size={20} />
+                            Zona de Peligro: Limpieza de Base de Datos
+                        </h3>
+                        <div className="flex items-center gap-4">
+                            <p className="text-sm text-gray-600 flex-1">
+                                Borra permanentemente los registros del rango seleccionado ({startDate || '...'} - {endDate || '...'}).
+                            </p>
+                            <button
+                                onClick={handleBulkDelete}
+                                disabled={deleting || !startDate || !endDate}
+                                className="px-4 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 font-bold transition flex items-center gap-2 disabled:opacity-50"
+                            >
+                                <Trash2 size={18} />
+                                {deleting ? 'Borrando...' : 'Borrar Rango'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Exportación de Incidentes */}
+                <div className="bg-white rounded-xl shadow-lg p-6 mb-6 border-l-4 border-orange-400">
+                    <h2 className="text-xl font-bold text-orange-700 mb-4 flex items-center gap-2">
+                        <TriangleAlert size={24} />
+                        Exportar Registro de Incidentes a CSV
+                    </h2>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                <Calendar size={16} className="inline mr-1" />
+                                Fecha Inicio
+                            </label>
+                            <input
+                                type="date"
+                                value={incidentStartDate}
+                                onChange={(e) => setIncidentStartDate(e.target.value)}
+                                className="w-full px-4 py-2 border border-orange-300 rounded-lg focus:ring-2 focus:ring-orange-400 focus:border-transparent"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                <Calendar size={16} className="inline mr-1" />
+                                Fecha Fin
+                            </label>
+                            <input
+                                type="date"
+                                value={incidentEndDate}
+                                onChange={(e) => setIncidentEndDate(e.target.value)}
+                                className="w-full px-4 py-2 border border-orange-300 rounded-lg focus:ring-2 focus:ring-orange-400 focus:border-transparent"
+                            />
+                        </div>
+                        <button
+                            onClick={exportIncidentsToCSV}
+                            disabled={exportingIncidents}
+                            className="px-6 py-2 bg-orange-500 text-white font-bold rounded-lg hover:bg-orange-600 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition"
+                        >
+                            <Download size={20} />
+                            {exportingIncidents ? 'Exportando...' : 'Exportar CSV'}
+                        </button>
+                    </div>
+
+                    <p className="text-sm text-gray-500 mt-3">
+                        {incidentStartDate || incidentEndDate
+                            ? `Exportará incidentes ${incidentStartDate ? `desde ${incidentStartDate}` : ''} ${incidentEndDate ? `hasta ${incidentEndDate}` : ''}`
+                            : 'Exportará todos los incidentes disponibles'}
                     </p>
                 </div>
 
