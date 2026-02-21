@@ -13,6 +13,7 @@ import {
     getBlob,
     getBytes,
     listAll,
+    deleteObject,
 } from 'firebase/storage';
 import {
     collection,
@@ -22,6 +23,8 @@ import {
     where,
     serverTimestamp,
     Timestamp,
+    deleteDoc,
+    doc
 } from 'firebase/firestore';
 import JSZip from 'jszip';
 
@@ -296,4 +299,65 @@ export const downloadPhotosAsZip = async (fileList, onProgress) => {
         type: 'blob',
         compression: 'STORE', // JPGs ya están comprimidos, STORE es más rápido
     });
+};
+
+// ─── Limpieza Automática de Fotos Antiguas ────────────────────────────────────
+export const cleanOldPhotos = async (retentionOpts) => {
+    // retenOpts = { asistencia: meses, incidentes: meses }
+    const { asistencia = 3, incidentes = 18 } = retentionOpts;
+
+    console.log(`🧹 Iniciando limpieza de Storage. Retención: Asistencia ${asistencia}m, Incidentes ${incidentes}m`);
+    let deletedCount = 0;
+
+    const deleteOldInFolder = async (folder, meses) => {
+        try {
+            // Calculamos fecha límite
+            const limitDate = new Date();
+            limitDate.setMonth(limitDate.getMonth() - meses);
+            // Firebase Storage no permite queries de fecha.
+            // PERO guardamos los datos en Firestore en la colección 'fotos'.
+            // Consultaremos Firestore para encontrar las fotos viejas, las borraremos de Storage y de Firestore.
+
+            const q = query(
+                collection(db, 'fotos'),
+                where("carpeta", "==", folder),
+                where("timestamp", "<", limitDate)
+            );
+
+            const snap = await getDocs(q);
+            if (snap.empty) {
+                console.log(`✨ Carpeta ${folder} está limpia.`);
+                return;
+            }
+
+            console.log(`🗑️ Encontradas ${snap.size} fotos para borrar en ${folder}...`);
+
+            // Borrar en lotes para no saturar
+            for (const docSnap of snap.docs) {
+                const data = docSnap.data();
+                try {
+                    // 1. Borrar en Storage
+                    if (data.path) {
+                        const fileRef = ref(storage, data.path);
+                        await deleteObject(fileRef).catch(err => {
+                            if (err.code !== 'storage/object-not-found') throw err;
+                        });
+                    }
+                    // 2. Borrar en Firestore
+                    await deleteDoc(doc(db, 'fotos', docSnap.id));
+                    deletedCount++;
+                } catch (err) {
+                    console.error(`Error borrando doc ${docSnap.id}:`, err.message);
+                }
+            }
+        } catch (err) {
+            console.error(`Error en ciclo de limpieza de ${folder}:`, err.message);
+        }
+    };
+
+    await deleteOldInFolder('asistencia', asistencia);
+    await deleteOldInFolder('incidentes', incidentes);
+
+    console.log(`🧹 Limpieza completada. Fotos eliminadas: ${deletedCount}`);
+    return deletedCount;
 };

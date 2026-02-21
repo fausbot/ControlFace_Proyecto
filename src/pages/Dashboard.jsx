@@ -37,6 +37,10 @@ export default function Dashboard() {
     const [showInstallBtn, setShowInstallBtn] = useState(false);
     const [isIOS, setIsIOS] = useState(false);
     const [isStandalone, setIsStandalone] = useState(false);
+    const [storageSettings, setStorageSettings] = useState({
+        storage_saveAsistencia: true,
+        storage_saveIncidentes: true
+    });
 
     useEffect(() => {
         // Detectar si ya está instalada
@@ -86,10 +90,21 @@ export default function Dashboard() {
 
     // Cleanup and Security: Logout on reload (F5)
     // Verificación de acceso y Migración perezosa
-    // Cargar modelos y descriptor del empleado
+    // Cargar modelos, descriptor del empleado y configuraciones generales
     useEffect(() => {
         const loadModelsAndData = async () => {
             try {
+                // 1. Cargar Configuración de Storage
+                const snapSettings = await getDoc(doc(db, 'settings', 'employeeFields'));
+                if (snapSettings.exists()) {
+                    const d = snapSettings.data();
+                    setStorageSettings({
+                        storage_saveAsistencia: d.storage_saveAsistencia !== false,
+                        storage_saveIncidentes: d.storage_saveIncidentes !== false
+                    });
+                }
+
+                // 2. Cargar Modelos Faciales
                 const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
                 await Promise.all([
                     faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
@@ -98,6 +113,7 @@ export default function Dashboard() {
                 ]);
                 setModelsLoaded(true);
 
+                // 3. Cargar datos del empleado actual
                 if (currentUser) {
                     const q = query(collection(db, "employees"), where("email", "==", currentUser.email));
                     const snap = await getDocs(q);
@@ -109,7 +125,7 @@ export default function Dashboard() {
                     }
                 }
             } catch (err) {
-                console.error("Error cargando modelos/datos faciales:", err);
+                console.error("Error cargando modelos/datos:", err);
             }
         };
         loadModelsAndData();
@@ -715,15 +731,23 @@ export default function Dashboard() {
                                     const saved = await saveRecord();
                                     if (!saved) return;
 
-                                    // Subir foto a Storage en segundo plano (sin await)
-                                    // para no bloquear el selector de WhatsApp (navigator.share requiere gesto directo)
-                                    uploadPhoto(
-                                        capturedData.image,
-                                        mode === 'incident' ? 'incidente' : capturedData.metadata.tipo,
-                                        capturedData.metadata.usuario,
-                                        capturedData.metadata.fecha,
-                                        capturedData.metadata.hora,
-                                    ).catch(err => console.error('Storage upload failed:', err));
+                                    // ¿Debemos guardar la foto en Storage?
+                                    const isIncidente = mode === 'incident';
+                                    const savePhoto = isIncidente ? storageSettings.storage_saveIncidentes : storageSettings.storage_saveAsistencia;
+
+                                    if (savePhoto) {
+                                        // Subir foto a Storage en segundo plano (sin await)
+                                        // para no bloquear el selector de WhatsApp (navigator.share requiere gesto directo)
+                                        uploadPhoto(
+                                            capturedData.image,
+                                            isIncidente ? 'incidente' : capturedData.metadata.tipo,
+                                            capturedData.metadata.usuario,
+                                            capturedData.metadata.fecha,
+                                            capturedData.metadata.hora,
+                                        ).catch(err => console.error('Storage upload failed:', err));
+                                    } else {
+                                        console.log('Almacenamiento de foto desactivado por configuración.');
+                                    }
 
                                     await shareImage();
 
@@ -762,7 +786,7 @@ export default function Dashboard() {
             </div>
             {/* Version Indicator */}
             <div className="p-2 text-center flex flex-col items-center gap-1 opacity-50">
-                <span className="text-[10px] text-black font-mono px-2 py-0.5 rounded">v1.1.0</span>
+                <span className="text-[10px] text-black font-mono px-2 py-0.5 rounded">v1.3.0</span>
                 <button
                     onClick={clearAppCache}
                     className="text-[9px] text-blue-600 underline decoration-blue-300 hover:text-blue-800 transition pointer-events-auto"

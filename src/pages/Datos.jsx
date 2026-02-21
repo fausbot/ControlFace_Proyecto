@@ -52,6 +52,8 @@ export default function Datos() {
     const [photoProgress, setPhotoProgress] = useState({ current: 0, total: 0 });
     const [photoMsg, setPhotoMsg] = useState('');
     const [foundPhotos, setFoundPhotos] = useState([]); // Nueva lista de resultados
+    const [cleaningStorage, setCleaningStorage] = useState(false);
+    const [storageConfig, setStorageConfig] = useState(null);
 
     const navigate = useNavigate();
     const { isAdminAuthenticated, currentUser } = useAuth();
@@ -63,8 +65,60 @@ export default function Datos() {
             return;
         }
         loadLogs();
+        loadStorageConfigAndClean();
         checkAndRestoreEmployees().catch(console.error);
     }, [isAdminAuthenticated, currentUser]);
+
+    // ─── Cargar Settings de Storage y Limpiar Automáticamente ─────────────────
+    const loadStorageConfigAndClean = async () => {
+        try {
+            const snap = await getDoc(doc(db, 'settings', 'employeeFields'));
+            let settings = { retentionAsistencia: 3, retentionIncidentes: 18, saveAsistencia: true, saveIncidentes: true };
+            if (snap.exists()) {
+                const d = snap.data();
+                settings = {
+                    retentionAsistencia: d.storage_retentionAsistencia ?? 3,
+                    retentionIncidentes: d.storage_retentionIncidentes ?? 18,
+                    saveAsistencia: d.storage_saveAsistencia !== false,
+                    saveIncidentes: d.storage_saveIncidentes !== false
+                };
+            }
+            setStorageConfig(settings);
+
+            // Ejecutar limpieza silenciosa si está encendido al menos uno
+            if (settings.saveAsistencia || settings.saveIncidentes) {
+                // Importación dinámica para evitar ciclos si storageService no está listo
+                const { cleanOldPhotos } = await import('../services/storageService');
+                cleanOldPhotos({
+                    asistencia: settings.retentionAsistencia,
+                    incidentes: settings.retentionIncidentes
+                }).then(deleted => {
+                    if (deleted > 0) console.log(`🧹 Autolimpieza borró ${deleted} fotos antiguas.`);
+                }).catch(err => console.error("Error Autolimpieza:", err));
+            }
+        } catch (err) {
+            console.error("Error cargando Storage Config en Datos:", err);
+        }
+    };
+
+    const handleManualCleanup = async () => {
+        if (!storageConfig) return;
+        if (!window.confirm(`¿Ejecutar limpieza manual de fotos más antiguas de ${storageConfig.retentionAsistencia} meses (asistencia) y ${storageConfig.retentionIncidentes} meses (incidentes)?`)) return;
+
+        setCleaningStorage(true);
+        try {
+            const { cleanOldPhotos } = await import('../services/storageService');
+            const deleted = await cleanOldPhotos({
+                asistencia: storageConfig.retentionAsistencia,
+                incidentes: storageConfig.retentionIncidentes
+            });
+            alert(`✅ Limpieza completada. Se liberó espacio de ${deleted} fotos.`);
+        } catch (err) {
+            alert('❌ Error en la limpieza: ' + err.message);
+        } finally {
+            setCleaningStorage(false);
+        }
+    };
 
     // ─── Recalcular página cuando cambia pageNumber ──────────────────────────
     useEffect(() => {
@@ -351,7 +405,7 @@ export default function Datos() {
                 <div className="flex justify-between items-center mb-8">
                     <h1 className="text-3xl font-bold text-gray-800 flex items-baseline gap-2">
                         Centro de Datos
-                        <span className="text-sm font-normal text-gray-500 bg-gray-200 px-2 py-0.5 rounded-full">v1.2.0</span>
+                        <span className="text-sm font-normal text-gray-500 bg-gray-200 px-2 py-0.5 rounded-full">v1.3.0</span>
                     </h1>
                     <div className="flex gap-3">
                         <button
@@ -441,139 +495,183 @@ export default function Datos() {
                 </div>
 
                 {/* Exportar Fotos */}
-                <div className="bg-white rounded-xl shadow-lg p-6 mb-6 border-l-4 border-blue-500">
-                    <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
-                        <Image size={24} />
-                        Exportar Fotos de Asistencia e Incidentes
-                    </h2>
-
-                    {/* Fila 1: Fecha Inicio, Fecha Fin, Botón */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end mb-4">
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                                <Calendar size={16} className="inline mr-1" />
-                                Fecha Inicio
-                            </label>
-                            <input
-                                type="date"
-                                value={photoDesde}
-                                onChange={e => setPhotoDesde(e.target.value)}
-                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                                <Calendar size={16} className="inline mr-1" />
-                                Fecha Fin
-                            </label>
-                            <input
-                                type="date"
-                                value={photoHasta}
-                                onChange={e => setPhotoHasta(e.target.value)}
-                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            />
-                        </div>
-                        <button
-                            id="btn-exportar-fotos"
-                            disabled={photoSearching || !photoDesde || !photoHasta}
-                            onClick={async () => {
-                                if (!photoDesde || !photoHasta) {
-                                    setPhotoMsg('⚠️ Selecciona el rango de fechas.');
-                                    return;
-                                }
-                                setPhotoSearching(true);
-                                setPhotoMsg('Buscando fotos...');
-                                setPhotoProgress({ current: 0, total: 0 });
-                                try {
-                                    const desde = new Date(photoDesde + 'T00:00:00');
-                                    const hasta = new Date(photoHasta + 'T23:59:59');
-                                    const lista = await listPhotosByFilter({
-                                        tipo: photoTipo,
-                                        desde,
-                                        hasta,
-                                        filtroUsuario: photoFiltroUser,
-                                    });
-                                    if (lista.length === 0) {
-                                        setPhotoMsg('No se encontraron fotos con esos filtros.');
-                                        return;
-                                    }
-                                    setPhotoMsg(`Descargando ZIP con ${lista.length} fotos...`);
-
-                                    const zipBlob = await downloadPhotosAsZip(lista, (cur, tot) => {
-                                        setPhotoProgress({ current: cur, total: tot });
-                                    });
-
-                                    const nombre = `fotos_${photoTipo}_${photoDesde}_al_${photoHasta}${photoFiltroUser ? '_' + photoFiltroUser.replace('@', '').replace(/\./g, '-') : ''}.zip`;
-                                    const url = URL.createObjectURL(zipBlob);
-                                    const link = document.createElement('a');
-                                    link.href = url;
-                                    link.download = nombre;
-                                    link.click();
-                                    URL.revokeObjectURL(url);
-                                    setPhotoMsg(`✅ ZIP descargado: ${lista.length} fotos`);
-                                } catch (err) {
-                                    console.error(err);
-                                    setPhotoMsg('❌ Error: ' + err.message);
-                                } finally {
-                                    setPhotoSearching(false);
-                                }
-                            }}
-                            className="px-6 py-2 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition"
-                        >
-                            {photoSearching
-                                ? <><Loader2 size={20} className="animate-spin" /> Exportando...</>
-                                : <><Download size={20} /> Exportar Fotos</>
-                            }
-                        </button>
-                    </div>
-
-                    {/* Fila 2: Tipo + Usuario/Dominio */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-3">
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">Tipo de foto</label>
-                            <select
-                                value={photoTipo}
-                                onChange={e => setPhotoTipo(e.target.value)}
-                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                <div className="bg-white rounded-xl shadow-lg p-6 mb-6 border-l-4 border-blue-500 relative">
+                    <div className="flex justify-between items-start mb-4">
+                        <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                            <Image size={24} />
+                            Exportar Fotos de Asistencia e Incidentes
+                        </h2>
+                        {storageConfig && (storageConfig.saveAsistencia || storageConfig.saveIncidentes) && (
+                            <button
+                                onClick={handleManualCleanup}
+                                disabled={cleaningStorage}
+                                className="text-xs bg-red-50 text-red-600 px-3 py-1.5 rounded-lg border border-red-200 hover:bg-red-100 font-bold flex items-center gap-1 transition shadow-sm"
                             >
-                                <option value="ambos">Asistencia + Incidentes</option>
-                                <option value="asistencia">Solo Asistencia</option>
-                                <option value="incidentes">Solo Incidentes</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">Usuario o Dominio</label>
-                            <input
-                                type="text"
-                                placeholder="juan@empresa.com  ó  @empresa.com"
-                                value={photoFiltroUser}
-                                onChange={e => setPhotoFiltroUser(e.target.value)}
-                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            />
-                        </div>
+                                {cleaningStorage ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                                Limpiar fotos antiguas
+                            </button>
+                        )}
                     </div>
 
-                    {/* Barra de progreso */}
-                    {photoSearching && photoProgress.total > 0 && (
-                        <div className="mt-2 mb-1">
-                            <div className="w-full bg-gray-100 rounded-full h-2">
-                                <div
-                                    className="bg-blue-500 h-2 rounded-full transition-all"
-                                    style={{ width: `${Math.round((photoProgress.current / photoProgress.total) * 100)}%` }}
-                                />
-                            </div>
-                            <p className="text-xs text-gray-500 mt-1">
-                                Descargando {photoProgress.current} / {photoProgress.total} fotos...
-                            </p>
-                        </div>
-                    )}
+                    {!storageConfig ? (
+                        <div className="flex justify-center p-4"><Loader2 size={24} className="animate-spin text-blue-500" /></div>
+                    ) : (
+                        <>
+                            {(!storageConfig.saveAsistencia && !storageConfig.saveIncidentes) ? (
+                                <div className="p-4 bg-gray-50 border-2 border-dashed border-gray-300 rounded-xl text-center">
+                                    <p className="text-gray-500 font-bold mb-1">El almacenamiento de fotos está desactivado.</p>
+                                    <p className="text-xs text-gray-400">Actívalo en la pestaña de Configuración para poder guardar y descargar fotos.</p>
+                                </div>
+                            ) : (
+                                <>
+                                    {/* Mostrar qué está desactivado si solo es uno */}
+                                    {(!storageConfig.saveAsistencia || !storageConfig.saveIncidentes) && (
+                                        <div className="mb-4 bg-yellow-50 text-yellow-800 p-3 rounded-lg border border-yellow-200 text-sm flex gap-2 items-center">
+                                            <AlertTriangle size={18} className="shrink-0" />
+                                            <span>
+                                                El guardado de fotos de <strong>{!storageConfig.saveAsistencia ? 'Asistencia' : 'Incidentes'}</strong> está desactivado.
+                                                Solo podrás descargar las de <strong>{storageConfig.saveAsistencia ? 'Asistencia' : 'Incidentes'}</strong>.
+                                            </span>
+                                        </div>
+                                    )}
 
-                    {/* Mensaje */}
-                    <p className="text-sm text-gray-600 mt-2 font-medium">
-                        {photoMsg || (photoDesde || photoHasta
-                            ? `Buscará fotos ${photoDesde ? `desde ${photoDesde}` : ''} ${photoHasta ? `hasta ${photoHasta}` : ''}`
-                            : 'Selecciona un rango para buscar fotos')}
-                    </p>
+                                    {/* Fila 1: Fecha Inicio, Fecha Fin, Botón */}
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end mb-4">
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                                <Calendar size={16} className="inline mr-1" />
+                                                Fecha Inicio
+                                            </label>
+                                            <input
+                                                type="date"
+                                                value={photoDesde}
+                                                onChange={e => setPhotoDesde(e.target.value)}
+                                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                                <Calendar size={16} className="inline mr-1" />
+                                                Fecha Fin
+                                            </label>
+                                            <input
+                                                type="date"
+                                                value={photoHasta}
+                                                onChange={e => setPhotoHasta(e.target.value)}
+                                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                            />
+                                        </div>
+                                        <button
+                                            id="btn-exportar-fotos"
+                                            disabled={photoSearching || !photoDesde || !photoHasta || (photoTipo === 'asistencia' && !storageConfig.saveAsistencia) || (photoTipo === 'incidentes' && !storageConfig.saveIncidentes)}
+                                            onClick={async () => {
+                                                if (!photoDesde || !photoHasta) {
+                                                    setPhotoMsg('⚠️ Selecciona el rango de fechas.');
+                                                    return;
+                                                }
+                                                setPhotoSearching(true);
+                                                setPhotoMsg('Buscando fotos...');
+                                                setPhotoProgress({ current: 0, total: 0 });
+                                                try {
+                                                    const desde = new Date(photoDesde + 'T00:00:00');
+                                                    const hasta = new Date(photoHasta + 'T23:59:59');
+                                                    const lista = await listPhotosByFilter({
+                                                        tipo: photoTipo,
+                                                        desde,
+                                                        hasta,
+                                                        filtroUsuario: photoFiltroUser,
+                                                    });
+                                                    if (lista.length === 0) {
+                                                        setPhotoMsg('No se encontraron fotos con esos filtros.');
+                                                        return;
+                                                    }
+                                                    setPhotoMsg(`Descargando ZIP con ${lista.length} fotos...`);
+
+                                                    const zipBlob = await downloadPhotosAsZip(lista, (cur, tot) => {
+                                                        setPhotoProgress({ current: cur, total: tot });
+                                                    });
+
+                                                    const nombre = `fotos_${photoTipo}_${photoDesde}_al_${photoHasta}${photoFiltroUser ? '_' + photoFiltroUser.replace('@', '').replace(/\./g, '-') : ''}.zip`;
+                                                    const url = URL.createObjectURL(zipBlob);
+                                                    const link = document.createElement('a');
+                                                    link.href = url;
+                                                    link.download = nombre;
+                                                    link.click();
+                                                    URL.revokeObjectURL(url);
+                                                    setPhotoMsg(`✅ ZIP descargado: ${lista.length} fotos`);
+                                                } catch (err) {
+                                                    console.error(err);
+                                                    setPhotoMsg('❌ Error: ' + err.message);
+                                                } finally {
+                                                    setPhotoSearching(false);
+                                                }
+                                            }}
+                                            className="px-6 py-2 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition"
+                                        >
+                                            {photoSearching
+                                                ? <><Loader2 size={20} className="animate-spin" /> Exportando...</>
+                                                : <><Download size={20} /> Exportar Fotos</>
+                                            }
+                                        </button>
+                                    </div>
+
+                                    {/* Fila 2: Tipo + Usuario/Dominio */}
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-3">
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-2">Tipo de foto</label>
+                                            <select
+                                                value={photoTipo}
+                                                onChange={e => {
+                                                    // Evitar seleccionar un tipo desactivado si es posible
+                                                    const val = e.target.value;
+                                                    if (val === 'asistencia' && !storageConfig.saveAsistencia) return;
+                                                    if (val === 'incidentes' && !storageConfig.saveIncidentes) return;
+                                                    setPhotoTipo(val);
+                                                }}
+                                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                            >
+                                                {(storageConfig.saveAsistencia && storageConfig.saveIncidentes) && <option value="ambos">Asistencia + Incidentes</option>}
+                                                {storageConfig.saveAsistencia && <option value="asistencia">Solo Asistencia</option>}
+                                                {storageConfig.saveIncidentes && <option value="incidentes">Solo Incidentes</option>}
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-2">Usuario o Dominio</label>
+                                            <input
+                                                type="text"
+                                                placeholder="juan@empresa.com  ó  @empresa.com"
+                                                value={photoFiltroUser}
+                                                onChange={e => setPhotoFiltroUser(e.target.value)}
+                                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    {/* Barra de progreso */}
+                                    {photoSearching && photoProgress.total > 0 && (
+                                        <div className="mt-2 mb-1">
+                                            <div className="w-full bg-gray-100 rounded-full h-2">
+                                                <div
+                                                    className="bg-blue-500 h-2 rounded-full transition-all"
+                                                    style={{ width: `${Math.round((photoProgress.current / photoProgress.total) * 100)}%` }}
+                                                />
+                                            </div>
+                                            <p className="text-xs text-gray-500 mt-1">
+                                                Descargando {photoProgress.current} / {photoProgress.total} fotos...
+                                            </p>
+                                        </div>
+                                    )}
+
+                                    {/* Mensaje */}
+                                    <p className="text-sm text-gray-600 mt-2 font-medium">
+                                        {photoMsg || (photoDesde || photoHasta
+                                            ? `Buscará fotos ${photoDesde ? `desde ${photoDesde}` : ''} ${photoHasta ? `hasta ${photoHasta}` : ''}`
+                                            : 'Selecciona un rango para buscar fotos')}
+                                    </p>
+                                </>
+                            )}
+                        </>
+                    )}
                 </div>
 
                 {/* Exportación */}
