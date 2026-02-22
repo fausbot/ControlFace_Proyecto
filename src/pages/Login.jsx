@@ -201,7 +201,7 @@ export default function Login() {
             </div>
 
             <div className="fixed bottom-4 left-0 right-0 flex flex-col items-center gap-1 opacity-90 px-4">
-                <span className="text-[10px] text-white font-mono bg-red-600 px-2 py-0.5 rounded shadow-lg animate-pulse">Versión: 1.1.0</span>
+                <span className="text-[10px] text-white font-mono bg-red-600 px-2 py-0.5 rounded shadow-lg animate-pulse">Versión: {import.meta.env.VITE_APP_VERSION || '1.3.1'}</span>
                 <button
                     onClick={clearAppCache}
                     className="text-[9px] text-white underline decoration-white/30 hover:text-white/80 transition"

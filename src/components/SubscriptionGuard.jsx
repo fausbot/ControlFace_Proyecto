@@ -1,6 +1,6 @@
 // src/components/SubscriptionGuard.jsx
 import React, { useEffect, useState } from 'react';
-import { checkLicenseStatus } from '../services/licenseService';
+import { fetchLicenseStatus } from '../services/licenseService';
 
 export default function SubscriptionGuard({ children }) {
     const [status, setStatus] = useState('checking'); // 'checking', 'valid', 'invalid'
@@ -8,47 +8,37 @@ export default function SubscriptionGuard({ children }) {
 
     useEffect(() => {
         const verify = async () => {
-            const result = await checkLicenseStatus();
-            if (result.valid) {
-                setStatus('valid');
-            } else {
+            try {
+                const result = await fetchLicenseStatus();
+                // Validamos si hay token decodificado, si es válido y no expirado.
+                if (result && result.decoded && result.decoded.isValid && !result.decoded.isExpired) {
+                    setStatus('valid');
+                } else if (result.decoded && result.decoded.isExpired) {
+                    setStatus('invalid');
+                    setMessage(`Su licencia expiró el ${result.decoded.expirationDate}. Contacte a ${result.decoded.providerName}.`);
+                } else {
+                    setStatus('invalid');
+                    setMessage("Sistema sin licencia o código corrupto. Active una licencia en Configuración.");
+                }
+            } catch (error) {
                 setStatus('invalid');
-                setMessage(result.message || "Contacte al administrador.");
+                setMessage("Servicio de validación inalcanzable.");
             }
         };
         verify();
     }, []);
 
-    if (status === 'checking') {
-        return (
-            <div className="min-h-screen flex items-center justify-center bg-gray-100">
-                <div className="text-center">
-                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-                    <p className="text-gray-600">Verificando sistema...</p>
+    return (
+        <React.Fragment>
+            {status === 'invalid' && (
+                <div className="bg-red-600 text-white text-center py-3 px-4 font-bold shadow-md z-50 relative w-full text-sm flex items-center justify-center gap-4">
+                    <span>⚠️ AVISO DE LICENCIA: {message}</span>
+                    <a href="/configuracion" className="px-3 py-1 bg-white text-red-600 rounded-full hover:bg-gray-100 transition shadow hover:shadow-md text-xs">
+                        Activar Licencia
+                    </a>
                 </div>
-            </div>
-        );
-    }
-
-    if (status === 'invalid') {
-        return (
-            <div className="min-h-screen flex items-center justify-center bg-red-50 p-4">
-                <div className="bg-white p-8 rounded-2xl shadow-xl max-w-md w-full text-center border-l-4 border-red-500">
-                    <div className="text-red-500 mb-4">
-                        <svg className="w-16 h-16 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                        </svg>
-                    </div>
-                    <h1 className="text-2xl font-bold text-gray-800 mb-2">Acceso Bloqueado</h1>
-                    <p className="text-gray-600 mb-6">{message}</p>
-                    <div className="bg-gray-100 p-4 rounded text-sm text-gray-500">
-                        <p>ID de Soporte: ERR-LIC-001</p>
-                        <p>Por favor contacte a su proveedor de software para renovar su suscripción.</p>
-                    </div>
-                </div>
-            </div>
-        );
-    }
-
-    return children;
+            )}
+            {children}
+        </React.Fragment>
+    );
 }

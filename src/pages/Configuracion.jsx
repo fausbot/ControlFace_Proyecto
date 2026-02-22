@@ -5,6 +5,7 @@ import { Settings, Lock, Save, CheckSquare, Square, Loader2 } from 'lucide-react
 import { useAuth } from '../contexts/AuthContext';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
+import { fetchLicenseStatus, applyNewLicenseToken } from '../services/licenseService';
 
 // ─── Definición de todos los campos configurables ────────────────────────────
 const FIELD_GROUPS = [
@@ -56,6 +57,10 @@ export default function Configuracion() {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [savedOk, setSavedOk] = useState(false);
+    const [licenseStatus, setLicenseStatus] = useState(null);
+    const [licenseInput, setLicenseInput] = useState('');
+    const [savingLicense, setSavingLicense] = useState(false);
+    const [licenseError, setLicenseError] = useState('');
     const navigate = useNavigate();
     const { isAdminAuthenticated } = useAuth();
 
@@ -77,6 +82,11 @@ export default function Configuracion() {
                 // Primer uso: inicializamos la BD con los defaults
                 await setDoc(doc(db, 'settings', 'employeeFields'), DEFAULT_CONFIG);
             }
+
+            // Cargar estado de la Licencia
+            const licData = await fetchLicenseStatus();
+            setLicenseStatus(licData);
+
         } catch (err) {
             console.error('Error cargando configuración:', err);
         } finally {
@@ -106,6 +116,22 @@ export default function Configuracion() {
             alert('Error al guardar. Inténtalo de nuevo.');
         } finally {
             setSaving(false);
+        }
+    };
+
+    const handleUpdateLicense = async () => {
+        if (!licenseInput.trim()) return;
+        setSavingLicense(true);
+        setLicenseError('');
+        try {
+            const result = await applyNewLicenseToken(licenseInput);
+            setLicenseStatus({ rawToken: licenseInput, decoded: result });
+            setLicenseInput('');
+            alert("Licencia actualizada exitosamente.");
+        } catch (error) {
+            setLicenseError(error.message || "Token inválido.");
+        } finally {
+            setSavingLicense(false);
         }
     };
 
@@ -140,6 +166,53 @@ export default function Configuracion() {
                         >
                             Volver
                         </button>
+                    </div>
+                </div>
+
+                {/* ─── GESTIÓN DE LICENCIA ─── */}
+                <div className="bg-white rounded-xl shadow-lg p-6 mb-6 border-l-4 border-indigo-500">
+                    <h2 className="text-xl font-bold text-indigo-800 mb-2">Estado de la Licencia</h2>
+                    <p className="text-sm text-gray-600 mb-4">
+                        Información de su plan contratado y método para actualizar la suscripción.
+                    </p>
+
+                    {licenseStatus && licenseStatus.decoded ? (
+                        <div className={`p-4 rounded-xl border mb-4 text-sm ${licenseStatus.decoded.isExpired ? 'bg-red-50 border-red-200 text-red-800' : 'bg-emerald-50 border-emerald-200 text-emerald-800'}`}>
+                            {licenseStatus.decoded.isExpired && <p className="font-bold text-red-600 mb-2 flex items-center gap-2">⚠️ SU LICENCIA HA EXPIRADO</p>}
+                            <div className="grid grid-cols-2 gap-2">
+                                <div><b className="opacity-70">Límite contratado:</b> {licenseStatus.decoded.maxEmployees} <span className="text-xs opacity-60">(+{licenseStatus.decoded.bufferPercentage}% de cortesía)</span></div>
+                                <div><b className="opacity-70">Válida hasta:</b> {licenseStatus.decoded.expirationDate}</div>
+                                <div className="col-span-2 mt-2 pt-2 border-t border-black border-opacity-10">
+                                    <b className="opacity-70">Proveedor de Software:</b> {licenseStatus.decoded.providerName} <br />
+                                    <b className="opacity-70">Contacto (Soporte/Renovación):</b> {licenseStatus.decoded.providerPhone}
+                                </div>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="p-4 bg-yellow-50 text-yellow-800 rounded-xl border border-yellow-200 mb-4 text-sm">
+                            ⚠️ No hay una licencia válida o el código está corrupto. Contacte a su proveedor.
+                        </div>
+                    )}
+
+                    <div className="mt-4">
+                        <label className="block text-xs font-bold text-indigo-800 opacity-80 mb-1">Cargar nuevo código de licencia</label>
+                        <div className="flex gap-2">
+                            <input
+                                type="text"
+                                value={licenseInput}
+                                onChange={(e) => setLicenseInput(e.target.value)}
+                                placeholder="Pegue el código cifrado aquí..."
+                                className="flex-1 px-3 py-2 border border-indigo-200 rounded-lg focus:ring-2 focus:ring-indigo-500 font-mono text-xs"
+                            />
+                            <button
+                                onClick={handleUpdateLicense}
+                                disabled={savingLicense || !licenseInput}
+                                className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition text-sm font-bold flex items-center gap-2"
+                            >
+                                {savingLicense ? <Loader2 size={16} className="animate-spin" /> : 'Activar Código'}
+                            </button>
+                        </div>
+                        {licenseError && <p className="text-red-500 text-xs mt-1">{licenseError}</p>}
                     </div>
                 </div>
 

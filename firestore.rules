@@ -21,6 +21,12 @@ service cloud.firestore {
       allow write: if request.auth != null;  // Escritura solo para autenticados
     }
     
+    // Empleados: Lectura solo autenticados, ESCRITURA PROHIBIDA (Solo lo hace el Backend/Cloud Functions)
+    match /employees/{id} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+    
     // Resto de documentos requieren autenticación
     match /{document=**} {
       allow read, write: if request.auth != null;

@@ -5,6 +5,7 @@ import { collection, addDoc, serverTimestamp, getDocs, query, where, doc, getDoc
 import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { httpsCallable } from 'firebase/functions';
 import { auth, db, functions } from '../firebaseConfig';
+import { fetchLicenseStatus } from '../services/licenseService';
 import DeleteEmployeeModal from '../components/DeleteEmployeeModal';
 import { Trash2, UserPlus, LogOut, FileText, Loader2, Camera, UserCheck } from 'lucide-react';
 import * as faceapi from '@vladmandic/face-api';
@@ -62,26 +63,39 @@ export default function Register() {
     // ─── Estado campos opcionales dinámicos ───────────────────────────────────
     const [fieldConfig, setFieldConfig] = useState({});        // qué campos están activos
     const [extraFields, setExtraFields] = useState({});        // valores de los campos activos
-    const [configLoading, setConfigLoading] = useState(true);  // esperando Firestore
+    // ─── Estado de la Licencia ────────────────────────────────────────────────
+    const [licenseInfo, setLicenseInfo] = useState(null);
+    const [employeeCount, setEmployeeCount] = useState(0);
 
     const navigate = useNavigate();
     const { isAdminAuthenticated } = useAuth();
 
-    // ─── Cargar configuración de campos desde Firestore ───────────────────────
+    // ─── Cargar configuración de campos y estado de Licencia ─────────────────
     useEffect(() => {
-        const loadFieldConfig = async () => {
+        const loadInitialData = async () => {
             try {
                 const snap = await getDoc(doc(db, 'settings', 'employeeFields'));
                 if (snap.exists()) {
                     setFieldConfig(snap.data());
                 }
+
+                // Cargar Licencia y contar empleados actuales (Auth)
+                const lic = await fetchLicenseStatus();
+                setLicenseInfo(lic);
+
+                const getUsersListFn = httpsCallable(functions, 'getUsersList');
+                const result = await getUsersListFn();
+                if (result.data && result.data.users) {
+                    setEmployeeCount(result.data.users.length);
+                }
+
             } catch (err) {
-                console.warn('No se pudo cargar config de campos:', err);
+                console.warn('Error cargando iniciales:', err);
             } finally {
                 setConfigLoading(false);
             }
         };
-        loadFieldConfig();
+        loadInitialData();
     }, []);
 
     // ─── Cargar modelos de reconocimiento facial ──────────────────────────────
@@ -166,6 +180,12 @@ export default function Register() {
     // ─── Submit ───────────────────────────────────────────────────────────────
     const handleSubmit = async (e) => {
         e.preventDefault();
+
+        // --- Validación local del Token Licencia ---
+        if (!licenseInfo?.decoded?.isValid) return setError("Licencia no encontrada o corrupta. Revise Configuraciones.");
+        if (licenseInfo.decoded.isExpired) return setError(`Licencia expirada. Contacte a ${licenseInfo.decoded.providerName}.`);
+        if (employeeCount >= licenseInfo.decoded.absoluteMaxEmployees) return setError(`Límite bloqueado (${employeeCount}/${licenseInfo.decoded.absoluteMaxEmployees}). Comuníquese con el administrador para ampliar el plan.`);
+
         if (password !== confirmPassword) return setError('Las contraseñas no coinciden');
         if (!faceDescriptor) return setError('Debes capturar el rostro del empleado antes de crear la cuenta.');
 
@@ -175,8 +195,6 @@ export default function Register() {
             let emailToUse = email.includes('@') ? email : `${email}@usuario.com`;
             emailToUse = emailToUse.toLowerCase().trim();
 
-            await createUserWithEmailAndPassword(auth, emailToUse, password);
-
             // Construir objeto con campos opcionales activos
             const optionalData = {};
             FIELD_DEFS.forEach(({ key }) => {
@@ -185,51 +203,41 @@ export default function Register() {
                 }
             });
 
-            await addDoc(collection(db, 'employees'), {
+            // Reemplazo: Delegamos la creación al "Policía" del Back-End (Cloud Function)
+            // para que valide los cupos de la licencia antes de tocar Authentication
+            const createEmployeeSecureFn = httpsCallable(functions, 'createEmployeeSecure');
+            const result = await createEmployeeSecureFn({
                 email: emailToUse,
+                password: password,
                 firstName: firstName.trim(),
                 lastName: lastName.trim(),
-                fechaCreacion: serverTimestamp(),
-                faceDescriptor,
-                ...optionalData,
+                faceDescriptor: faceDescriptor,
+                extraFields: optionalData
             });
 
-            alert('Usuario creado exitosamente.');
-            setEmail(''); setFirstName(''); setLastName('');
-            setPassword(''); setConfirmPassword('');
-            setFaceDescriptor(null);
-            setExtraFields({});
+            if (result.data && result.data.success) {
+                alert('Usuario creado exitosamente.');
+                setEmail(''); setFirstName(''); setLastName('');
+                setPassword(''); setConfirmPassword('');
+                setFaceDescriptor(null);
+                setExtraFields({});
+                setEmployeeCount(prev => prev + 1); // Aumentar en UI
+            } else {
+                setError('Error desconocido al crear la cuenta.');
+            }
+
         } catch (err) {
             console.error(err);
-            if (err.code === 'auth/email-already-in-use') {
-                try {
-                    let emailToUse = email.includes('@') ? email : `${email}@usuario.com`;
-                    emailToUse = emailToUse.toLowerCase().trim();
-                    const q = query(collection(db, 'employees'), where('email', '==', emailToUse));
-                    const snap = await getDocs(q);
-                    if (snap.empty) {
-                        await addDoc(collection(db, 'employees'), {
-                            email: emailToUse,
-                            firstName: firstName.trim(),
-                            lastName: lastName.trim(),
-                            fechaCreacion: serverTimestamp(),
-                        });
-                        const qQueue = query(collection(db, 'deletionQueue'), where('email', '==', emailToUse));
-                        const snapQueue = await getDocs(qQueue);
-                        const { deleteDoc: del, doc: fDoc } = await import('firebase/firestore');
-                        snapQueue.forEach(async (d) => { await del(d.ref); });
-                        alert('Usuario re-vinculado correctamente.');
-                        setEmail(''); setPassword(''); setConfirmPassword('');
-                    } else {
-                        setError('Este usuario ya existe y ya está en la lista de gestión.');
-                    }
-                } catch (linkErr) {
-                    setError('El usuario ya existe, pero hubo un error al sincronizarlo: ' + linkErr.message);
-                }
-            } else if (err.code === 'auth/weak-password') {
-                setError('La contraseña debe tener al menos 6 caracteres.');
+            // Capturar errores amigables lanzados por la Cloud Function
+            if (err.code === 'functions/resource-exhausted') {
+                setError(err.message || "Límite absoluto de empleados alcanzado. Licencia Agotada.");
+            } else if (err.code === 'functions/permission-denied') {
+                setError(err.message || "Licencia corrupta o caducada. Verifique Configuraciones.");
+            } else if (err.code === 'functions/already-exists') {
+                setError('Este correo ya pertenece a otro usuario registrado.');
             } else {
-                setError('Error al crear cuenta: ' + err.message);
+                // Posibles errores de Auth o validaciones
+                setError('Error al crear cuenta: ' + (err.message || err));
             }
         }
         setLoading(false);
@@ -331,6 +339,12 @@ export default function Register() {
 
     const hasOptionalFields = Object.keys(activeGroups).length > 0;
 
+    // ─── Banderas de Bloqueo por Licencia ────────────────────────────────────
+    const isLicenseExpired = licenseInfo?.decoded?.isExpired;
+    const isWarningZone = licenseInfo?.decoded && (employeeCount >= licenseInfo.decoded.maxEmployees) && (employeeCount < licenseInfo.decoded.absoluteMaxEmployees);
+    const isLicenseFull = licenseInfo?.decoded && (employeeCount >= licenseInfo.decoded.absoluteMaxEmployees);
+    const blockCreation = isLicenseExpired || isLicenseFull || !licenseInfo?.decoded?.isValid;
+
     // ─── Render ───────────────────────────────────────────────────────────────
     return (
         <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-green-500 to-teal-600 p-4">
@@ -341,6 +355,32 @@ export default function Register() {
                     </div>
                 </div>
                 <h2 className="text-3xl font-bold text-center mb-6 text-gray-800">Registrar Nuevo Empleado</h2>
+
+                {/* Panel Informativo Licencia */}
+                {licenseInfo?.decoded && (
+                    <div className={`mb-6 p-4 rounded-xl border text-sm text-center ${blockCreation ? 'bg-red-50 border-red-200 text-red-800' : isWarningZone ? 'bg-orange-50 border-orange-200 text-orange-800' : 'bg-emerald-50 border-emerald-200 text-emerald-800'}`}>
+                        {isLicenseExpired ? (
+                            <p className="font-bold">❌ Su licencia venció el {licenseInfo.decoded.expirationDate}</p>
+                        ) : isLicenseFull ? (
+                            <p className="font-bold">❌ Ha alcanzado el límite absoluto de su plan ({employeeCount} / {licenseInfo.decoded.absoluteMaxEmployees} empleados, incluyendo el margen de cortesía).</p>
+                        ) : isWarningZone ? (
+                            <p className="font-bold">⚠️ Ha superado su límite contratado ({employeeCount}/{licenseInfo.decoded.maxEmployees}). Se encuentra en su margen de cortesía. Quedan {licenseInfo.decoded.absoluteMaxEmployees - employeeCount} cupos antes del bloqueo total.</p>
+                        ) : (
+                            <p className="font-medium">Plan activo: Capacidad {employeeCount} / {licenseInfo.decoded.maxEmployees} empleados.</p>
+                        )}
+                        {(blockCreation || isWarningZone) && (
+                            <p className="text-xs mt-2 opacity-80">Contacte a <b>{licenseInfo.decoded.providerName}</b> al {licenseInfo.decoded.providerPhone} para ampliar su suscripción.</p>
+                        )}
+                    </div>
+                )}
+
+                {!licenseInfo?.decoded?.isValid && !configLoading && (
+                    <div className="mb-6 p-4 rounded-xl border bg-yellow-50 border-yellow-200 text-yellow-800 text-sm text-center">
+                        <p className="font-bold">⚠️ Sistema sin Licencia</p>
+                        <p className="text-xs mt-1">Por favor copie el token activador en la sección Configuración.</p>
+                    </div>
+                )}
+
                 {error && <div className="bg-red-100 text-red-700 p-3 rounded mb-4">{error}</div>}
 
                 <div className="space-y-4">
@@ -446,9 +486,9 @@ export default function Register() {
                         )}
                     </div>
 
-                    <button onClick={handleSubmit} disabled={loading}
-                        className="w-full flex justify-center py-3 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition duration-150">
-                        {loading ? 'Creando...' : 'Crear Cuenta'}
+                    <button onClick={handleSubmit} disabled={loading || blockCreation}
+                        className="w-full flex justify-center py-3 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition duration-150 disabled:opacity-50 disabled:cursor-not-allowed">
+                        {loading ? 'Creando...' : blockCreation ? 'Registro Bloqueado por Licencia' : 'Crear Cuenta'}
                     </button>
 
                     <div className="grid grid-cols-2 gap-3 mt-4">

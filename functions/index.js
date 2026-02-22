@@ -1,6 +1,7 @@
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const bcrypt = require("bcrypt");
+const CryptoJS = require("crypto-js");
 
 admin.initializeApp();
 
@@ -287,5 +288,103 @@ exports.changeAdminPassword = functions.https.onCall(async (data, context) => {
             "internal",
             "Error interno al cambiar la contraseña."
         );
+    }
+});
+
+/**
+ * Función protegida para crear empleados validando el Token de Licencia.
+ * Evita que un cliente cree usuarios superando su límite contratado.
+ */
+exports.createEmployeeSecure = functions.https.onCall(async (data, context) => {
+    // 1. Autorización: Opcional, asegurar que sea admin
+    if (!context.auth) {
+        throw new functions.https.HttpsError("unauthenticated", "Debe iniciar sesión primero.");
+    }
+
+    const { email, password, firstName, lastName, faceDescriptor, extraFields } = data;
+    if (!email || !password || !faceDescriptor) {
+        throw new functions.https.HttpsError("invalid-argument", "Faltan datos obligatorios (Email, Contraseña o Rostro).");
+    }
+
+    try {
+        const db = admin.firestore();
+
+        // 2. Leer la licencia actual
+        const licenseSnap = await db.collection("settings").doc("license").get();
+        if (!licenseSnap.exists || !licenseSnap.data().token) {
+            throw new functions.https.HttpsError("permission-denied", "No hay una licencia instalada en el sistema.");
+        }
+
+        const rawToken = licenseSnap.data().token;
+        const SECRET_KEY = process.env.VITE_LICENSE_SECRET || "ZAPATO_ROJO_MASTER_KEY_2026";
+
+        // 3. Desencriptar Token
+        let decoded = null;
+        try {
+            const bytes = CryptoJS.AES.decrypt(rawToken, SECRET_KEY);
+            const decryptedString = bytes.toString(CryptoJS.enc.Utf8);
+            decoded = JSON.parse(decryptedString);
+        } catch (err) {
+            throw new functions.https.HttpsError("permission-denied", "El token de licencia está corrupto o es inválido.");
+        }
+
+        if (!decoded || !decoded.maxEmployees || !decoded.expirationDate) {
+            throw new functions.https.HttpsError("permission-denied", "El token no tiene un formato válido.");
+        }
+
+        // 4. Validar Fecha de Expiración
+        const today = new Date();
+        const expiration = new Date(decoded.expirationDate);
+        if (today > expiration) {
+            throw new functions.https.HttpsError("permission-denied", `Su licencia expiró el ${decoded.expirationDate}. Contacte a ${decoded.providerName}.`);
+        }
+
+        // 5. Contar Empleados Actuales
+        const listUsersResult = await admin.auth().listUsers(1000);
+        const currentCount = listUsersResult.users.length;
+
+        // 6. Validar Límite con Gabela (Buffer)
+        const maxEmp = parseInt(decoded.maxEmployees, 10);
+        const bufferPct = parseInt(decoded.bufferPercentage || 0, 10);
+        const absoluteMax = maxEmp + Math.ceil(maxEmp * (bufferPct / 100));
+
+        if (currentCount >= absoluteMax) {
+            throw new functions.https.HttpsError("resource-exhausted", `Límite absoluto de ${absoluteMax} alcanzado (Contrato: ${maxEmp} + ${bufferPct}% de cortesía). Contacte a ${decoded.providerName}.`);
+        }
+
+        // 7. FLUJO DE CREACIÓN - Límite Aprobado
+        // A. Crear usuario en Auth
+        const userRecord = await admin.auth().createUser({
+            email: email.toLowerCase().trim(),
+            password: password,
+            displayName: `${firstName} ${lastName}`.trim()
+        });
+
+        // B. Guardar en Firestore
+        await db.collection("employees").add({
+            email: userRecord.email,
+            firstName: firstName.trim(),
+            lastName: lastName.trim(),
+            fechaCreacion: admin.firestore.FieldValue.serverTimestamp(),
+            faceDescriptor: faceDescriptor,
+            ...(extraFields || {})
+        });
+
+        return { success: true, uid: userRecord.uid, message: "Empleado creado exitosamente." };
+
+    } catch (error) {
+        console.error("Error en createEmployeeSecure:", error);
+
+        // Si el usuario ya existe en Auth, lanzamos el error amigable
+        if (error.code === 'auth/email-already-exists') {
+            throw new functions.https.HttpsError("already-exists", "El correo ya está registrado.");
+        }
+
+        // Re-lanzar los errores controlados de Firebase Functions
+        if (error instanceof functions.https.HttpsError) {
+            throw error;
+        }
+
+        throw new functions.https.HttpsError("internal", "Logica de creación fallida: " + error.message);
     }
 });

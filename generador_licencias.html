@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Generador de Licencias - Faustino Software</title>
+    <!-- Importamos CryptoJS para encriptar en formato AES -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f0f2f5;
+            display: flex;
+            justify-content: center;
+            padding-top: 50px;
+        }
+
+        .card {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+            width: 100%;
+            max-width: 500px;
+        }
+
+        h2 {
+            color: #1e3a8a;
+            margin-top: 0;
+            text-align: center;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            font-weight: bold;
+            margin-bottom: 8px;
+            color: #4b5563;
+            font-size: 14px;
+        }
+
+        input {
+            padding: 10px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            width: 100%;
+            box-sizing: border-box;
+            font-size: 16px;
+        }
+
+        .secret-box {
+            background: #fee2e2;
+            border: 1px solid #ef4444;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 25px;
+        }
+
+        .secret-box label {
+            color: #991b1b;
+        }
+
+        button {
+            background-color: #2563eb;
+            color: white;
+            border: none;
+            padding: 12px;
+            width: 100%;
+            border-radius: 6px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.3s;
+            font-size: 16px;
+        }
+
+        button:hover {
+            background-color: #1d4ed8;
+        }
+
+        .result-box {
+            margin-top: 20px;
+            display: none;
+        }
+
+        textarea.result {
+            width: 100%;
+            height: 120px;
+            padding: 10px;
+            font-family: monospace;
+            border: 2px dashed #10b981;
+            border-radius: 6px;
+            background: #ecfdf5;
+            box-sizing: border-box;
+            resize: none;
+            word-break: break-all;
+            margin-top: 10px;
+        }
+
+        .copy-btn {
+            background: #10b981;
+            margin-top: 10px;
+        }
+
+        .copy-btn:hover {
+            background: #059669;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="card">
+        <h2>Generador de Licencias</h2>
+
+        <div class="secret-box">
+            <label>🔑 Clave Secreta Maestra (Debe coincidir con la app):</label>
+            <input type="password" id="secretKey" value="ZAPATO_ROJO_MASTER_KEY_2026">
+            <p style="font-size: 11px; color:#ef4444; margin-top:5px; margin-bottom:0;">No cambiar esta clave a menos
+                que se cambie también en el .env del sistema.</p>
+        </div>
+
+        <div class="form-group">
+            <label>Límite de Empleados Permitidos:</label>
+            <input type="number" id="maxEmployees" value="50">
+        </div>
+
+        <div class="form-group">
+            <label>Margen de Cortesía (% extra antes de bloqueo real):</label>
+            <input type="number" id="bufferPercentage" value="10">
+        </div>
+
+        <div class="form-group">
+            <label>Fecha de Vencimiento de la App:</label>
+            <input type="date" id="expirationDate" value="2027-12-31">
+        </div>
+
+        <div class="form-group">
+            <label>Mensaje de Bloqueo (Nombre Empresa):</label>
+            <input type="text" id="providerName" value="Faustino Software">
+        </div>
+
+        <div class="form-group">
+            <label>Teléfono de Soporte (Ej: WhatsApp):</label>
+            <input type="text" id="providerPhone" value="+57 315 805 9309">
+        </div>
+
+        <button onclick="generarToken()">Generar Token Cifrado</button>
+
+        <div class="result-box" id="resultContainer">
+            <label style="color: #047857;">✅ Token Generado Exitosamente. Cópialo y envíaselo al cliente:</label>
+            <textarea id="tokenOutput" class="result" readonly></textarea>
+            <button class="copy-btn" onclick="copiarToken()">Copiar al Portapapeles</button>
+        </div>
+    </div>
+
+    <script>
+        function generarToken() {
+            // 1. Recolectar datos
+            const secretKey = document.getElementById('secretKey').value;
+            const payload = {
+                maxEmployees: parseInt(document.getElementById('maxEmployees').value, 10),
+                bufferPercentage: parseInt(document.getElementById('bufferPercentage').value, 10) || 0,
+                expirationDate: document.getElementById('expirationDate').value,
+                providerName: document.getElementById('providerName').value,
+                providerPhone: document.getElementById('providerPhone').value,
+                issueDate: new Date().toISOString() // Fecha de hoy para auditoría
+            };
+
+            // 2. Convertir JSON a String
+            const jsonString = JSON.stringify(payload);
+
+            // 3. Encriptar usando AES (Algoritmo seguro)
+            const encrypted = CryptoJS.AES.encrypt(jsonString, secretKey).toString();
+
+            // 4. Mostrar en pantalla
+            const output = document.getElementById('tokenOutput');
+            output.value = encrypted;
+            document.getElementById('resultContainer').style.display = 'block';
+        }
+
+        function copiarToken() {
+            const output = document.getElementById('tokenOutput');
+            output.select();
+            document.execCommand('copy');
+            alert("¡Token copiado al portapapeles! Listo para enviar por WhatsApp.");
+        }
+    </script>
+
+</body>
+
+</html>

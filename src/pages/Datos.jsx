@@ -58,6 +58,7 @@ export default function Datos() {
     const [foundPhotos, setFoundPhotos] = useState([]); // Nueva lista de resultados
     const [cleaningStorage, setCleaningStorage] = useState(false);
     const [storageConfig, setStorageConfig] = useState(null);
+    const [employeesMap, setEmployeesMap] = useState({});
 
     const navigate = useNavigate();
     const { isAdminAuthenticated, currentUser } = useAuth();
@@ -135,6 +136,9 @@ export default function Datos() {
     const loadLogs = async () => {
         setLoading(true);
         try {
+            const map = await getEmployeesMap();
+            setEmployeesMap(map);
+
             const all = await getAllAttendanceLogs(); // ← servicio, no Firestore directo
             setAllLogs(all);
             const { data, hasMore: more } = paginateLogs(all, 1, PAGE_SIZE);
@@ -423,7 +427,7 @@ export default function Datos() {
                 <div className="flex justify-between items-center mb-8">
                     <h1 className="text-3xl font-bold text-gray-800 flex items-baseline gap-2">
                         Centro de Datos
-                        <span className="text-sm font-normal text-gray-500 bg-gray-200 px-2 py-0.5 rounded-full">v1.3.1</span>
+                        <span className="text-sm font-normal text-gray-500 bg-gray-200 px-2 py-0.5 rounded-full">v{import.meta.env.VITE_APP_VERSION || '1.3.1'}</span>
                     </h1>
                     <div className="flex gap-3">
                         <button
@@ -441,6 +445,7 @@ export default function Datos() {
                         <table className="w-full text-left">
                             <thead className="bg-gray-100 border-b border-gray-200">
                                 <tr>
+                                    <th className="p-4 font-semibold text-gray-600">Nombre y Apellido</th>
                                     <th className="p-4 font-semibold text-gray-600">Usuario</th>
                                     <th className="p-4 font-semibold text-gray-600">Tipo</th>
                                     <th className="p-4 font-semibold text-gray-600">Fecha</th>
@@ -451,31 +456,42 @@ export default function Datos() {
                             </thead>
                             <tbody className="divide-y divide-gray-100">
                                 {loading ? (
-                                    <tr><td colSpan="6" className="p-8 text-center">Cargando registros...</td></tr>
-                                ) : logs.map((log) => (
-                                    <tr key={log.id} className="hover:bg-gray-50 transition">
-                                        <td className="p-4 font-medium text-gray-900">{log.usuario}</td>
-                                        <td className="p-4">
-                                            <span className={`px-2 py-1 rounded text-xs font-bold ${log.tipo === 'Entrada' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                                                {log.tipo}
-                                            </span>
-                                        </td>
-                                        <td className="p-4 text-gray-600">{log.fecha}</td>
-                                        <td className="p-4 text-gray-600">{log.hora}</td>
-                                        <td className="p-4 text-gray-500 text-sm">{log.localidad}</td>
-                                        <td className="p-4 text-center">
-                                            <button
-                                                onClick={() => handleDelete(log.id)}
-                                                className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition"
-                                                title="Eliminar Registro"
-                                            >
-                                                <Trash2 size={18} />
-                                            </button>
-                                        </td>
-                                    </tr>
-                                ))}
+                                    <tr><td colSpan="7" className="p-8 text-center">Cargando registros...</td></tr>
+                                ) : logs.map((log) => {
+                                    const emp = employeesMap[log.usuario] || { firstName: '-', lastName: '' };
+                                    return (
+                                        <tr key={log.id} className="hover:bg-gray-50 transition">
+                                            <td className="p-4 font-bold text-gray-900">{emp.firstName} {emp.lastName}</td>
+                                            <td className="p-4 font-medium text-gray-600">{log.usuario}</td>
+                                            <td className="p-4">
+                                                <span className={`px-2 py-1 rounded text-xs font-bold ${log.tipo === 'Entrada' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                                    {log.tipo}
+                                                </span>
+                                            </td>
+                                            <td className="p-4 text-gray-600">{log.fecha}</td>
+                                            <td className="p-4 text-gray-600">{log.hora}</td>
+                                            <td className="p-4 text-gray-500 text-sm">
+                                                <div
+                                                    className="overflow-hidden whitespace-nowrap overflow-ellipsis resize-x min-w-[120px] max-w-[300px] border-b border-dashed border-gray-300 pb-1"
+                                                    title={log.localidad}
+                                                >
+                                                    {log.localidad}
+                                                </div>
+                                            </td>
+                                            <td className="p-4 text-center">
+                                                <button
+                                                    onClick={() => handleDelete(log.id)}
+                                                    className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition"
+                                                    title="Eliminar Registro"
+                                                >
+                                                    <Trash2 size={18} />
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    )
+                                })}
                                 {logs.length === 0 && !loading && (
-                                    <tr><td colSpan="6" className="p-8 text-center text-gray-500">No hay registros aún.</td></tr>
+                                    <tr><td colSpan="7" className="p-8 text-center text-gray-500">No hay registros aún.</td></tr>
                                 )}
                             </tbody>
                         </table>
