@@ -149,6 +149,12 @@ export const listPhotosByFilter = async ({ tipo, desde, hasta, filtroUsuario }) 
                     } else if (emailLow !== filtroNorm) continue;
                 }
 
+                if (tipo !== 'ambos') {
+                    // Si el usuario pide solo asistencia y la foto es un incidente (o viceversa), saltarla.
+                    // NOTA: en uploadPhoto se guarda doc.tipo como 'asistencia' o 'incidente'.
+                    if (data.tipo !== tipo && data.carpeta !== tipo) continue;
+                }
+
                 if (!resultsMap.has(data.path)) {
                     const sRef = ref(storage, data.path);
                     let directUrl = data.url || null;
@@ -157,6 +163,7 @@ export const listPhotosByFilter = async ({ tipo, desde, hasta, filtroUsuario }) 
                     }
 
                     resultsMap.set(data.path, {
+                        id: docSnap.id,
                         name: data.fileName || data.path.split('/').pop(),
                         path: data.path,
                         ref: sRef,
@@ -172,26 +179,53 @@ export const listPhotosByFilter = async ({ tipo, desde, hasta, filtroUsuario }) 
         }
 
         // 2. Búsqueda en Storage (Fallback para fotos antiguas)
-        const year = String(desde.getFullYear());
-        const month = String(desde.getMonth() + 1).padStart(2, '0');
-        const folders = [];
-        if (tipo === 'asistencia' || tipo === 'ambos') {
-            folders.push(`asistencia/${year}/${month}`);
-            folders.push(`asistencias/${year}/${month}`);
-        }
-        if (tipo === 'incidente' || tipo === 'ambos') {
-            folders.push(`incidentes/${year}/${month}`);
+        const foldersToSearch = [];
+        const startMonth = new Date(desde.getFullYear(), desde.getMonth(), 1);
+        const endMonth = new Date(hasta.getFullYear(), hasta.getMonth(), 1);
+        let currentMonth = new Date(startMonth);
+
+        while (currentMonth <= endMonth) {
+            const year = String(currentMonth.getFullYear());
+            const month = String(currentMonth.getMonth() + 1).padStart(2, '0');
+            if (tipo === 'asistencia' || tipo === 'ambos') {
+                foldersToSearch.push(`asistencia/${year}/${month}`);
+                foldersToSearch.push(`asistencias/${year}/${month}`);
+            }
+            if (tipo === 'incidente' || tipo === 'ambos') {
+                foldersToSearch.push(`incidentes/${year}/${month}`);
+            }
+            currentMonth.setMonth(currentMonth.getMonth() + 1);
         }
 
         const emailFilter = (filtroUsuario || '').trim().toLowerCase().replace(/[@.]/g, '-');
 
-        for (const prefijo of folders) {
+        for (const prefijo of foldersToSearch) {
             try {
                 const folderRef = ref(storage, prefijo);
                 const res = await listAll(folderRef);
                 for (const item of res.items) {
                     if (resultsMap.has(item.fullPath)) continue;
                     if (emailFilter && !item.name.toLowerCase().includes(emailFilter)) continue;
+
+                    let fileDate = desde;
+                    try {
+                        // Formato: Entrada_email_21-2-2026_16-02.jpg
+                        const nameWithoutExt = item.name.split('.')[0];
+                        const parts = nameWithoutExt.split('_');
+                        if (parts.length >= 4) {
+                            const timePart = parts[parts.length - 1]; // "16-02"
+                            const datePart = parts[parts.length - 2]; // "21-2-2026"
+                            const [day, m, yStr] = datePart.split('-');
+                            const [hour, minute] = timePart.split('-');
+                            fileDate = new Date(parseInt(yStr), parseInt(m) - 1, parseInt(day), parseInt(hour), parseInt(minute));
+                        }
+                    } catch (e) {
+                        // Si falla el parseo, asumimos que está en rango por estar en la carpeta
+                    }
+
+                    if (fileDate < desde || fileDate > hasta) {
+                        continue;
+                    }
 
                     let directUrl = null;
                     try { directUrl = await getDownloadURL(item); } catch (e) { /* skip */ }
@@ -201,7 +235,7 @@ export const listPhotosByFilter = async ({ tipo, desde, hasta, filtroUsuario }) 
                         path: item.fullPath,
                         ref: item,
                         url: directUrl,
-                        date: desde,
+                        date: fileDate,
                         source: 'storage'
                     });
                     storageCount++;
@@ -261,9 +295,22 @@ export const downloadPhotosAsZip = async (fileList, onProgress) => {
             }
 
         } catch (err) {
-            // Si el error es object-not-found, NO reintentamos. El archivo fue borrado.
-            if (err.code === 'storage/object-not-found' || err.message.includes('not found')) {
-                console.warn(`🛑 Archivo no existe físicamente: ${fullPath}. Saltando...`);
+            // Si el error es object-not-found, 404 o 403, NO reintentamos. El archivo fue borrado.
+            const isNotFound = err.code === 'storage/object-not-found' ||
+                err.message.includes('not found') ||
+                err.message.includes('404') ||
+                err.message.includes('403');
+
+            if (isNotFound) {
+                console.warn(`🛑 Archivo no existe físicamente: ${fullPath} (borrado manual). Saltando...`);
+                if (file.id) {
+                    try {
+                        console.log(`🧹 Auto-limpiando registro huérfano en Firestore: ${file.id}`);
+                        await deleteDoc(doc(db, 'fotos', file.id));
+                    } catch (e) {
+                        console.warn("No se pudo limpiar registro huérfano:", e.message);
+                    }
+                }
                 return; // Salir silenciosamente para no detener el ZIP
             }
 
@@ -294,11 +341,13 @@ export const downloadPhotosAsZip = async (fileList, onProgress) => {
         throw new Error(`¡Descarga fallida! 0/${fileList.length} obtenidas. Revisa permisos o si los archivos existen realmente.`);
     }
 
-    console.log(`🤐 Finalizado. Fotos: ${addedCount}`);
-    return await zip.generateAsync({
+    console.log(`🤐 Finalizado. Fotos empaquetadas: ${addedCount}`);
+    const generatedZipBlob = await zip.generateAsync({
         type: 'blob',
         compression: 'STORE', // JPGs ya están comprimidos, STORE es más rápido
     });
+
+    return { zipBlob: generatedZipBlob, addedCount };
 };
 
 // ─── Limpieza Automática de Fotos Antiguas ────────────────────────────────────

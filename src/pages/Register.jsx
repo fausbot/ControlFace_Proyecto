@@ -6,8 +6,7 @@ import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { httpsCallable } from 'firebase/functions';
 import { auth, db, functions } from '../firebaseConfig';
 import { fetchLicenseStatus } from '../services/licenseService';
-import DeleteEmployeeModal from '../components/DeleteEmployeeModal';
-import { Trash2, UserPlus, LogOut, FileText, Loader2, Camera, UserCheck } from 'lucide-react';
+import { UserPlus, LogOut, Loader2, Camera, UserCheck } from 'lucide-react';
 import * as faceapi from '@vladmandic/face-api';
 
 // ─── Definición de campos opcionales (igual que en Configuracion.jsx) ─────────
@@ -49,9 +48,6 @@ export default function Register() {
     const [confirmPassword, setConfirmPassword] = useState('');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
-    const [exporting, setExporting] = useState(false);
-    const [filterEmail, setFilterEmail] = useState('');
-    const [showDeleteModal, setShowDeleteModal] = useState(false);
     const [faceDescriptor, setFaceDescriptor] = useState(null);
     const [isCameraOpen, setIsCameraOpen] = useState(false);
     const [modelsLoaded, setModelsLoaded] = useState(false);
@@ -59,6 +55,7 @@ export default function Register() {
     const videoRef = React.useRef(null);
     const canvasRef = React.useRef(null);
     const streamRef = React.useRef(null);
+    const [configLoading, setConfigLoading] = useState(true);
 
     // ─── Estado campos opcionales dinámicos ───────────────────────────────────
     const [fieldConfig, setFieldConfig] = useState({});        // qué campos están activos
@@ -68,7 +65,7 @@ export default function Register() {
     const [employeeCount, setEmployeeCount] = useState(0);
 
     const navigate = useNavigate();
-    const { isAdminAuthenticated } = useAuth();
+    const { adminAccess } = useAuth();
 
     // ─── Cargar configuración de campos y estado de Licencia ─────────────────
     useEffect(() => {
@@ -84,9 +81,13 @@ export default function Register() {
                 setLicenseInfo(lic);
 
                 const getUsersListFn = httpsCallable(functions, 'getUsersList');
-                const result = await getUsersListFn();
-                if (result.data && result.data.users) {
-                    setEmployeeCount(result.data.users.length);
+                try {
+                    const result = await getUsersListFn();
+                    if (result.data && result.data.users) {
+                        setEmployeeCount(result.data.users.length);
+                    }
+                } catch (fnErr) {
+                    console.error("Error al obtener la lista de usuarios:", fnErr);
                 }
 
             } catch (err) {
@@ -124,8 +125,8 @@ export default function Register() {
     }, []);
 
     useEffect(() => {
-        if (!isAdminAuthenticated) navigate('/login');
-    }, [isAdminAuthenticated, navigate]);
+        if (!adminAccess['/registro']) navigate('/login');
+    }, [adminAccess, navigate]);
 
     // ─── Cámara ───────────────────────────────────────────────────────────────
     const startCamera = async () => {
@@ -241,88 +242,6 @@ export default function Register() {
             }
         }
         setLoading(false);
-    };
-
-    // ─── Exportar empleados ───────────────────────────────────────────────────
-    const exportEmployeesToCSV = async () => {
-        setExporting(true);
-        try {
-            // 1. Obtener usuarios de Firebase Auth
-            const getUsersListFn = httpsCallable(functions, 'getUsersList');
-            const result = await getUsersListFn();
-            let authUsers = result.data.users;
-            if (!authUsers || authUsers.length === 0) { alert('No hay empleados para exportar.'); return; }
-
-            // 2. Filtrar por email si se especificó uno
-            if (filterEmail.trim()) {
-                const needle = filterEmail.trim().toLowerCase();
-                authUsers = authUsers.filter(emp =>
-                    (emp.email || '').toLowerCase().includes(needle)
-                );
-                if (authUsers.length === 0) {
-                    alert(`No se encontró ningún empleado con el correo "${filterEmail.trim()}".`);
-                    return;
-                }
-            }
-
-            // 3. Obtener datos adicionales de Firestore (nombre, apellido y campos opcionales)
-            const fsSnap = await getDocs(collection(db, 'employees'));
-            const fsMap = {};
-            fsSnap.forEach(d => {
-                const data = d.data();
-                if (data.email) fsMap[data.email.toLowerCase()] = data;
-            });
-
-            // 4. Determinar qué campos opcionales tienen datos en al menos un empleado
-            const activeOptionalKeys = FIELD_DEFS
-                .filter(({ key }) => authUsers.some(u => {
-                    const fs = fsMap[(u.email || '').toLowerCase()];
-                    return fs && fs[key] !== undefined && fs[key] !== '';
-                }))
-                .map(({ key, label }) => ({ key, label }));
-
-            // 5. Construir cabecera dinámica
-            const headers = [
-                'Email/ID', 'Nombres', 'Apellidos',
-                'Fecha de Creacion', 'Ultimo Acceso', 'UID',
-                ...activeOptionalKeys.map(f => f.label),
-            ];
-
-            // 6. Construir filas
-            const escape = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-            const csvRows = [headers.join(',')];
-            authUsers.forEach(emp => {
-                const fs = fsMap[(emp.email || '').toLowerCase()] || {};
-                const created = emp.creationTime ? new Date(emp.creationTime).toLocaleString('es-ES') : 'N/A';
-                const lastLogin = emp.lastSignInTime ? new Date(emp.lastSignInTime).toLocaleString('es-ES') : 'N/A';
-                const row = [
-                    escape(emp.email),
-                    escape(fs.firstName || ''),
-                    escape(fs.lastName || ''),
-                    escape(created),
-                    escape(lastLogin),
-                    escape(emp.uid),
-                    ...activeOptionalKeys.map(({ key }) => escape(fs[key] || '')),
-                ];
-                csvRows.push(row.join(','));
-            });
-
-            const now = new Date();
-            const ts = now.toISOString().slice(0, 16).replace(/[-:T]/g, '');
-            const blob = new Blob(['\ufeff' + csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
-            const link = document.createElement('a');
-            link.setAttribute('href', URL.createObjectURL(blob));
-            link.setAttribute('download', `empleados_auth_${ts}.csv`);
-            link.style.visibility = 'hidden';
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-        } catch (err) {
-            console.error('Error exportando empleados:', err);
-            alert('Error al exportar empleados: ' + err.message);
-        } finally {
-            setExporting(false);
-        }
     };
 
     // ─── Campos opcionales activos agrupados ──────────────────────────────────
@@ -491,30 +410,7 @@ export default function Register() {
                         {loading ? 'Creando...' : blockCreation ? 'Registro Bloqueado por Licencia' : 'Crear Cuenta'}
                     </button>
 
-                    <div className="grid grid-cols-2 gap-3 mt-4">
-                        {/* Filtro por email para la exportación */}
-                        <div className="col-span-2">
-                            <label className="block text-xs font-medium text-gray-500 mb-1">Filtrar exportación por correo (opcional)</label>
-                            <input
-                                type="text"
-                                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                                placeholder="Ej: juan.perez — vacío exporta todos"
-                                value={filterEmail}
-                                onChange={(e) => setFilterEmail(e.target.value)}
-                            />
-                        </div>
-                        <button type="button" onClick={() => setShowDeleteModal(true)}
-                            className="flex items-center justify-center gap-2 py-2.5 px-4 bg-blue-600 text-white text-xs rounded-lg hover:bg-blue-700 font-bold transition shadow-sm">
-                            <Trash2 size={16} /> Borrar Empleado
-                        </button>
-                        <button type="button" onClick={exportEmployeesToCSV} disabled={exporting}
-                            className="flex items-center justify-center gap-2 py-2.5 px-4 bg-blue-500 text-white text-xs rounded-lg hover:bg-blue-600 font-bold transition shadow-sm disabled:opacity-50">
-                            {exporting ? <Loader2 size={16} className="animate-spin" /> : <FileText size={16} />}
-                            Exportar CSV
-                        </button>
-                    </div>
-
-                    <div className="pt-4 border-t border-gray-100">
+                    <div className="pt-4 mt-6 border-t border-gray-100">
                         <button type="button" onClick={() => navigate('/login')}
                             className="flex items-center justify-center gap-2 w-full text-sm text-gray-500 hover:text-gray-700 transition">
                             <LogOut size={16} /> Volver al Login
@@ -522,8 +418,6 @@ export default function Register() {
                     </div>
                 </div>
             </div>
-
-            <DeleteEmployeeModal isOpen={showDeleteModal} onClose={() => setShowDeleteModal(false)} />
         </div>
     );
 }

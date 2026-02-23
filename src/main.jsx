@@ -22,9 +22,10 @@ registerSW({
 const APP_VERSION = import.meta.env.VITE_APP_VERSION || '1.3.1';
 const savedVersion = localStorage.getItem('app_version');
 
-if (savedVersion !== APP_VERSION) {
+if (savedVersion !== APP_VERSION && !sessionStorage.getItem('reloaded_for_version')) {
   console.log(`Nueva versión detectada (${APP_VERSION}). Limpiando caché...`);
   localStorage.setItem('app_version', APP_VERSION);
+  sessionStorage.setItem('reloaded_for_version', 'true');
 
   // Limpiar Service Workers y Caché manualmente como medida extrema
   if ('serviceWorker' in navigator) {

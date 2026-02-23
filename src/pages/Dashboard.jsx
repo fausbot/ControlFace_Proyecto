@@ -3,12 +3,13 @@ import Webcam from 'react-webcam';
 import { useAuth } from '../contexts/AuthContext';
 import { addWatermarkToImage, fetchServerTime, fetchLocationName } from '../utils/watermark';
 import { db } from '../firebaseConfig';
-import { collection, addDoc, query, where, getDocs, serverTimestamp, orderBy, limit } from 'firebase/firestore';
-import { Camera, MapPin, Search, CheckCircle, AlertCircle, LogOut, LogIn, Share2, Settings, UserCheck, ShieldAlert, TriangleAlert } from 'lucide-react';
+import { collection, addDoc, query, where, getDocs, serverTimestamp, orderBy, limit, doc, getDoc } from 'firebase/firestore';
+import { Camera, MapPin, Search, CheckCircle, AlertCircle, LogOut, LogIn, Share2, Settings, UserCheck, ShieldAlert, TriangleAlert, User } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import AdminPasswordModal from '../components/AdminPasswordModal';
 import * as faceapi from '@vladmandic/face-api';
 import { uploadPhoto } from '../services/storageService';
+import { fetchLicenseStatus } from '../services/licenseService';
 
 export default function Dashboard() {
     const { currentUser, logout } = useAuth();
@@ -21,7 +22,7 @@ export default function Dashboard() {
     const [mode, setMode] = useState(null); // 'entry', 'exit', 'incident'
     const [allowedActions, setAllowedActions] = useState({ entry: true, exit: true });
     const [loadingState, setLoadingState] = useState(true);
-    const [incidentDescription, setIncidentDescription] = useState(''); // Descripción del incidente
+    const [incidentDescription, setIncidentDescription] = useState(''); // Descripción de la novedad
     const [step, setStep] = useState('idle'); // idle, camera, processing, success
     const [statusMessage, setStatusMessage] = useState('');
     const [isCapturing, setIsCapturing] = useState(false);
@@ -41,6 +42,7 @@ export default function Dashboard() {
         storage_saveAsistencia: true,
         storage_saveIncidentes: true
     });
+    const [isLicenseValid, setIsLicenseValid] = useState(true);
 
     useEffect(() => {
         // Detectar si ya está instalada
@@ -102,6 +104,12 @@ export default function Dashboard() {
                         storage_saveAsistencia: d.storage_saveAsistencia !== false,
                         storage_saveIncidentes: d.storage_saveIncidentes !== false
                     });
+                }
+
+                // 1.5 Cargar Estado de la Licencia
+                const licStatus = await fetchLicenseStatus();
+                if (licStatus && licStatus.decoded && (!licStatus.decoded.isValid || licStatus.decoded.isExpired)) {
+                    setIsLicenseValid(false);
                 }
 
                 // 2. Cargar Modelos Faciales
@@ -387,7 +395,7 @@ export default function Dashboard() {
 
             let tipoLabel = 'Entrada';
             if (mode === 'exit') tipoLabel = 'Salida';
-            else if (mode === 'incident') tipoLabel = 'Incidente';
+            else if (mode === 'incident') tipoLabel = 'Novedad';
 
             setCapturedData({
                 image: watermarkedImage,
@@ -439,7 +447,7 @@ export default function Dashboard() {
             }
 
             const shareData = {
-                title: mode === 'incident' ? '⚠️ Reporte de Incidente' : 'Registro de Asistencia',
+                title: mode === 'incident' ? '⚠️ Reporte de Novedad' : 'Registro de Asistencia',
                 text: shareText,
                 files: [file]
             };
@@ -557,49 +565,65 @@ export default function Dashboard() {
                             )}
                         </div>
 
-                        {!loadingState && allowedActions.entry && (
-                            <button
-                                onClick={() => handleStart('entry')}
-                                className="group relative flex flex-col items-center justify-center p-8 bg-gradient-to-tr from-green-400 to-green-600 rounded-2xl shadow-lg hover:shadow-xl transition transform hover:scale-105 active:scale-95 animate-fade-in"
-                            >
-                                <LogIn className="w-12 h-12 text-white mb-2" />
-                                <span className="text-2xl font-bold text-white">Registrar Entrada</span>
-                            </button>
-                        )}
+                        {isLicenseValid ? (
+                            <React.Fragment>
+                                {!loadingState && allowedActions.entry && (
+                                    <button
+                                        onClick={() => handleStart('entry')}
+                                        className="group relative flex flex-col items-center justify-center p-8 bg-gradient-to-tr from-green-400 to-green-600 rounded-2xl shadow-lg hover:shadow-xl transition transform hover:scale-105 active:scale-95 animate-fade-in"
+                                    >
+                                        <LogIn className="w-12 h-12 text-white mb-2" />
+                                        <span className="text-2xl font-bold text-white">Registrar Entrada</span>
+                                    </button>
+                                )}
 
-                        {!loadingState && allowedActions.exit && (
-                            <button
-                                onClick={() => handleStart('exit')}
-                                className="group relative flex flex-col items-center justify-center p-8 bg-gradient-to-tr from-red-400 to-red-600 rounded-2xl shadow-lg hover:shadow-xl transition transform hover:scale-105 active:scale-95 animate-fade-in"
-                            >
-                                <LogOut className="w-12 h-12 text-white mb-2" />
-                                <span className="text-2xl font-bold text-white">Registrar Salida</span>
-                            </button>
-                        )}
+                                {!loadingState && allowedActions.exit && (
+                                    <button
+                                        onClick={() => handleStart('exit')}
+                                        className="group relative flex flex-col items-center justify-center p-8 bg-gradient-to-tr from-red-400 to-red-600 rounded-2xl shadow-lg hover:shadow-xl transition transform hover:scale-105 active:scale-95 animate-fade-in"
+                                    >
+                                        <LogOut className="w-12 h-12 text-white mb-2" />
+                                        <span className="text-2xl font-bold text-white">Registrar Salida</span>
+                                    </button>
+                                )}
 
-                        {/* Mensaje visual de bloqueo si uno está deshabilitado */}
-                        {!loadingState && !allowedActions.entry && (
-                            <div className="opacity-40 grayscale flex flex-col items-center justify-center p-4 border-2 border-dashed border-gray-300 rounded-xl">
-                                <span className="text-gray-400 font-bold block mb-1">Entrada Bloqueada</span>
-                                <span className="text-[10px] text-gray-400 text-center">Debes marcar salida primero o esperar 20h</span>
+                                {/* Mensaje visual de bloqueo si uno está deshabilitado */}
+                                {!loadingState && !allowedActions.entry && (
+                                    <div className="opacity-40 grayscale flex flex-col items-center justify-center p-4 border-2 border-dashed border-gray-300 rounded-xl">
+                                        <span className="text-gray-400 font-bold block mb-1">Entrada Bloqueada</span>
+                                        <span className="text-[10px] text-gray-400 text-center">Debes marcar salida primero o esperar 20h</span>
+                                    </div>
+                                )}
+                                {!loadingState && !allowedActions.exit && (
+                                    <div className="opacity-40 grayscale flex flex-col items-center justify-center p-4 border-2 border-dashed border-gray-300 rounded-xl">
+                                        <span className="text-gray-400 font-bold block mb-1">Salida Bloqueada</span>
+                                        <span className="text-[10px] text-gray-400 text-center">Debes marcar entrada primero</span>
+                                    </div>
+                                )}
+                                {/* Botón INCIDENTE — siempre visible, sin restricción de ciclo */}
+                                {!loadingState && (
+                                    <button
+                                        onClick={() => handleStart('incident')}
+                                        className="group relative flex flex-col items-center justify-center p-5 bg-gradient-to-tr from-orange-400 to-orange-600 rounded-2xl shadow-lg hover:shadow-xl transition transform hover:scale-105 active:scale-95 animate-fade-in"
+                                    >
+                                        <TriangleAlert className="w-8 h-8 text-white mb-1" />
+                                        <span className="text-xl font-bold text-white">Reportar Novedad</span>
+                                        <span className="text-xs text-orange-100 mt-1">Registro de Novedades, Mantenimientos o Incidentes.</span>
+                                    </button>
+                                )}
+                            </React.Fragment>
+                        ) : (
+                            <div className="col-span-2 bg-red-50 border-2 border-red-500 rounded-2xl p-6 text-center shadow-lg animate-pulse">
+                                <TriangleAlert className="w-12 h-12 text-red-500 mx-auto mb-3" />
+                                <h3 className="text-xl font-bold text-red-700 mb-2">Servicio Suspendido</h3>
+                                <p className="text-red-600 font-medium">
+                                    La licencia del sistema ha expirado.<br />
+                                    El registro de asistencia y novedades está temporalmente deshabilitado.
+                                </p>
+                                <p className="text-sm mt-4 text-red-500">
+                                    Use el botón CONFIG para activar una nueva licencia.
+                                </p>
                             </div>
-                        )}
-                        {!loadingState && !allowedActions.exit && (
-                            <div className="opacity-40 grayscale flex flex-col items-center justify-center p-4 border-2 border-dashed border-gray-300 rounded-xl">
-                                <span className="text-gray-400 font-bold block mb-1">Salida Bloqueada</span>
-                                <span className="text-[10px] text-gray-400 text-center">Debes marcar entrada primero</span>
-                            </div>
-                        )}
-                        {/* Botón INCIDENTE — siempre visible, sin restricción de ciclo */}
-                        {!loadingState && (
-                            <button
-                                onClick={() => handleStart('incident')}
-                                className="group relative flex flex-col items-center justify-center p-5 bg-gradient-to-tr from-orange-400 to-orange-600 rounded-2xl shadow-lg hover:shadow-xl transition transform hover:scale-105 active:scale-95 animate-fade-in"
-                            >
-                                <TriangleAlert className="w-8 h-8 text-white mb-1" />
-                                <span className="text-xl font-bold text-white">Reportar Incidente</span>
-                                <span className="text-xs text-orange-100 mt-1">Daño o accidente en el trabajo</span>
-                            </button>
                         )}
                     </div>
                 )}
@@ -607,7 +631,7 @@ export default function Dashboard() {
                 {step === 'camera' && (
                     <div className="w-full flex flex-col items-center animate-fade-in">
                         <h2 className="text-xl font-bold mb-4 capitalize text-gray-800">
-                            {mode === 'incident' ? '⚠️ Registrando Incidente' : `Registrando ${mode === 'entry' ? 'Entrada' : 'Salida'}`}
+                            {mode === 'incident' ? '⚠️ Registrando Novedad' : `Registrando ${mode === 'entry' ? 'Entrada' : 'Salida'}`}
                         </h2>
 
                         {/* Native Video Element */}
@@ -664,11 +688,11 @@ export default function Dashboard() {
                 {step === 'preview' && capturedData && (
                     <div className="w-full flex flex-col items-center animate-fade-in">
                         <h2 className="text-xl font-bold mb-2 text-gray-800">
-                            {mode === 'incident' ? '⚠️ Vista Previa del Incidente' : 'Vista Previa'}
+                            {mode === 'incident' ? '⚠️ Vista Previa de la Novedad' : 'Vista Previa'}
                         </h2>
                         <p className="text-sm text-gray-500 mb-4 text-center">
                             {mode === 'incident'
-                                ? 'Describe el incidente antes de guardar.'
+                                ? 'Describe la novedad antes de guardar.'
                                 : faceVerified
                                     ? 'Identidad verificada correctamente. Comparte esta imagen como evidencia.'
                                     : 'No se pudo verificar tu identidad facial.'}
@@ -702,10 +726,10 @@ export default function Dashboard() {
                             )}
                         </div>
 
-                        {/* Campo de descripción SOLO para incidentes */}
+                        {/* Campo de descripción SOLO para novedades */}
                         {mode === 'incident' && (
                             <div className="w-full max-w-sm mb-4">
-                                <label className="block text-sm font-bold text-orange-700 mb-1">📝 Descripción del incidente *</label>
+                                <label className="block text-sm font-bold text-orange-700 mb-1">📝 Descripción de la novedad *</label>
                                 <textarea
                                     value={incidentDescription}
                                     onChange={(e) => setIncidentDescription(e.target.value)}
@@ -724,7 +748,7 @@ export default function Dashboard() {
                                         return;
                                     }
                                     if (mode === 'incident' && !incidentDescription.trim()) {
-                                        alert("Por favor describe el incidente antes de guardar.");
+                                        alert("Por favor describe la novedad antes de guardar.");
                                         return;
                                     }
 
@@ -763,7 +787,7 @@ export default function Dashboard() {
                                     }`}
                             >
                                 <CheckCircle size={20} />
-                                {mode === 'incident' ? 'Guardar Incidente y Compartir' : 'Guardar y Compartir'}
+                                {mode === 'incident' ? 'Guardar Novedad y Compartir' : 'Guardar y Compartir'}
                             </button>
                             <button
                                 onClick={() => { stopCamera(); setStep('idle'); setMode(null); }}
@@ -780,7 +804,6 @@ export default function Dashboard() {
                         <CheckCircle className="w-20 h-20 text-green-500 mx-auto mb-4" />
                         <h2 className="text-2xl font-bold text-gray-800 mb-2">¡Registrado!</h2>
                         <p className="text-gray-600">Registro guardado exitosamente.</p>
-                        <p className="text-xs text-gray-400 mt-2">(La imagen no se guardó en el servidor para ahorrar costos)</p>
                     </div>
                 )}
             </div>

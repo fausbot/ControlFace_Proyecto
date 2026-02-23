@@ -15,14 +15,29 @@ export function AuthProvider({ children }) {
     // Hardcoded for demo if Firebase fails or is not setup, 
     // but logic handles real firebase auth.
 
-    const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
+    const [adminAccess, setAdminAccess] = useState({
+        '/registro': false,
+        '/datos': false,
+        '/configuracion': false
+    });
+
+    // Mantenemos esto temporalmente por retrocompatibilidad mientras migramos otras páginas
+    const isAdminAuthenticated = Object.values(adminAccess).some(val => val === true);
+
+    function grantAccess(route) {
+        setAdminAccess(prev => ({ ...prev, [route]: true }));
+    }
+
+    function revokeAllAccess() {
+        setAdminAccess({ '/registro': false, '/datos': false, '/configuracion': false });
+    }
 
     function login(email, password) {
         return signInWithEmailAndPassword(auth, email, password);
     }
 
     function logout() {
-        setIsAdminAuthenticated(false);
+        revokeAllAccess();
         return signOut(auth);
     }
 
@@ -39,8 +54,10 @@ export function AuthProvider({ children }) {
         currentUser,
         login,
         logout,
-        isAdminAuthenticated,
-        setIsAdminAuthenticated
+        adminAccess,
+        grantAccess,
+        revokeAllAccess,
+        isAdminAuthenticated // deprecated soon
     };
 
     return (

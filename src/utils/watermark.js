@@ -28,7 +28,7 @@ export const addWatermarkToImage = async (imageSrc, data) => {
                 // --- Draw Mode Label (ENTRADA/SALIDA/INCIDENTE) at Top ---
                 let modeText = 'ENTRADA';
                 if (data.mode === 'exit') modeText = 'SALIDA';
-                else if (data.mode === 'incident') modeText = 'INCIDENTE';
+                else if (data.mode === 'incident') modeText = 'NOVEDAD';
                 const modeFontSize = Math.max(40, img.width * 0.08); // Large font
                 ctx.font = `bold ${modeFontSize}px Arial`;
                 ctx.textAlign = 'center';

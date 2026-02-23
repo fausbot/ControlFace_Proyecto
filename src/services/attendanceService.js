@@ -123,3 +123,38 @@ export const filterLogsByDateRange = (logs, startDate, endDate) => {
         return true;
     });
 };
+
+// ─────────────────────────────────────────────
+// Elimina en lote todos los registros de INCIDENTES dentro
+// del rango [startDate, endDate] (strings YYYY-MM-DD)
+// Devuelve la cantidad de registros borrados.
+// ─────────────────────────────────────────────
+export const bulkDeleteIncidentsByDateRange = async (startDate, endDate) => {
+    const snapshot = await getDocs(collection(db, 'incidents'));
+
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    end.setHours(23, 59, 59, 999);
+
+    const toDelete = snapshot.docs.filter(d => {
+        const data = d.data();
+        let logDate = null;
+
+        if (data.timestamp) {
+            logDate = data.timestamp.toDate();
+        } else if (data.fecha) {
+            logDate = parseSpanishDate(data.fecha);
+        }
+
+        if (!logDate) return false;
+        return logDate >= start && logDate <= end;
+    });
+
+    if (toDelete.length === 0) return 0;
+
+    const batch = writeBatch(db);
+    toDelete.forEach(docSnap => batch.delete(docSnap.ref));
+    await batch.commit();
+
+    return toDelete.length;
+};

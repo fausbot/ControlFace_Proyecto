@@ -4,8 +4,40 @@
 
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Download, Calendar, Trash2, ChevronLeft, ChevronRight, AlertTriangle, TriangleAlert, Image, Loader2 } from 'lucide-react';
+import { Download, Calendar, Trash2, ChevronLeft, ChevronRight, AlertTriangle, TriangleAlert, Image, Loader2, UserMinus, FileText } from 'lucide-react';
+import DeleteEmployeeModal from '../components/DeleteEmployeeModal';
 import { listPhotosByFilter, downloadPhotosAsZip } from '../services/storageService';
+import { httpsCallable } from 'firebase/functions';
+import { functions } from '../firebaseConfig';
+
+// ─── Definición de campos opcionales ─────────
+const FIELD_DEFS = [
+    { key: 'documentoIdentidad', label: 'Documento de identidad', type: 'text', group: 'Identificación' },
+    { key: 'fechaNacimiento', label: 'Fecha de nacimiento', type: 'date', group: 'Identificación' },
+    { key: 'fechaIngreso', label: 'Fecha de ingreso', type: 'date', group: 'Identificación' },
+    { key: 'infoBancaria', label: 'Información bancaria', type: 'text', group: 'Identificación' },
+    { key: 'licenciaConducir', label: 'Licencia de conducir', type: 'text', group: 'Identificación' },
+    { key: 'tallaUniforme', label: 'Talla de uniformes', type: 'text', group: 'Identificación' },
+    { key: 'tallaCalzado', label: 'Talla de calzado', type: 'text', group: 'Identificación' },
+    { key: 'alergias', label: 'Alergias / cond. médicas', type: 'text', group: 'Identificación' },
+    { key: 'estadoCivil', label: 'Estado civil', type: 'text', group: 'Identificación' },
+    { key: 'hijos', label: 'Hijos y edades', type: 'text', group: 'Identificación' },
+    { key: 'grupoSanguineo', label: 'Grupo sanguíneo', type: 'text', group: 'Identificación' },
+    { key: 'direccion', label: 'Dirección de residencia', type: 'text', group: 'Contacto' },
+    { key: 'telefono', label: 'Teléfono personal', type: 'tel', group: 'Contacto' },
+    { key: 'correoPersonal', label: 'Correo electrónico personal', type: 'email', group: 'Contacto' },
+    { key: 'contactoEmergenciaNombre', label: 'Contacto emergencia (Nombre)', type: 'text', group: 'Contacto' },
+    { key: 'contactoEmergenciaTelefono', label: 'Contacto emergencia (Tel.)', type: 'text', group: 'Contacto' },
+    { key: 'cargo', label: 'Cargo o posición', type: 'text', group: 'Laboral' },
+    { key: 'departamento', label: 'Departamento / Área', type: 'text', group: 'Laboral' },
+    { key: 'tipoContrato', label: 'Tipo de contrato', type: 'text', group: 'Laboral' },
+    { key: 'salario', label: 'Salario / Remuneración', type: 'text', group: 'Laboral' },
+    { key: 'horario', label: 'Horario de trabajo', type: 'text', group: 'Laboral' },
+    { key: 'nivelEstudios', label: 'Nivel educativo', type: 'text', group: 'Otros' },
+    { key: 'certificaciones', label: 'Certificaciones relevantes', type: 'text', group: 'Otros' },
+    { key: 'tallaCamisa', label: 'Talla de camisa/polo', type: 'text', group: 'Otros' },
+    { key: 'tallaPantalon', label: 'Talla de pantalón', type: 'text', group: 'Otros' }
+];
 import { useAuth } from '../contexts/AuthContext';
 
 // ✅ Importamos desde los servicios, no desde firebase directamente
@@ -14,6 +46,7 @@ import {
     paginateLogs,
     deleteAttendanceLog,
     bulkDeleteByDateRange,
+    bulkDeleteIncidentsByDateRange,
     filterLogsByDateRange,
     parseSpanishDate
 } from '../services/attendanceService';
@@ -43,6 +76,7 @@ export default function Datos() {
     const [incidentStartDate, setIncidentStartDate] = useState('');
     const [incidentEndDate, setIncidentEndDate] = useState('');
     const [incidentCsvUserFilter, setIncidentCsvUserFilter] = useState('');
+    const [deletingIncidents, setDeletingIncidents] = useState(false);
 
     // CSV Asistencia export
     const [csvUserFilter, setCsvUserFilter] = useState('');
@@ -59,6 +93,11 @@ export default function Datos() {
     const [cleaningStorage, setCleaningStorage] = useState(false);
     const [storageConfig, setStorageConfig] = useState(null);
     const [employeesMap, setEmployeesMap] = useState({});
+
+    // Módulo Gestión Empleados (Borrar, Exportar)
+    const [showDeleteModal, setShowDeleteModal] = useState(false);
+    const [filterEmail, setFilterEmail] = useState('');
+    const [exportingEmployees, setExportingEmployees] = useState(false);
 
     const navigate = useNavigate();
     const { isAdminAuthenticated, currentUser } = useAuth();
@@ -188,6 +227,88 @@ export default function Datos() {
             alert('Error al realizar la limpieza.');
         } finally {
             setDeleting(false);
+        }
+    };
+
+    // ─── Exportar empleados ───────────────────────────────────────────────────
+    const exportEmployeesToCSV = async () => {
+        setExportingEmployees(true);
+        try {
+            // 1. Obtener usuarios de Firebase Auth
+            const getUsersListFn = httpsCallable(functions, 'getUsersList');
+            const result = await getUsersListFn();
+            let authUsers = result.data.users;
+            if (!authUsers || authUsers.length === 0) { alert('No hay empleados para exportar.'); return; }
+
+            // 2. Filtrar por email si se especificó uno
+            if (filterEmail.trim()) {
+                const needle = filterEmail.trim().toLowerCase();
+                authUsers = authUsers.filter(emp =>
+                    (emp.email || '').toLowerCase().includes(needle)
+                );
+                if (authUsers.length === 0) {
+                    alert(`No se encontró ningún empleado con el correo "${filterEmail.trim()}".`);
+                    return;
+                }
+            }
+
+            // 3. Obtener datos adicionales de Firestore (nombre, apellido y campos opcionales)
+            const fsSnap = await getDocs(collection(db, 'employees'));
+            const fsMap = {};
+            fsSnap.forEach(d => {
+                const data = d.data();
+                if (data.email) fsMap[data.email.toLowerCase()] = data;
+            });
+
+            // 4. Determinar qué campos opcionales tienen datos en al menos un empleado
+            const activeOptionalKeys = FIELD_DEFS
+                .filter(({ key }) => authUsers.some(u => {
+                    const fs = fsMap[(u.email || '').toLowerCase()];
+                    return fs && fs[key] !== undefined && fs[key] !== '';
+                }))
+                .map(({ key, label }) => ({ key, label }));
+
+            // 5. Construir cabecera dinámica
+            const headers = [
+                'Email/ID', 'Nombres', 'Apellidos',
+                'Fecha de Creacion', 'Ultimo Acceso', 'UID',
+                ...activeOptionalKeys.map(f => f.label),
+            ];
+
+            // 6. Construir filas
+            const escape = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+            const csvRows = [headers.join(',')];
+            authUsers.forEach(emp => {
+                const fs = fsMap[(emp.email || '').toLowerCase()] || {};
+                const created = emp.creationTime ? new Date(emp.creationTime).toLocaleString('es-ES') : 'N/A';
+                const lastLogin = emp.lastSignInTime ? new Date(emp.lastSignInTime).toLocaleString('es-ES') : 'N/A';
+                const row = [
+                    escape(emp.email),
+                    escape(fs.firstName || ''),
+                    escape(fs.lastName || ''),
+                    escape(created),
+                    escape(lastLogin),
+                    escape(emp.uid),
+                    ...activeOptionalKeys.map(({ key }) => escape(fs[key] || '')),
+                ];
+                csvRows.push(row.join(','));
+            });
+
+            const now = new Date();
+            const ts = now.toISOString().slice(0, 16).replace(/[-:T]/g, '');
+            const blob = new Blob(['\ufeff' + csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            link.setAttribute('href', URL.createObjectURL(blob));
+            link.setAttribute('download', `empleados_auth_${ts}.csv`);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        } catch (err) {
+            console.error('Error exportando empleados:', err);
+            alert('Error al exportar empleados: ' + err.message);
+        } finally {
+            setExportingEmployees(false);
         }
     };
 
@@ -351,7 +472,7 @@ export default function Datos() {
     };
 
 
-    // ─── Exportar Incidentes CSV ─────────────────────────────────────────────
+    // ─── Exportar Novedades CSV ─────────────────────────────────────────────
     const exportIncidentsToCSV = async () => {
         setExportingIncidents(true);
         try {
@@ -361,9 +482,9 @@ export default function Datos() {
             // Filtrar por rango si se especificaron fechas
             if (incidentStartDate || incidentEndDate) {
                 incidents = incidents.filter(inc => {
-                    if (!inc.fecha) return true;
+                    if (!inc.fecha) return false; // si no hay fecha y pidieron filtro, lo ideal es ignorarlo o incluirlo? el user dijo "exportar todos si no hay fechas", si HAY fechas y el log no tiene, se ignora.
                     const d = parseSpanishDate(inc.fecha);
-                    if (!d) return true;
+                    if (!d) return false;
                     const t = d.getTime();
                     const start = incidentStartDate ? new Date(incidentStartDate + 'T00:00:00').getTime() : 0;
                     const end = incidentEndDate ? new Date(incidentEndDate + 'T23:59:59').getTime() : Infinity;
@@ -378,7 +499,7 @@ export default function Datos() {
             }
 
             if (incidents.length === 0) {
-                alert('No hay incidentes con esos filtros.');
+                alert('No hay novedades con esos filtros.');
                 return;
             }
 
@@ -413,10 +534,41 @@ export default function Datos() {
             link.click();
             document.body.removeChild(link);
         } catch (error) {
-            console.error('Error exportando incidentes:', error);
-            alert('Error al exportar incidentes. Intenta de nuevo.');
+            console.error('Error exportando novedades:', error);
+            alert('Error al exportar novedades. Intenta de nuevo.');
         } finally {
             setExportingIncidents(false);
+        }
+    };
+
+    // ─── Borrar Novedades por Rango ─────────────────────────────────────────
+    const handleBulkDeleteIncidents = async () => {
+        if (!incidentStartDate || !incidentEndDate) {
+            alert('Debes seleccionar fecha de inicio y fin para borrar en lote.');
+            return;
+        }
+
+        const confirm1 = window.confirm(`⚠️ PELIGRO: Vas a borrar PERMANENTEMENTE las NOVEDADES desde ${incidentStartDate} hasta ${incidentEndDate}.\n\nEsta acción NO se puede deshacer.\n¿Deseas continuar?`);
+        if (!confirm1) return;
+
+        const confirm2 = window.confirm('¿Estás ABSOLUTAMENTE SEGURO? Todas las novedades seleccionadas desaparecerán para siempre.');
+        if (!confirm2) return;
+
+        setDeletingIncidents(true);
+        try {
+            const deletedCount = await bulkDeleteIncidentsByDateRange(incidentStartDate, incidentEndDate);
+
+            if (deletedCount > 0) {
+                // Notificar éxito sin forzar recarga de los "entradas y salidas" (no afecta la vista principal)
+                alert(`✅ Se borraron ${deletedCount} registros de novedades exitosamente.`);
+            } else {
+                alert('No se encontraron novedades en ese rango de fechas para borrar.');
+            }
+        } catch (error) {
+            console.error('Error en borrado masivo de novedades:', error);
+            alert('Hubo un error al borrar los registros. Revisa la consola para más detalles.');
+        } finally {
+            setDeletingIncidents(false);
         }
     };
 
@@ -621,7 +773,7 @@ export default function Datos() {
                                                     }
                                                     setPhotoMsg(`Descargando ZIP con ${lista.length} fotos...`);
 
-                                                    const zipBlob = await downloadPhotosAsZip(lista, (cur, tot) => {
+                                                    const { zipBlob, addedCount } = await downloadPhotosAsZip(lista, (cur, tot) => {
                                                         setPhotoProgress({ current: cur, total: tot });
                                                     });
 
@@ -632,7 +784,7 @@ export default function Datos() {
                                                     link.download = nombre;
                                                     link.click();
                                                     URL.revokeObjectURL(url);
-                                                    setPhotoMsg(`✅ ZIP descargado: ${lista.length} fotos`);
+                                                    setPhotoMsg(`✅ ZIP descargado: ${addedCount} fotos válidas`);
                                                 } catch (err) {
                                                     console.error(err);
                                                     setPhotoMsg('❌ Error: ' + err.message);
@@ -664,9 +816,9 @@ export default function Datos() {
                                                 }}
                                                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                                             >
-                                                {(storageConfig.saveAsistencia && storageConfig.saveIncidentes) && <option value="ambos">Asistencia + Incidentes</option>}
+                                                {(storageConfig.saveAsistencia && storageConfig.saveIncidentes) && <option value="ambos">Asistencia + Novedades</option>}
                                                 {storageConfig.saveAsistencia && <option value="asistencia">Solo Asistencia</option>}
-                                                {storageConfig.saveIncidentes && <option value="incidentes">Solo Incidentes</option>}
+                                                {storageConfig.saveIncidentes && <option value="incidentes">Solo Novedades</option>}
                                             </select>
                                         </div>
                                         <div>
@@ -706,6 +858,40 @@ export default function Datos() {
                             )}
                         </>
                     )}
+                </div>
+
+                {/* --- NUEVO BLOQUE: GESTIÓN DE EMPLEADOS --- */}
+                <div className="bg-white rounded-xl shadow-lg p-6 mb-6 border-l-4 border-emerald-500 relative">
+                    <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2 mb-4">
+                        <UserMinus size={24} className="text-emerald-600" />
+                        Gestión de Empleados
+                    </h2>
+
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                        <div className="md:col-span-2">
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Filtrar exportación por correo (opcional)</label>
+                            <input
+                                type="text"
+                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                                placeholder="Ej: juan.perez — vacío exporta todos"
+                                value={filterEmail}
+                                onChange={(e) => setFilterEmail(e.target.value)}
+                            />
+                        </div>
+                        <div className="md:col-span-1">
+                            <button type="button" onClick={() => setShowDeleteModal(true)}
+                                className="flex items-center justify-center gap-2 w-full py-2.5 px-4 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700 font-bold transition shadow-sm">
+                                <Trash2 size={18} /> Borrar Empleado
+                            </button>
+                        </div>
+                        <div className="md:col-span-1">
+                            <button type="button" onClick={exportEmployeesToCSV} disabled={exportingEmployees}
+                                className="flex items-center justify-center gap-2 w-full py-2.5 px-4 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 font-bold transition shadow-sm disabled:opacity-50">
+                                {exportingEmployees ? <Loader2 size={18} className="animate-spin" /> : <FileText size={18} />}
+                                Exportar CSV
+                            </button>
+                        </div>
+                    </div>
                 </div>
 
                 {/* Exportación */}
@@ -787,11 +973,11 @@ export default function Datos() {
                     </div>
                 </div>
 
-                {/* Exportación de Incidentes */}
+                {/* Exportación de Novedades */}
                 <div className="bg-white rounded-xl shadow-lg p-6 mb-6 border-l-4 border-orange-400">
                     <h2 className="text-xl font-bold text-orange-700 mb-4 flex items-center gap-2">
                         <TriangleAlert size={24} />
-                        Exportar Registro de Incidentes a CSV
+                        Exportar Registro de Novedades a CSV
                     </h2>
 
                     <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
@@ -841,13 +1027,33 @@ export default function Datos() {
 
                     <p className="text-sm text-gray-500 mt-3">
                         {incidentStartDate || incidentEndDate || incidentCsvUserFilter
-                            ? `Exportará incidentes ${incidentStartDate ? `desde ${incidentStartDate}` : ''} ${incidentEndDate ? `hasta ${incidentEndDate}` : ''} ${incidentCsvUserFilter ? `(Contiene: ${incidentCsvUserFilter})` : ''}`
-                            : 'Exportará todos los incidentes disponibles'}
+                            ? `Exportará novedades ${incidentStartDate ? `desde ${incidentStartDate}` : ''} ${incidentEndDate ? `hasta ${incidentEndDate}` : ''} ${incidentCsvUserFilter ? `(Contiene: ${incidentCsvUserFilter})` : ''}`
+                            : 'Exportará todas las novedades disponibles'}
                     </p>
-                </div>
 
-            </div >
-        </div >
+                    <div className="mt-8 pt-6 border-t border-red-100">
+                        <h3 className="text-red-600 font-bold flex items-center gap-2 mb-4">
+                            <AlertTriangle size={20} />
+                            Zona de Peligro: Limpieza de Base de Datos de Novedades
+                        </h3>
+                        <div className="flex items-center gap-4">
+                            <p className="text-sm text-gray-600 flex-1">
+                                Borra permanentemente las novedades del rango seleccionado ({incidentStartDate || '...'} - {incidentEndDate || '...'}).
+                            </p>
+                            <button
+                                onClick={handleBulkDeleteIncidents}
+                                disabled={deletingIncidents || !incidentStartDate || !incidentEndDate}
+                                className="px-4 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 font-bold transition flex items-center gap-2 disabled:opacity-50"
+                            >
+                                <Trash2 size={18} />
+                                {deletingIncidents ? 'Borrando...' : 'Borrar Rango'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <DeleteEmployeeModal isOpen={showDeleteModal} onClose={() => setShowDeleteModal(false)} />
+        </div>
     );
 }
-

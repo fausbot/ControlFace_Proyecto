@@ -4,11 +4,12 @@ import { useAuth } from '../contexts/AuthContext';
 import { functions } from '../firebaseConfig';
 import { httpsCallable } from 'firebase/functions';
 
-export default function AdminPasswordModal({ isOpen, onClose, onSuccess }) {
+export default function AdminPasswordModal({ isOpen, onClose, onSuccess, target }) {
     const [password, setPassword] = useState('');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
-    const { setIsAdminAuthenticated } = useAuth();
+    const [isReadOnly, setIsReadOnly] = useState(true);
+    const { grantAccess } = useAuth();
 
     if (!isOpen) return null;
 
@@ -19,11 +20,11 @@ export default function AdminPasswordModal({ isOpen, onClose, onSuccess }) {
 
         try {
             const verifyPasswordFn = httpsCallable(functions, 'verifyAdminPassword');
-            const result = await verifyPasswordFn({ password: password });
+            const result = await verifyPasswordFn({ password: password, target: target });
 
             if (result.data.success) {
-                // Otorgar acceso administrativo en el estado global
-                setIsAdminAuthenticated(true);
+                // Otorgar acceso administrativo SOLO a la ruta destino solicitada
+                grantAccess(target);
                 onSuccess();
                 setPassword('');
                 onClose();
@@ -65,8 +66,16 @@ export default function AdminPasswordModal({ isOpen, onClose, onSuccess }) {
                         <input
                             type="text"
                             style={{ WebkitTextSecurity: 'disc' }}
-                            name="x_access_id"
+                            name={`key_${Math.random().toString(36).substring(7)}`}
+                            id={`key_${Math.random().toString(36).substring(7)}`}
                             autoComplete="off"
+                            spellCheck="false"
+                            autoCorrect="off"
+                            data-lpignore="true"
+                            data-form-type="other"
+                            readOnly={isReadOnly}
+                            onFocus={() => setIsReadOnly(false)}
+                            onBlur={() => setIsReadOnly(true)}
                             value={password}
                             onChange={(e) => setPassword(e.target.value)}
                             onKeyDown={(e) => {

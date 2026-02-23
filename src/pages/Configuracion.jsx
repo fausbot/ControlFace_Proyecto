@@ -62,15 +62,15 @@ export default function Configuracion() {
     const [savingLicense, setSavingLicense] = useState(false);
     const [licenseError, setLicenseError] = useState('');
     const navigate = useNavigate();
-    const { isAdminAuthenticated } = useAuth();
+    const { adminAccess, currentUser } = useAuth();
 
     useEffect(() => {
-        if (!isAdminAuthenticated) {
+        if (!adminAccess['/configuracion']) {
             navigate('/login');
             return;
         }
         loadConfig();
-    }, [isAdminAuthenticated]);
+    }, [adminAccess]);
 
     const loadConfig = async () => {
         try {

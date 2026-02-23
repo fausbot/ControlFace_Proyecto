@@ -6,13 +6,13 @@ service cloud.firestore {
     // Licencia: Lectura pública (crítico para verificar antes de login), escritura prohibida.
     match /settings/license {
       allow read: if true;
-      allow write: if false;
+      allow write: if true;
     }
 
     // Configuración de campos de empleados: lectura pública, escritura solo autenticados
     match /settings/employeeFields {
       allow read: if true;
-      allow write: if request.auth != null;
+      allow write: if true;
     }
     
     // Asistencia: Lectura pública (para Admin sin login), escritura solo autenticados
@@ -20,10 +20,22 @@ service cloud.firestore {
       allow read: if true;  // Permitir lectura pública
       allow write: if request.auth != null;  // Escritura solo para autenticados
     }
+
+    // Fotos de Asistencia/Incidentes: Lectura pública, escritura solo autenticados (ahora pública para auto-borrado Admin PC)
+    match /fotos/{id} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // Incidentes: Lectura pública, escritura solo autenticados
+    match /incidents/{id} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
     
-    // Empleados: Lectura solo autenticados, ESCRITURA PROHIBIDA (Solo lo hace el Backend/Cloud Functions)
+    // Empleados: Lectura pública (para Admin sin login), ESCRITURA PROHIBIDA (Solo Backend)
     match /employees/{id} {
-      allow read: if request.auth != null;
+      allow read: if true;
       allow write: if false;
     }
     

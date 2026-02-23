@@ -11,9 +11,12 @@ export default function ChangeAdminPassword() {
     const [showCurrent, setShowCurrent] = useState(false);
     const [showNew, setShowNew] = useState(false);
     const [showConfirm, setShowConfirm] = useState(false);
+    const [target, setTarget] = useState('todas');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     const [success, setSuccess] = useState(false);
+    const [isReadOnlyCurrent, setIsReadOnlyCurrent] = useState(true);
+    const [isReadOnlyNew, setIsReadOnlyNew] = useState(true);
     const navigate = useNavigate();
 
     const handleSubmit = async (e) => {
@@ -43,7 +46,8 @@ export default function ChangeAdminPassword() {
             const changePassword = httpsCallable(functions, 'changeAdminPassword');
             const result = await changePassword({
                 currentPassword,
-                newPassword
+                newPassword,
+                target
             });
 
             if (result.data.success) {
@@ -101,7 +105,24 @@ export default function ChangeAdminPassword() {
                     </div>
                 )}
 
-                <form onSubmit={handleSubmit} className="space-y-5">
+                <div className="space-y-5">
+                    {/* Sección/Target */}
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Sección a Actualizar
+                        </label>
+                        <select
+                            value={target}
+                            onChange={(e) => setTarget(e.target.value)}
+                            disabled={loading || success}
+                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                        >
+                            <option value="todas">Cambiar para Todas las Secciones</option>
+                            <option value="/registro">Contraseña de Registro</option>
+                            <option value="/datos">Contraseña de Datos</option>
+                            <option value="/configuracion">Contraseña de Configuración</option>
+                        </select>
+                    </div>
                     {/* Contraseña Actual */}
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -109,8 +130,17 @@ export default function ChangeAdminPassword() {
                         </label>
                         <div className="relative">
                             <input
-                                type={showCurrent ? "text" : "password"}
-                                required
+                                type="text"
+                                style={{ WebkitTextSecurity: showCurrent ? 'none' : 'disc' }}
+                                name={`curr_${Math.random().toString(36).substring(7)}`}
+                                id={`curr_${Math.random().toString(36).substring(7)}`}
+                                autoComplete="off"
+                                spellCheck="false"
+                                autoCorrect="off"
+                                data-lpignore="true"
+                                readOnly={isReadOnlyCurrent}
+                                onFocus={() => setIsReadOnlyCurrent(false)}
+                                onBlur={() => setIsReadOnlyCurrent(true)}
                                 value={currentPassword}
                                 onChange={(e) => setCurrentPassword(e.target.value)}
                                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent pr-12"
@@ -134,8 +164,17 @@ export default function ChangeAdminPassword() {
                         </label>
                         <div className="relative">
                             <input
-                                type={showNew ? "text" : "password"}
-                                required
+                                type="text"
+                                style={{ WebkitTextSecurity: showNew ? 'none' : 'disc' }}
+                                name={`new_${Math.random().toString(36).substring(7)}`}
+                                id={`new_${Math.random().toString(36).substring(7)}`}
+                                autoComplete="off"
+                                spellCheck="false"
+                                autoCorrect="off"
+                                data-lpignore="true"
+                                readOnly={isReadOnlyNew}
+                                onFocus={() => setIsReadOnlyNew(false)}
+                                onBlur={() => setIsReadOnlyNew(true)}
                                 value={newPassword}
                                 onChange={(e) => setNewPassword(e.target.value)}
                                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent pr-12"
@@ -162,10 +201,18 @@ export default function ChangeAdminPassword() {
                         </label>
                         <div className="relative">
                             <input
-                                type={showConfirm ? "text" : "password"}
-                                required
+                                type="text"
+                                style={{ WebkitTextSecurity: showConfirm ? 'none' : 'disc' }}
+                                autoComplete="new-password"
+                                spellCheck="false"
+                                autoCorrect="off"
                                 value={confirmPassword}
                                 onChange={(e) => setConfirmPassword(e.target.value)}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                        handleSubmit(e);
+                                    }
+                                }}
                                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent pr-12"
                                 placeholder="Repite la nueva contraseña"
                                 disabled={loading || success}
@@ -184,8 +231,9 @@ export default function ChangeAdminPassword() {
                     </div>
 
                     <button
-                        type="submit"
-                        disabled={loading || success}
+                        type="button"
+                        onClick={handleSubmit}
+                        disabled={loading || success || !currentPassword || !newPassword || !confirmPassword}
                         className="w-full py-3 px-4 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition flex items-center justify-center gap-2"
                     >
                         {loading ? (
@@ -205,12 +253,12 @@ export default function ChangeAdminPassword() {
                             </>
                         )}
                     </button>
-                </form>
+                </div>
 
                 <div className="mt-6 p-4 bg-blue-50 rounded-lg">
                     <p className="text-sm text-blue-800">
-                        <strong>Nota:</strong> La contraseña debe tener al menos 6 caracteres.
-                        Asegúrate de recordarla, ya que la necesitarás para acceder al panel de administración.
+                        <strong>Nota:</strong> Si cambias la contraseña de una sección específica, dicho cambio no afectará a las demás.
+                        Usar "Cambiar para Todas" sobrescribirá todas las divisiones con la nueva clave.
                     </p>
                 </div>
             </div>

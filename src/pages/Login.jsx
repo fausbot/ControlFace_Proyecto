@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 
 import { Settings } from 'lucide-react';
 import AdminPasswordModal from '../components/AdminPasswordModal';
+import { fetchLicenseStatus } from '../services/licenseService';
 
 export default function Login() {
     const [email, setEmail] = useState('');
@@ -17,6 +18,7 @@ export default function Login() {
     const [showInstallBtn, setShowInstallBtn] = useState(false);
     const [isIOS, setIsIOS] = useState(false);
     const [isStandalone, setIsStandalone] = useState(false);
+    const [isLicenseValid, setIsLicenseValid] = useState(true);
 
     useEffect(() => {
         // Detectar si ya está instalada
@@ -35,6 +37,15 @@ export default function Login() {
             setDeferredPrompt(e);
             setShowInstallBtn(true);
         });
+
+        // Verificar la licencia antes de permitir el ingreso
+        const checkLicense = async () => {
+            const status = await fetchLicenseStatus();
+            if (status && status.decoded && (!status.decoded.isValid || status.decoded.isExpired)) {
+                setIsLicenseValid(false);
+            }
+        };
+        checkLicense();
     }, []);
 
     const handleInstallClick = async () => {
@@ -74,6 +85,12 @@ export default function Login() {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+
+        if (!isLicenseValid) {
+            setError('Acceso bloqueado: La licencia del sistema se encuentra caducada.');
+            return;
+        }
+
         try {
             setError('');
             let emailToUse = email.trim().toLowerCase();
@@ -108,13 +125,15 @@ export default function Login() {
     return (
         <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-500 to-purple-600 p-4 relative">
             <div className="absolute top-4 right-4 flex gap-2">
-                <button
-                    onClick={() => { setAdminTarget('/registro'); setShowAdminModal(true); }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-lg border border-white/30 backdrop-blur-sm transition text-xs font-bold"
-                >
-                    <Settings size={14} />
-                    REGISTRO
-                </button>
+                {isLicenseValid && (
+                    <button
+                        onClick={() => { setAdminTarget('/registro'); setShowAdminModal(true); }}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-lg border border-white/30 backdrop-blur-sm transition text-xs font-bold"
+                    >
+                        <Settings size={14} />
+                        REGISTRO
+                    </button>
+                )}
                 <button
                     onClick={() => { setAdminTarget('/datos'); setShowAdminModal(true); }}
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-lg border border-white/30 backdrop-blur-sm transition text-xs font-bold"
@@ -133,6 +152,7 @@ export default function Login() {
 
             <AdminPasswordModal
                 isOpen={showAdminModal}
+                target={adminTarget}
                 onClose={() => setShowAdminModal(false)}
                 onSuccess={() => {
                     setShowAdminModal(false);
@@ -175,12 +195,18 @@ export default function Login() {
                             onChange={(e) => setPassword(e.target.value)}
                         />
                     </div>
-                    <button
-                        type="submit"
-                        className="w-full flex justify-center py-3 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition duration-150"
-                    >
-                        Ingresar
-                    </button>
+                    {isLicenseValid ? (
+                        <button
+                            type="submit"
+                            className="w-full flex justify-center py-3 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition duration-150"
+                        >
+                            Ingresar
+                        </button>
+                    ) : (
+                        <div className="w-full text-center py-3 px-4 border border-red-400 rounded-lg bg-red-50 text-red-700 text-sm font-bold">
+                            ⚠️ ACCESO DESHABILITADO POR LICENCIA VENCIDA
+                        </div>
+                    )}
                 </form>
 
                 {(showInstallBtn && !isStandalone) && (
