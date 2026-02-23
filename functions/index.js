@@ -59,13 +59,13 @@ exports.deleteUser = functions.https.onCall(async (data, context) => {
     }
 
     try {
-        // 1. Eliminar de Authentication
-        await admin.auth().deleteUser(uid);
-
-        // 2. Obtener el email del usuario para agregarlo a la cola de borrado
+        // 1. Obtener el email del usuario ANTES de eliminarlo de Authentication
         const db = admin.firestore();
         const userRecord = await admin.auth().getUser(uid).catch(() => null);
         const userEmail = userRecord ? userRecord.email : null;
+
+        // 2. Eliminar de Authentication
+        await admin.auth().deleteUser(uid);
 
         if (userEmail) {
             // 3. Agregar a la cola de borrado en Firestore
@@ -77,13 +77,16 @@ exports.deleteUser = functions.https.onCall(async (data, context) => {
             });
 
             // 4. Eliminar de la colección employees si existe
-            const employeesQuery = db.collection('employees').where('email', '==', userEmail);
+            const employeesQuery = db.collection('employees').where('email', '==', userEmail.toLowerCase().trim());
             const employeesSnapshot = await employeesQuery.get();
-            const batch = db.batch();
-            employeesSnapshot.forEach(doc => {
-                batch.delete(doc.ref);
-            });
-            await batch.commit();
+
+            if (!employeesSnapshot.empty) {
+                const batch = db.batch();
+                employeesSnapshot.forEach(doc => {
+                    batch.delete(doc.ref);
+                });
+                await batch.commit();
+            }
         }
 
         return { success: true };
