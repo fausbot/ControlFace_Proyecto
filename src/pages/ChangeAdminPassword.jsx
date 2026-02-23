@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
 import { functions } from '../firebaseConfig';
 import { httpsCallable } from 'firebase/functions';
 import { Lock, Eye, EyeOff, ArrowLeft, CheckCircle } from 'lucide-react';
@@ -18,6 +19,13 @@ export default function ChangeAdminPassword() {
     const [isReadOnlyCurrent, setIsReadOnlyCurrent] = useState(true);
     const [isReadOnlyNew, setIsReadOnlyNew] = useState(true);
     const navigate = useNavigate();
+    const { isAdminAuthenticated } = useAuth();
+
+    useEffect(() => {
+        if (!isAdminAuthenticated) {
+            navigate('/login');
+        }
+    }, [isAdminAuthenticated, navigate]);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -58,7 +66,7 @@ export default function ChangeAdminPassword() {
 
                 // Redirigir después de 2 segundos
                 setTimeout(() => {
-                    navigate('/datos');
+                    navigate('/login');
                 }, 2000);
             } else {
                 setError(result.data.error || 'Error al cambiar la contraseña.');
@@ -75,7 +83,7 @@ export default function ChangeAdminPassword() {
         <div className="min-h-screen bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center p-4">
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8">
                 <button
-                    onClick={() => navigate('/datos')}
+                    onClick={() => navigate('/login')}
                     className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-6 transition"
                 >
                     <ArrowLeft size={20} />
