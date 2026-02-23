@@ -26,7 +26,8 @@ Dentro de la consola web de tu nuevo proyecto en Firebase (menú a la izquierda)
 1.  **Authentication (Autenticación):** 
     - Dale a "Comenzar" y activa únicamente la opción de "Correo electrónico/Contraseña".
 2.  **Firestore Database:** 
-    - Crea la base de datos (elige opción Reglas de Producción temporalmente o Reglas de Prueba).
+    - Crea la base de datos.
+    - **CRÍTICO:** Asegúrate de que las reglas de Firestore (`firestore.rules`) queden actualizadas al hacer el despliegue final (Paso 4) para permitir el "auto-saneamiento" de registros huérfanos sin errores de permisos.
 3.  **Storage (Para las fotos):**
     - Créalo también con las reglas por defecto.
     - **IMPORTANTE:** Para que la cámara funcione, [deberás configurar el "CORS"](https://firebase.google.com/docs/storage/web/download-files?hl=es-419#cors_configuration) en tu Storage (necesitas ejecutar un par de comandos desde la terminal para instalar y usar `gsutil`).
@@ -62,3 +63,20 @@ firebase deploy
 
 ### ¡Listo!
 Ahora ya puedes empezar a registrar Empleados. Todo el sistema usará los textos, colores y fotos limitados e independientes para tu nuevo cliente.
+
+---
+
+## 🛠️ Nuevas Funcionalidades y Mejoras (Actualizado)
+
+Al instalar esta nueva versión para un cliente, ten en cuenta las siguientes características de seguridad y gestión que ya están integradas:
+
+1. **Licenciamiento Estricto y Búfer de Gracia:**
+   - La nueva versión incluye un **búfer de gracia del 15%** al cupo máximo de empleados. La app avisará cuando se alcance el límite original, pero solo bloqueará la creación cuando se tope el límite absoluto (+15%).
+   - Si la licencia **vence por fecha límite**, la aplicación activa un **bloqueo estricto**. Desaparecen las opciones de Entrada, Salida y Novedad para el usuario final, y se bloquea el formulario de Login hasta que se inserte la nueva clave maestra con la licencia renovada en el panel de `Configuración`.
+
+2. **Terminología Actualizada:**
+   - Para evitar confusiones, el antiguo botón de "Incidente" en la cámara se ha renombrado en todas las pantallas a **"Reportar Novedad"**. (Internamente las carpetas de almacenamiento siguen llamándose `incidentes` para mantener compatibilidad).
+
+3. **Auto-Saneamiento al Exportar Fotos (Self-Healing):**
+   - Si necesitas borrar fotos manualmente ahorrando costos directamente desde la pestaña Storage en Firebase Console, ya no necesitas preocuparte por descuadrar la contabilidad.
+   - El sistema tiene una función de **auto-saneamiento**. Cuando el cliente presiona "Exportar Fotos" (ZIP) y el sistema detecta que la foto física ya no existe, borrará silenciosamente el registro fantasma ("recibo") de la base de datos y entregará el número real y exacto de fotos validadas.
