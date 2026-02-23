@@ -16,8 +16,6 @@ export default function ChangeAdminPassword() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     const [success, setSuccess] = useState(false);
-    const [isReadOnlyCurrent, setIsReadOnlyCurrent] = useState(true);
-    const [isReadOnlyNew, setIsReadOnlyNew] = useState(true);
     const navigate = useNavigate();
     const { isAdminAuthenticated } = useAuth();
 
@@ -146,9 +144,6 @@ export default function ChangeAdminPassword() {
                                 spellCheck="false"
                                 autoCorrect="off"
                                 data-lpignore="true"
-                                readOnly={isReadOnlyCurrent}
-                                onFocus={() => setIsReadOnlyCurrent(false)}
-                                onBlur={() => setIsReadOnlyCurrent(true)}
                                 value={currentPassword}
                                 onChange={(e) => setCurrentPassword(e.target.value)}
                                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent pr-12"
@@ -180,9 +175,6 @@ export default function ChangeAdminPassword() {
                                 spellCheck="false"
                                 autoCorrect="off"
                                 data-lpignore="true"
-                                readOnly={isReadOnlyNew}
-                                onFocus={() => setIsReadOnlyNew(false)}
-                                onBlur={() => setIsReadOnlyNew(true)}
                                 value={newPassword}
                                 onChange={(e) => setNewPassword(e.target.value)}
                                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent pr-12"

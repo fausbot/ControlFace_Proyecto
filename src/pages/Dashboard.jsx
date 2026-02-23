@@ -3,10 +3,9 @@ import Webcam from 'react-webcam';
 import { useAuth } from '../contexts/AuthContext';
 import { addWatermarkToImage, fetchServerTime, fetchLocationName } from '../utils/watermark';
 import { db } from '../firebaseConfig';
-import { collection, addDoc, query, where, getDocs, serverTimestamp, orderBy, limit, doc, getDoc } from 'firebase/firestore';
-import { Camera, MapPin, Search, CheckCircle, AlertCircle, LogOut, LogIn, Share2, Settings, UserCheck, ShieldAlert, TriangleAlert, User } from 'lucide-react';
+import { collection, addDoc, query, where, getDocs, serverTimestamp, doc, getDoc } from 'firebase/firestore';
+import { Camera, MapPin, CheckCircle, LogOut, LogIn, UserCheck, ShieldAlert, TriangleAlert } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import AdminPasswordModal from '../components/AdminPasswordModal';
 import * as faceapi from '@vladmandic/face-api';
 import { uploadPhoto } from '../services/storageService';
 import { fetchLicenseStatus } from '../services/licenseService';
@@ -26,8 +25,6 @@ export default function Dashboard() {
     const [step, setStep] = useState('idle'); // idle, camera, processing, success
     const [statusMessage, setStatusMessage] = useState('');
     const [isCapturing, setIsCapturing] = useState(false);
-    const [showAdminModal, setShowAdminModal] = useState(false);
-    const [adminTarget, setAdminTarget] = useState(''); // '/registro' or '/admin'
     const [modelsLoaded, setModelsLoaded] = useState(false);
     const [savedDescriptor, setSavedDescriptor] = useState(null);
     const [faceVerified, setFaceVerified] = useState(false);
@@ -496,40 +493,9 @@ export default function Dashboard() {
 
     return (
         <div className="min-h-screen bg-gray-100 flex flex-col">
-            <AdminPasswordModal
-                isOpen={showAdminModal}
-                onClose={() => setShowAdminModal(false)}
-                onSuccess={() => {
-                    setShowAdminModal(false);
-                    navigate(adminTarget);
-                }}
-            />
             {/* Header */}
             <div className="bg-white shadow p-4 flex justify-between items-center gap-2 overflow-x-auto">
-                <div className="flex gap-2 shrink-0">
-                    <button
-                        onClick={() => { setAdminTarget('/registro'); setShowAdminModal(true); }}
-                        className="flex flex-col items-center gap-0.5 text-green-600 font-bold border-2 border-green-200 px-3 py-1.5 rounded-xl hover:bg-green-50 transition"
-                    >
-                        <Settings size={18} />
-                        <span className="text-[10px] uppercase">Registro</span>
-                    </button>
-                    <button
-                        onClick={() => { setAdminTarget('/datos'); setShowAdminModal(true); }}
-                        className="flex flex-col items-center gap-0.5 text-blue-600 font-bold border-2 border-blue-200 px-3 py-1.5 rounded-xl hover:bg-blue-50 transition"
-                    >
-                        <Settings size={18} />
-                        <span className="text-[10px] uppercase">Datos</span>
-                    </button>
-                    <button
-                        onClick={() => { setAdminTarget('/configuracion'); setShowAdminModal(true); }}
-                        className="flex flex-col items-center gap-0.5 text-purple-600 font-bold border-2 border-purple-200 px-3 py-1.5 rounded-xl hover:bg-purple-50 transition"
-                    >
-                        <Settings size={18} />
-                        <span className="text-[10px] uppercase">Config</span>
-                    </button>
-                </div>
-                <h1 className="text-lg font-bold text-gray-800 flex-1 text-center truncate">Control Asistencia</h1>
+                <h1 className="text-lg font-bold text-gray-800 flex-1 text-left truncate">Control Asistencia</h1>
                 <button onClick={() => logout()} className="text-red-500 text-xs font-semibold hover:text-red-700 shrink-0">Salir</button>
             </div>
 

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Lock, Loader2 } from 'lucide-react';
+import { X, Lock, Loader2, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { functions } from '../firebaseConfig';
 import { httpsCallable } from 'firebase/functions';
@@ -8,7 +8,7 @@ export default function AdminPasswordModal({ isOpen, onClose, onSuccess, target 
     const [password, setPassword] = useState('');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
-    const [isReadOnly, setIsReadOnly] = useState(true);
+    const [showPassword, setShowPassword] = useState(false);
     const { grantAccess } = useAuth();
 
     if (!isOpen) return null;
@@ -63,30 +63,36 @@ export default function AdminPasswordModal({ isOpen, onClose, onSuccess, target 
                     </p>
 
                     <div className="space-y-2">
-                        <input
-                            type="text"
-                            style={{ WebkitTextSecurity: 'disc' }}
-                            name={`key_${Math.random().toString(36).substring(7)}`}
-                            id={`key_${Math.random().toString(36).substring(7)}`}
-                            autoComplete="off"
-                            spellCheck="false"
-                            autoCorrect="off"
-                            data-lpignore="true"
-                            data-form-type="other"
-                            readOnly={isReadOnly}
-                            onFocus={() => setIsReadOnly(false)}
-                            onBlur={() => setIsReadOnly(true)}
-                            value={password}
-                            onChange={(e) => setPassword(e.target.value)}
-                            onKeyDown={(e) => {
-                                if (e.key === 'Enter' && password) {
-                                    handleSubmit(e);
-                                }
-                            }}
-                            className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition text-lg tracking-widest"
-                            placeholder="••••••"
-                            autoFocus
-                        />
+                        <div className="relative">
+                            <input
+                                type="text"
+                                style={{ WebkitTextSecurity: showPassword ? 'none' : 'disc' }}
+                                name={`key_${Math.random().toString(36).substring(7)}`}
+                                id={`key_${Math.random().toString(36).substring(7)}`}
+                                autoComplete="off"
+                                spellCheck="false"
+                                autoCorrect="off"
+                                data-lpignore="true"
+                                data-form-type="other"
+                                value={password}
+                                onChange={(e) => setPassword(e.target.value)}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter' && password) {
+                                        handleSubmit(e);
+                                    }
+                                }}
+                                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition text-lg tracking-widest pr-12"
+                                placeholder={showPassword ? "Clave" : "••••••"}
+                                autoFocus
+                            />
+                            <button
+                                type="button"
+                                onClick={() => setShowPassword(!showPassword)}
+                                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                            >
+                                {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                            </button>
+                        </div>
                         {error && (
                             <p className="text-red-500 text-sm font-medium animate-pulse">
                                 {error}

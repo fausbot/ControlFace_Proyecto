@@ -19,7 +19,7 @@ registerSW({
 
 // --- CONTROL DE VERSIÓN FORZADO ---
 // Cambiar este número cuando se necesite forzar a TODOS los usuarios a recargar
-const APP_VERSION = import.meta.env.VITE_APP_VERSION || '1.3.1';
+const APP_VERSION = import.meta.env.VITE_APP_VERSION || '1.3.16';
 const savedVersion = localStorage.getItem('app_version');
 
 if (savedVersion !== APP_VERSION && !sessionStorage.getItem('reloaded_for_version')) {
