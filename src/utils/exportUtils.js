@@ -1,71 +1,136 @@
 /**
- * Generates an HTML-based XLS file and triggers download.
+ * Generates an XML-based Excel Spreadsheet 2003 file and triggers download.
+ * This native format prevents the "format and extension don't match" warning in modern Excel
+ * and properly supports background colors and borders.
  *
  * @param {string} filename The name of the downloaded file.
  * @param {string[]} headers Array of header strings.
  * @param {string[][]} rows Array of row arrays, where each row is an array of strings.
  */
 export const exportToExcelHTML = (filename, headers, rows) => {
-    // Escape XML/HTML special characters for basic safety
-    const escapeHtml = (unsafe) => {
+    // Escape XML special characters to prevent document corruption
+    const escapeXml = (unsafe) => {
         if (unsafe === null || unsafe === undefined) return '';
         return String(unsafe)
             .replace(/&/g, "&amp;")
             .replace(/</g, "&lt;")
             .replace(/>/g, "&gt;")
             .replace(/"/g, "&quot;")
-            .replace(/'/g, "&#039;");
+            .replace(/'/g, "&apos;");
     };
 
-    // Construcción de la tabla HTML
-    let tableHtml = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">';
-    tableHtml += '<head><meta charset="UTF-8">';
-    tableHtml += '<!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>Sheet1</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]-->';
-    tableHtml += `
-    <style>
-        table { border-collapse: collapse; width: 100%; font-family: Calibri, Arial, sans-serif; }
-        th, td { border: 1pt solid #000000; padding: 4px; }
-        th { background-color: #D9E1F2; font-weight: bold; text-align: center; }
-        td.first-col { background-color: #E2EFDA; font-weight: bold; }
-        .text { mso-number-format:"\\@"; } /* Tratar como texto plano */
-    </style>
-    `;
-    tableHtml += '</head><body><table>';
+    // Calculate columns count
+    const colCount = Math.max(headers.length, ...rows.map(r => r.length));
 
-    // Cabeceras
-    tableHtml += '<thead><tr>';
+    // Constructing the XML Spreadsheet 2003 structure
+    let xml = '<?xml version="1.0"?>\n';
+    xml += '<?mso-application progid="Excel.Sheet"?>\n';
+    xml += '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"\n';
+    xml += ' xmlns:o="urn:schemas-microsoft-com:office:office"\n';
+    xml += ' xmlns:x="urn:schemas-microsoft-com:office:excel"\n';
+    xml += ' xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"\n';
+    xml += ' xmlns:html="http://www.w3.org/TR/REC-html40">\n';
+
+    // Styles Definition
+    xml += '<Styles>\n';
+
+    // Default Style (s62)
+    xml += '  <Style ss:ID="Default" ss:Name="Normal">\n';
+    xml += '   <Alignment ss:Vertical="Bottom"/>\n';
+    xml += '   <Borders/>\n';
+    xml += '   <Font ss:FontName="Calibri" x:Family="Swiss" ss:Size="11" ss:Color="#000000"/>\n';
+    xml += '   <Interior/>\n';
+    xml += '   <NumberFormat/>\n';
+    xml += '   <Protection/>\n';
+    xml += '  </Style>\n';
+
+    // Header Style (s63) - Blue background, Bold, Centered, Borders
+    xml += '  <Style ss:ID="s63">\n';
+    xml += '   <Alignment ss:Horizontal="Center" ss:Vertical="Center" ss:WrapText="1"/>\n';
+    xml += '   <Borders>\n';
+    xml += '    <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1"/>\n';
+    xml += '    <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1"/>\n';
+    xml += '    <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1"/>\n';
+    xml += '    <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1"/>\n';
+    xml += '   </Borders>\n';
+    xml += '   <Font ss:FontName="Calibri" x:Family="Swiss" ss:Size="11" ss:Color="#000000" ss:Bold="1"/>\n';
+    xml += '   <Interior ss:Color="#D9E1F2" ss:Pattern="Solid"/>\n';
+    xml += '  </Style>\n';
+
+    // First Column Style (s64) - Green background, Text format, Borders
+    xml += '  <Style ss:ID="s64">\n';
+    xml += '   <Borders>\n';
+    xml += '    <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1"/>\n';
+    xml += '    <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1"/>\n';
+    xml += '    <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1"/>\n';
+    xml += '    <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1"/>\n';
+    xml += '   </Borders>\n';
+    xml += '   <Interior ss:Color="#E2EFDA" ss:Pattern="Solid"/>\n';
+    xml += '   <NumberFormat ss:Format="@"/>\n';
+    xml += '  </Style>\n';
+
+    // Standard Cell Style (s65) - Text format, Borders
+    xml += '  <Style ss:ID="s65">\n';
+    xml += '   <Borders>\n';
+    xml += '    <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1"/>\n';
+    xml += '    <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1"/>\n';
+    xml += '    <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1"/>\n';
+    xml += '    <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1"/>\n';
+    xml += '   </Borders>\n';
+    xml += '   <NumberFormat ss:Format="@"/>\n';
+    xml += '  </Style>\n';
+
+    xml += '</Styles>\n';
+
+    // Worksheet
+    xml += ' <Worksheet ss:Name="Reporte">\n';
+    xml += `  <Table ss:ExpandedColumnCount="${colCount}" ss:ExpandedRowCount="${rows.length + 1}" x:FullColumns="1" x:FullRows="1" ss:DefaultRowHeight="15">\n`;
+
+    // Auto-width for some columns (Optional, setting rough defaults)
+    for (let c = 0; c < colCount; c++) {
+        const width = c === 0 ? 150 : 100; // First column wider
+        xml += `   <Column ss:AutoFitWidth="0" ss:Width="${width}"/>\n`;
+    }
+
+    // Headers Row
+    xml += '   <Row ss:AutoFitHeight="0" ss:Height="25">\n';
     headers.forEach(header => {
-        tableHtml += `<th>${escapeHtml(header)}</th>`;
+        xml += `    <Cell ss:StyleID="s63"><Data ss:Type="String">${escapeXml(header)}</Data></Cell>\n`;
     });
-    tableHtml += '</tr></thead>';
+    xml += '   </Row>\n';
 
-    // Filas
-    tableHtml += '<tbody>';
+    // Data Rows
     rows.forEach(row => {
-        tableHtml += '<tr>';
+        xml += '   <Row ss:AutoFitHeight="0">\n';
         row.forEach((cell, index) => {
-            // Eliminar comillas dobles explícitas si vienen rodeando el valor (común en nuestro CSV formatter anterior)
             let cellValue = String(cell || '');
             if (cellValue.startsWith('"') && cellValue.endsWith('"') && cellValue.length >= 2) {
                 cellValue = cellValue.slice(1, -1);
-                // Restaurar comillas escapadas "" a "
                 cellValue = cellValue.replace(/""/g, '"');
             }
 
-            // La primera columna recibe clase `first-col`, y a todas les damos formato de texto `.text`
-            const className = index === 0 ? 'text first-col' : 'text';
-            tableHtml += `<td class="${className}">${escapeHtml(cellValue)}</td>`;
+            const styleId = index === 0 ? 's64' : 's65';
+            xml += `    <Cell ss:StyleID="${styleId}"><Data ss:Type="String">${escapeXml(cellValue)}</Data></Cell>\n`;
         });
-        tableHtml += '</tr>';
+        xml += '   </Row>\n';
     });
-    tableHtml += '</tbody></table></body></html>';
 
-    // Generar archivo y forzar descarga
-    const blob = new Blob(['\ufeff', tableHtml], { type: 'application/vnd.ms-excel;charset=utf-8' });
+    xml += '  </Table>\n';
+    xml += ' </Worksheet>\n';
+    xml += '</Workbook>\n';
+
+    // Generate output Blob (XML Spreadsheet extension can be .xls or .xml, .xml is safer for Excel 2007+, but 2003 XML works fine with .xls without warning in recent patches if mime is correct)
+    const blob = new Blob([xml], { type: 'application/vnd.ms-excel' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.setAttribute('href', url);
-    link.setAttribute('download', filename);
+
+    // If we name it .xml, Excel opens it perfectly as 2003 spreadsheet without warnings.
+    // If we name it .xls, some aggressive security settings in Windows still flag the mismatch of MIME.
+    // We will use .xml which is the standard extension for SpreadsheetML.
+    const safeFilename = filename.endsWith('.xls') ? filename.replace('.xls', '.xml') : filename;
+
+    link.setAttribute('download', safeFilename);
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
