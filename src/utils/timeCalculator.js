@@ -44,6 +44,10 @@ export const calculateLaborHours = (entry, exit, config = {}) => {
     let start = new Date(entry.getTime());
     let end = new Date(exit.getTime());
 
+    // Guardar original por si el redondeo colapsa el turno (ej. turnos de 5 mins)
+    const origStart = new Date(entry.getTime());
+    const origEnd = new Date(exit.getTime());
+
     // 1. Aplicar Redondeo
     if (config.calc_rounding && config.calc_roundingMins) {
         start = roundDateToNearest(start, config.calc_roundingMins);
@@ -53,7 +57,14 @@ export const calculateLaborHours = (entry, exit, config = {}) => {
     // Calcular duración total real redondeada
     let totalDurationMs = end.getTime() - start.getTime();
     if (totalDurationMs <= 0) {
-        return { error: 'Duración cero o negativa' };
+        // Verificar si fue culpa del redondeo (y el turno real era > 0)
+        if (origEnd.getTime() - origStart.getTime() > 0) {
+            start = origStart;
+            end = origEnd;
+            totalDurationMs = end.getTime() - start.getTime();
+        } else {
+            return { error: 'Duración cero o negativa' };
+        }
     }
 
     // Baldes de minutos (Acumuladores)
