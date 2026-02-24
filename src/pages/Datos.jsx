@@ -58,6 +58,7 @@ import {
 
 import { collection, getDocs, query, where, orderBy, getDoc, doc } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
+import { exportToExcelHTML } from '../utils/exportUtils';
 
 const PAGE_SIZE = 100;
 
@@ -80,6 +81,15 @@ export default function Datos() {
 
     // CSV Asistencia export
     const [csvUserFilter, setCsvUserFilter] = useState('');
+    const [exportFormatAttendance, setExportFormatAttendance] = useState('csv');
+
+    // Módulo Gestión Empleados (Borrar, Exportar)
+    const [showDeleteModal, setShowDeleteModal] = useState(false);
+    const [filterEmail, setFilterEmail] = useState('');
+    const [exportingEmployees, setExportingEmployees] = useState(false);
+    const [exportFormatEmployees, setExportFormatEmployees] = useState('csv');
+
+    const [exportFormatIncidents, setExportFormatIncidents] = useState('csv');
 
     // Descargador de fotos
     const [photoTipo, setPhotoTipo] = useState('ambos');
@@ -94,10 +104,7 @@ export default function Datos() {
     const [storageConfig, setStorageConfig] = useState(null);
     const [employeesMap, setEmployeesMap] = useState({});
 
-    // Módulo Gestión Empleados (Borrar, Exportar)
-    const [showDeleteModal, setShowDeleteModal] = useState(false);
-    const [filterEmail, setFilterEmail] = useState('');
-    const [exportingEmployees, setExportingEmployees] = useState(false);
+
 
     const navigate = useNavigate();
     const { isAdminAuthenticated, currentUser } = useAuth();
@@ -276,34 +283,42 @@ export default function Datos() {
             ];
 
             // 6. Construir filas
-            const escape = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-            const csvRows = [headers.join(',')];
+            const rows = [];
             authUsers.forEach(emp => {
                 const fs = fsMap[(emp.email || '').toLowerCase()] || {};
                 const created = emp.creationTime ? new Date(emp.creationTime).toLocaleString('es-ES') : 'N/A';
                 const lastLogin = emp.lastSignInTime ? new Date(emp.lastSignInTime).toLocaleString('es-ES') : 'N/A';
+
                 const row = [
-                    escape(emp.email),
-                    escape(fs.firstName || ''),
-                    escape(fs.lastName || ''),
-                    escape(created),
-                    escape(lastLogin),
-                    escape(emp.uid),
-                    ...activeOptionalKeys.map(({ key }) => escape(fs[key] || '')),
+                    emp.email || '',
+                    fs.firstName || '',
+                    fs.lastName || '',
+                    created,
+                    lastLogin,
+                    emp.uid || '',
+                    ...activeOptionalKeys.map(({ key }) => fs[key] || ''),
                 ];
-                csvRows.push(row.join(','));
+                rows.push(row);
             });
 
             const now = new Date();
             const ts = now.toISOString().slice(0, 16).replace(/[-:T]/g, '');
-            const blob = new Blob(['\ufeff' + csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
-            const link = document.createElement('a');
-            link.setAttribute('href', URL.createObjectURL(blob));
-            link.setAttribute('download', `empleados_auth_${ts}.csv`);
-            link.style.visibility = 'hidden';
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
+
+            if (exportFormatEmployees === 'xls') {
+                exportToExcelHTML(`empleados_auth_${ts}.xls`, headers, rows);
+            } else {
+                const escape = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+                const csvRows = [headers.join(',')];
+                rows.forEach(r => csvRows.push(r.map(escape).join(',')));
+                const blob = new Blob(['\ufeff' + csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+                const link = document.createElement('a');
+                link.setAttribute('href', URL.createObjectURL(blob));
+                link.setAttribute('download', `empleados_auth_${ts}.csv`);
+                link.style.visibility = 'hidden';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            }
         } catch (err) {
             console.error('Error exportando empleados:', err);
             alert('Error al exportar empleados: ' + err.message);
@@ -393,7 +408,7 @@ export default function Datos() {
                 'Fecha Salida', 'Hora Salida', 'Localidad Salida',
                 'Horas Trabajadas'
             ];
-            const csvRows = [headers.join(',')];
+            const rows = [];
 
             shifts.forEach(({ entry, exit, email }) => {
                 const emailKey = email || '';
@@ -429,39 +444,49 @@ export default function Datos() {
 
                 const row = [
                     refRec?.usuario || '',
-                    `"${emp.firstName}"`,
-                    `"${emp.lastName}"`,
+                    emp.firstName || '',
+                    emp.lastName || '',
                     diaNombre,
                     entry?.fecha || '-',
                     entry?.hora || '-',
-                    `"${(entry?.localidad || '-').replace(/"/g, '""')}"`,
+                    entry?.localidad || '-',
                     exit?.fecha || '-',
                     exit?.hora || '-',
-                    `"${(exit?.localidad || '-').replace(/"/g, '""')}"`,
+                    exit?.localidad || '-',
                     horasTrabajadas
                 ];
-                csvRows.push(row.join(','));
+                rows.push(row);
             });
 
-            // BOM para compatibilidad con Excel
-            const csvContent = '\ufeff' + csvRows.join('\n');
-            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement('a');
-
-            const now = new Date();
-            const ts = now.toISOString().slice(0, 16).replace(/[-:T]/g, '');
             const filterPart = csvUserFilter ? `_${csvUserFilter.replace(/[@.]/g, '')}` : '';
-            const fileName = startDate && endDate
-                ? `turnos_${startDate.replace(/-/g, '')}_${endDate.replace(/-/g, '')}${filterPart}_${ts}.csv`
-                : `turnos${filterPart}_${ts}.csv`;
+            const ts = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
 
-            link.setAttribute('href', url);
-            link.setAttribute('download', fileName);
-            link.style.visibility = 'hidden';
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
+            if (exportFormatAttendance === 'xls') {
+                const fileName = startDate && endDate
+                    ? `turnos_${startDate.replace(/-/g, '')}_${endDate.replace(/-/g, '')}${filterPart}_${ts}.xls`
+                    : `turnos${filterPart}_${ts}.xls`;
+                exportToExcelHTML(fileName, headers, rows);
+            } else {
+                const escape = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+                const csvRows = [headers.join(',')];
+                rows.forEach(r => csvRows.push(r.map(escape).join(',')));
+
+                const csvContent = '\ufeff' + csvRows.join('\n');
+                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+
+                const fileName = startDate && endDate
+                    ? `turnos_${startDate.replace(/-/g, '')}_${endDate.replace(/-/g, '')}${filterPart}_${ts}.csv`
+                    : `turnos${filterPart}_${ts}.csv`;
+
+                link.setAttribute('href', url);
+                link.setAttribute('download', fileName);
+                link.style.visibility = 'hidden';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            }
 
         } catch (error) {
             console.error('Error exportando CSV:', error);
@@ -504,35 +529,48 @@ export default function Datos() {
             }
 
             const headers = ['Usuario', 'Fecha', 'Hora', 'Localidad', 'Descripcion'];
-            const csvRows = [headers.join(',')];
+            const rows = [];
 
             incidents.forEach(inc => {
                 const row = [
                     inc.usuario || '',
                     inc.fecha || '',
                     inc.hora || '',
-                    `"${(inc.localidad || '').replace(/"/g, '""')}"`,
-                    `"${(inc.descripcion || '').replace(/"/g, '""')}"`,
+                    inc.localidad || '',
+                    inc.descripcion || '',
                 ];
-                csvRows.push(row.join(','));
+                rows.push(row);
             });
 
-            const csvContent = '\ufeff' + csvRows.join('\n');
-            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            const now = new Date();
-            const ts = now.toISOString().slice(0, 16).replace(/[-:T]/g, '');
+            const ts = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
             const filterPart = incidentCsvUserFilter ? `_${incidentCsvUserFilter.replace(/[@.]/g, '')}` : '';
-            const fileName = incidentStartDate && incidentEndDate
-                ? `incidentes_${incidentStartDate.replace(/-/g, '')}_${incidentEndDate.replace(/-/g, '')}${filterPart}_${ts}.csv`
-                : `incidentes${filterPart}_${ts}.csv`;
-            link.setAttribute('href', url);
-            link.setAttribute('download', fileName);
-            link.style.visibility = 'hidden';
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
+
+            if (exportFormatIncidents === 'xls') {
+                const fileName = incidentStartDate && incidentEndDate
+                    ? `incidentes_${incidentStartDate.replace(/-/g, '')}_${incidentEndDate.replace(/-/g, '')}${filterPart}_${ts}.xls`
+                    : `incidentes${filterPart}_${ts}.xls`;
+                exportToExcelHTML(fileName, headers, rows);
+            } else {
+                const escape = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+                const csvRows = [headers.join(',')];
+                rows.forEach(r => csvRows.push(r.map(escape).join(',')));
+
+                const csvContent = '\ufeff' + csvRows.join('\n');
+                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+
+                const fileName = incidentStartDate && incidentEndDate
+                    ? `incidentes_${incidentStartDate.replace(/-/g, '')}_${incidentEndDate.replace(/-/g, '')}${filterPart}_${ts}.csv`
+                    : `incidentes${filterPart}_${ts}.csv`;
+
+                link.setAttribute('href', url);
+                link.setAttribute('download', fileName);
+                link.style.visibility = 'hidden';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            }
         } catch (error) {
             console.error('Error exportando novedades:', error);
             alert('Error al exportar novedades. Intenta de nuevo.');
@@ -880,15 +918,24 @@ export default function Datos() {
                         </div>
                         <div className="md:col-span-1">
                             <button type="button" onClick={() => setShowDeleteModal(true)}
-                                className="flex items-center justify-center gap-2 w-full py-2.5 px-4 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700 font-bold transition shadow-sm">
+                                className="flex items-center justify-center gap-2 w-full py-2.5 px-4 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700 font-bold transition shadow-sm h-full">
                                 <Trash2 size={18} /> Borrar Empleado
                             </button>
                         </div>
-                        <div className="md:col-span-1">
+                        <div className="md:col-span-1 flex gap-2 w-full h-full">
+                            <select
+                                value={exportFormatEmployees}
+                                onChange={(e) => setExportFormatEmployees(e.target.value)}
+                                className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
+                                title="Formato de archivo"
+                            >
+                                <option value="csv">CSV</option>
+                                <option value="xls">Excel (XLS)</option>
+                            </select>
                             <button type="button" onClick={exportEmployeesToCSV} disabled={exportingEmployees}
-                                className="flex items-center justify-center gap-2 w-full py-2.5 px-4 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 font-bold transition shadow-sm disabled:opacity-50">
+                                className="flex-1 flex items-center justify-center gap-2 py-2.5 px-3 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 font-bold transition shadow-sm disabled:opacity-50">
                                 {exportingEmployees ? <Loader2 size={18} className="animate-spin" /> : <FileText size={18} />}
-                                Exportar CSV
+                                Exportar
                             </button>
                         </div>
                     </div>
@@ -936,14 +983,25 @@ export default function Datos() {
                                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                             />
                         </div>
-                        <button
-                            onClick={exportToCSV}
-                            disabled={exporting}
-                            className="px-6 py-2 h-[42px] bg-green-600 text-white font-bold rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition"
-                        >
-                            <Download size={20} />
-                            {exporting ? 'Exportando...' : 'Exportar CSV'}
-                        </button>
+                        <div className="flex gap-2 w-full">
+                            <select
+                                value={exportFormatAttendance}
+                                onChange={(e) => setExportFormatAttendance(e.target.value)}
+                                className="px-3 py-2 h-[42px] border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-green-500"
+                                title="Formato de archivo"
+                            >
+                                <option value="csv">CSV</option>
+                                <option value="xls">Excel (XLS)</option>
+                            </select>
+                            <button
+                                onClick={exportToCSV}
+                                disabled={exporting}
+                                className="flex-1 px-4 py-2 h-[42px] bg-green-600 text-white font-bold rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition"
+                            >
+                                <Download size={20} />
+                                {exporting ? 'Exportando...' : 'Exportar'}
+                            </button>
+                        </div>
                     </div>
 
                     <p className="text-sm text-gray-500 mt-3">
@@ -1015,14 +1073,25 @@ export default function Datos() {
                                 className="w-full px-4 py-2 border border-orange-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
                             />
                         </div>
-                        <button
-                            onClick={exportIncidentsToCSV}
-                            disabled={exportingIncidents}
-                            className="px-6 py-2 h-[42px] bg-orange-600 text-white font-bold rounded-lg hover:bg-orange-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition"
-                        >
-                            <Download size={20} />
-                            {exportingIncidents ? 'Exportando...' : 'Exportar CSV'}
-                        </button>
+                        <div className="flex gap-2 w-full">
+                            <select
+                                value={exportFormatIncidents}
+                                onChange={(e) => setExportFormatIncidents(e.target.value)}
+                                className="px-3 py-2 h-[42px] border border-orange-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-orange-500"
+                                title="Formato de archivo"
+                            >
+                                <option value="csv">CSV</option>
+                                <option value="xls">Excel (XLS)</option>
+                            </select>
+                            <button
+                                onClick={exportIncidentsToCSV}
+                                disabled={exportingIncidents}
+                                className="flex-1 px-4 py-2 h-[42px] bg-orange-600 text-white font-bold rounded-lg hover:bg-orange-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition"
+                            >
+                                <Download size={20} />
+                                {exportingIncidents ? 'Exportando...' : 'Exportar'}
+                            </button>
+                        </div>
                     </div>
 
                     <p className="text-sm text-gray-500 mt-3">
