@@ -304,8 +304,8 @@ export default function Datos() {
             const now = new Date();
             const ts = now.toISOString().slice(0, 16).replace(/[-:T]/g, '');
 
-            if (exportFormatEmployees === 'xls') {
-                exportToExcelHTML(`empleados_auth_${ts}.xls`, headers, rows);
+            if (exportFormatEmployees === 'xlsx') {
+                exportToExcelHTML(`empleados_auth_${ts}.xlsx`, headers, rows);
             } else {
                 const escape = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
                 const csvRows = [headers.join(',')];
@@ -461,10 +461,10 @@ export default function Datos() {
             const filterPart = csvUserFilter ? `_${csvUserFilter.replace(/[@.]/g, '')}` : '';
             const ts = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
 
-            if (exportFormatAttendance === 'xls') {
+            if (exportFormatAttendance === 'xlsx') {
                 const fileName = startDate && endDate
-                    ? `turnos_${startDate.replace(/-/g, '')}_${endDate.replace(/-/g, '')}${filterPart}_${ts}.xls`
-                    : `turnos${filterPart}_${ts}.xls`;
+                    ? `turnos_${startDate.replace(/-/g, '')}_${endDate.replace(/-/g, '')}${filterPart}_${ts}.xlsx`
+                    : `turnos${filterPart}_${ts}.xlsx`;
                 exportToExcelHTML(fileName, headers, rows);
             } else {
                 const escape = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
@@ -545,10 +545,10 @@ export default function Datos() {
             const ts = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
             const filterPart = incidentCsvUserFilter ? `_${incidentCsvUserFilter.replace(/[@.]/g, '')}` : '';
 
-            if (exportFormatIncidents === 'xls') {
+            if (exportFormatIncidents === 'xlsx') {
                 const fileName = incidentStartDate && incidentEndDate
-                    ? `incidentes_${incidentStartDate.replace(/-/g, '')}_${incidentEndDate.replace(/-/g, '')}${filterPart}_${ts}.xls`
-                    : `incidentes${filterPart}_${ts}.xls`;
+                    ? `incidentes_${incidentStartDate.replace(/-/g, '')}_${incidentEndDate.replace(/-/g, '')}${filterPart}_${ts}.xlsx`
+                    : `incidentes${filterPart}_${ts}.xlsx`;
                 exportToExcelHTML(fileName, headers, rows);
             } else {
                 const escape = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
@@ -930,7 +930,7 @@ export default function Datos() {
                                 title="Formato de archivo"
                             >
                                 <option value="csv">CSV</option>
-                                <option value="xls">Excel (XLS)</option>
+                                <option value="xlsx">Excel (XLSX)</option>
                             </select>
                             <button type="button" onClick={exportEmployeesToCSV} disabled={exportingEmployees}
                                 className="flex-1 flex items-center justify-center gap-2 py-2.5 px-3 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 font-bold transition shadow-sm disabled:opacity-50">
@@ -991,7 +991,7 @@ export default function Datos() {
                                 title="Formato de archivo"
                             >
                                 <option value="csv">CSV</option>
-                                <option value="xls">Excel (XLS)</option>
+                                <option value="xlsx">Excel (XLSX)</option>
                             </select>
                             <button
                                 onClick={exportToCSV}
@@ -1081,7 +1081,7 @@ export default function Datos() {
                                 title="Formato de archivo"
                             >
                                 <option value="csv">CSV</option>
-                                <option value="xls">Excel (XLS)</option>
+                                <option value="xlsx">Excel (XLSX)</option>
                             </select>
                             <button
                                 onClick={exportIncidentsToCSV}

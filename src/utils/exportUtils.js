@@ -1,5 +1,9 @@
+import * as XLSX from 'xlsx-js-style';
+
 /**
- * Generates an HTML-based file encoded properly to bypass strict Excel warnings
+ * Generates a true binary .xlsx file encoded with styles 
+ * using the xlsx-js-style library (SheetJS fork).
+ * This natively prevents Excel format/extension mismatch warnings
  * while maintaining background colors, bold text, and borders.
  *
  * @param {string} filename The name of the downloaded file.
@@ -7,83 +11,81 @@
  * @param {string[][]} rows Array of row arrays, where each row is an array of strings.
  */
 export const exportToExcelHTML = (filename, headers, rows) => {
-    // Escape HTML special characters
-    const escapeHtml = (unsafe) => {
-        if (unsafe === null || unsafe === undefined) return '';
-        return String(unsafe)
-            .replace(/&/g, "&amp;")
-            .replace(/</g, "&lt;")
-            .replace(/>/g, "&gt;")
-            .replace(/"/g, "&quot;")
-            .replace(/'/g, "&#039;");
+    // Combine headers and rows
+    const ws_data = [headers, ...rows];
+
+    // Create worksheet
+    const ws = XLSX.utils.aoa_to_sheet(ws_data);
+
+    // Default border style
+    const defaultBorder = {
+        top: { style: "thin", color: { auto: 1 } },
+        bottom: { style: "thin", color: { auto: 1 } },
+        left: { style: "thin", color: { auto: 1 } },
+        right: { style: "thin", color: { auto: 1 } }
     };
 
-    // The key to avoiding the warning in modern Excel when using HTML is including the mso-excel schemas
-    // and properly encoding it as a Blob with UTF-8 BOM, but we stick to standard HTML table which Excel parses natively.
-    let tableHtml = `
-<html xmlns:o="urn:schemas-microsoft-com:office:office" 
-      xmlns:x="urn:schemas-microsoft-com:office:excel" 
-      xmlns="http://www.w3.org/TR/REC-html40">
-<head>
-    <meta charset="utf-8">
-    <style>
-        table { border-collapse: collapse; width: 100%; font-family: Calibri, sans-serif; }
-        th, td { border: .5pt solid #000000; padding: 5px; }
-        th { background-color: #D9E1F2; font-weight: bold; text-align: center; }
-        td.first-col { background-color: #E2EFDA; font-weight: bold; }
-        .text-format { mso-number-format: "\\@"; } /* Force Excel to treat as text */
-    </style>
-</head>
-<body>
-    <table>
-        <thead>
-            <tr>`;
+    // Apply styles to headers (row 0)
+    for (let c = 0; c < headers.length; c++) {
+        const cellRef = XLSX.utils.encode_cell({ r: 0, c: c });
+        if (!ws[cellRef]) continue;
 
-    // Headers
-    headers.forEach(header => {
-        tableHtml += `<th>${escapeHtml(header)}</th>`;
-    });
-    tableHtml += `</tr>
-        </thead>
-        <tbody>`;
+        ws[cellRef].s = {
+            fill: { fgColor: { rgb: "D9E1F2" } }, // Light blue
+            font: { bold: true, name: "Calibri", sz: 11 },
+            border: defaultBorder,
+            alignment: { horizontal: "center", vertical: "center" }
+        };
+    }
 
-    // Data Rows
-    rows.forEach(row => {
-        tableHtml += '<tr>';
-        row.forEach((cell, index) => {
-            let cellValue = String(cell || '');
-            if (cellValue.startsWith('"') && cellValue.endsWith('"') && cellValue.length >= 2) {
-                cellValue = cellValue.slice(1, -1);
-                cellValue = cellValue.replace(/""/g, '"');
+    // Apply styles to data rows
+    for (let r = 1; r <= rows.length; r++) {
+        for (let c = 0; c < headers.length; c++) {
+            const cellRef = XLSX.utils.encode_cell({ r: r, c: c });
+
+            // If cell is empty, still create it to apply borders
+            if (!ws[cellRef]) {
+                ws[cellRef] = { t: 's', v: '' };
             }
 
-            const extraClass = index === 0 ? ' first-col' : '';
-            tableHtml += `<td class="text-format${extraClass}">${escapeHtml(cellValue)}</td>`;
-        });
-        tableHtml += '</tr>\n';
-    });
+            // Force cell type to string to prevent dropping leading zeros or weird number formatting
+            ws[cellRef].t = 's';
+            if (ws[cellRef].v !== undefined && ws[cellRef].v !== null) {
+                // Remove trailing/leading artificial quotes if inherited from previous CSV logic
+                let val = String(ws[cellRef].v);
+                if (val.startsWith('"') && val.endsWith('"') && val.length >= 2) {
+                    val = val.slice(1, -1);
+                    val = val.replace(/""/g, '"');
+                }
+                ws[cellRef].v = val;
+            }
 
-    tableHtml += `
-        </tbody>
-    </table>
-</body>
-</html>`;
+            // Base style: just borders
+            ws[cellRef].s = {
+                font: { name: "Calibri", sz: 11 },
+                border: defaultBorder,
+                alignment: { vertical: "center" }
+            };
 
-    // Para evitar advertencias de Excel, a veces es mejor un Data URI Base64 si el archivo no es inmenso.
-    // Usaremos un Blob estandar con Excel MIME type y BOM.
-    const blob = new Blob(['\ufeff', tableHtml], { type: 'application/vnd.ms-excel;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
+            // First column styling (light green background and bold)
+            if (c === 0) {
+                ws[cellRef].s.fill = { fgColor: { rgb: "E2EFDA" } };
+                ws[cellRef].s.font.bold = true;
+            }
+        }
+    }
 
-    // Asegurarse que es extension .xls
-    const safeFilename = filename.endsWith('.xls') || filename.endsWith('.csv') || filename.endsWith('.xml')
-        ? filename.replace(/\.(xls|csv|xml)$/i, '.xls')
-        : filename + '.xls';
+    // Set column widths (first column wider, others normal)
+    const colWidths = headers.map((_, i) => ({ wch: i === 0 ? 25 : 20 }));
+    ws['!cols'] = colWidths;
 
-    link.setAttribute('href', url);
-    link.setAttribute('download', safeFilename);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    // Create workbook and append worksheet
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Reporte");
+
+    // Ensure the downloaded extension matches the binary format
+    const safeFilename = filename.replace(/\.(xls|xml|csv)$/i, '.xlsx');
+
+    // Trigger download
+    XLSX.writeFile(wb, safeFilename);
 };
