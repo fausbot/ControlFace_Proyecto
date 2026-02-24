@@ -442,7 +442,7 @@ export default function Datos() {
                             const decimalHours = (totalSec / 3600).toFixed(2);
                             horasTrabajadas = decimalHours;
                         } else {
-                            horasTrabajadas = 'Error';
+                            horasTrabajadas = '0';
                         }
                     } else if (!entry) {
                         horasTrabajadas = 'Sin Entrada';
@@ -489,7 +489,11 @@ export default function Datos() {
                         if (!calc.error) {
                             horas = calc.format;
                         } else {
-                            horas.totalHHMM = 'Error: ' + calc.error;
+                            horas.diurnas = '0';
+                            horas.nocturnas = '0';
+                            horas.domDiurnas = '0';
+                            horas.domNocturnas = '0';
+                            horas.totalHHMM = '0';
                         }
                     }
 
