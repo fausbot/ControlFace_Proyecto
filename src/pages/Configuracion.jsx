@@ -50,6 +50,11 @@ const DEFAULT_CONFIG = {
     storage_saveIncidentes: true,
     storage_retentionAsistencia: 3,
     storage_retentionIncidentes: 18,
+    // defaults calculo tiempo
+    calc_rounding: false,
+    calc_roundingMins: 15,
+    calc_lunch: false,
+    calc_lunchMins: 60,
 };
 
 export default function Configuracion() {
@@ -99,9 +104,9 @@ export default function Configuracion() {
         setSavedOk(false);
     };
 
-    const handleNumberChange = (key, value) => {
+    const handleNumberChange = (key, value, maxVal = 60) => {
         const val = parseInt(value, 10);
-        setConfig(prev => ({ ...prev, [key]: isNaN(val) ? 1 : val > 60 ? 60 : val < 1 ? 1 : val }));
+        setConfig(prev => ({ ...prev, [key]: isNaN(val) ? 1 : val > maxVal ? maxVal : val < 1 ? 1 : val }));
         setSavedOk(false);
     };
 
@@ -282,6 +287,74 @@ export default function Configuracion() {
                                     value={config.storage_retentionIncidentes ?? 18}
                                     onChange={(e) => handleNumberChange('storage_retentionIncidentes', e.target.value)}
                                     className="px-3 py-2 border border-orange-200 rounded-lg focus:ring-2 focus:ring-orange-500 disabled:bg-gray-200 disabled:opacity-50"
+                                />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* ─── GESTIÓN DE CÁLCULO DE HORAS ─── */}
+                <div className="bg-white rounded-xl shadow-lg p-6 mb-6 border-l-4 border-teal-500">
+                    <h2 className="text-xl font-bold text-teal-800 mb-2">Cálculo de Tiempo Laborado</h2>
+                    <p className="text-sm text-gray-600 mb-4">
+                        Configura el redondeo de entradas/salidas y el descuento automático de tiempo de almuerzo aplicable únicamente a turnos de más de 8 horas.
+                    </p>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {/* REDONDEO */}
+                        <div className="space-y-3 bg-teal-50 p-4 rounded-xl border border-teal-100">
+                            <h3 className="font-bold text-teal-700">Redondeo de Horas</h3>
+                            <button
+                                onClick={() => toggle('calc_rounding')}
+                                className={`w-full flex items-center justify-between px-4 py-3 rounded-lg border-2 text-left transition font-medium text-sm
+                                    ${config.calc_rounding !== false
+                                        ? 'border-teal-500 bg-white text-teal-800'
+                                        : 'border-gray-300 bg-gray-100 text-gray-400 opacity-60'}`}
+                            >
+                                <span className="flex items-center gap-2">
+                                    {config.calc_rounding !== false ? <CheckSquare size={20} className="text-teal-600" /> : <Square size={20} />}
+                                    Activar redondeo cercano
+                                </span>
+                            </button>
+                            <p className="text-xs text-teal-700 opacity-80 leading-tight">Ejemplo: si es 15min, ingresar a las 07:58 se redondeará automáticamente a las 08:00 para el reporte detallado.</p>
+                            <div className="flex flex-col gap-1">
+                                <label className="text-xs font-bold text-teal-800 opacity-80">Fracción en Minutos</label>
+                                <input
+                                    type="number"
+                                    min="1" max="60"
+                                    disabled={config.calc_rounding === false}
+                                    value={config.calc_roundingMins ?? 15}
+                                    onChange={(e) => handleNumberChange('calc_roundingMins', e.target.value)}
+                                    className="px-3 py-2 border border-teal-200 rounded-lg focus:ring-2 focus:ring-teal-500 disabled:bg-gray-200 disabled:opacity-50"
+                                />
+                            </div>
+                        </div>
+
+                        {/* ALMUERZO */}
+                        <div className="space-y-3 bg-indigo-50 p-4 rounded-xl border border-indigo-100">
+                            <h3 className="font-bold text-indigo-700">Descuento de Almuerzo</h3>
+                            <button
+                                onClick={() => toggle('calc_lunch')}
+                                className={`w-full flex items-center justify-between px-4 py-3 rounded-lg border-2 text-left transition font-medium text-sm
+                                    ${config.calc_lunch !== false
+                                        ? 'border-indigo-500 bg-white text-indigo-800'
+                                        : 'border-gray-300 bg-gray-100 text-gray-400 opacity-60'}`}
+                            >
+                                <span className="flex items-center gap-2">
+                                    {config.calc_lunch !== false ? <CheckSquare size={20} className="text-indigo-600" /> : <Square size={20} />}
+                                    Descontar automáticamente
+                                </span>
+                            </button>
+                            <p className="text-xs text-indigo-700 opacity-80 leading-tight">Solo aplicará si el empleado registra un tiempo laborado superior a 8 horas.</p>
+                            <div className="flex flex-col gap-1">
+                                <label className="text-xs font-bold text-indigo-800 opacity-80">Tiempo a descontar (Minutos)</label>
+                                <input
+                                    type="number"
+                                    min="1" max="180"
+                                    disabled={config.calc_lunch === false}
+                                    value={config.calc_lunchMins ?? 60}
+                                    onChange={(e) => handleNumberChange('calc_lunchMins', e.target.value, 180)}
+                                    className="px-3 py-2 border border-indigo-200 rounded-lg focus:ring-2 focus:ring-indigo-500 disabled:bg-gray-200 disabled:opacity-50"
                                 />
                             </div>
                         </div>

@@ -82,6 +82,9 @@ export default function Datos() {
     // CSV Asistencia export
     const [csvUserFilter, setCsvUserFilter] = useState('');
     const [exportFormatAttendance, setExportFormatAttendance] = useState('csv');
+    const [attendanceReportType, setAttendanceReportType] = useState('estandar'); // estandar, detallado_horas, resumen
+    const [timeConfig, setTimeConfig] = useState({});
+
 
     // Módulo Gestión Empleados (Borrar, Exportar)
     const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -135,6 +138,11 @@ export default function Datos() {
                 };
             }
             setStorageConfig(settings);
+
+            const snapTime = await getDoc(doc(db, 'settings', 'employeeFields'));
+            if (snapTime.exists()) {
+                setTimeConfig(snapTime.data());
+            }
 
             // Ejecutar limpieza silenciosa si está encendido al menos uno
             if (settings.saveAsistencia || settings.saveIncidentes) {
@@ -401,62 +409,149 @@ export default function Datos() {
                 return tA - tB;
             });
 
-            // 6. Construir filas del CSV
-            const headers = [
-                'Usuario', 'Nombres', 'Apellidos',
-                'Dia Entrada', 'Fecha Entrada', 'Hora Entrada', 'Localidad Entrada',
-                'Fecha Salida', 'Hora Salida', 'Localidad Salida',
-                'Horas Trabajadas'
-            ];
-            const rows = [];
+            // 6. Construir filas según el tipo de reporte seleccionado
+            let headers = [];
+            let rows = [];
 
-            shifts.forEach(({ entry, exit, email }) => {
-                const emailKey = email || '';
-                const emp = employeesMap[emailKey] || { firstName: '', lastName: '' };
-
-                // Día de la semana basado en la entrada (o salida si no hay entrada)
-                let diaNombre = 'N/A';
-                const refRec = entry || exit;
-                if (refRec?.fecha) {
-                    const d = parseSpanishDate(refRec.fecha);
-                    if (d) {
-                        diaNombre = dayFormatter.format(d);
-                        diaNombre = diaNombre.charAt(0).toUpperCase() + diaNombre.slice(1);
-                    }
-                }
-
-                // Calcular horas trabajadas usando Timestamps reales (maneja cruces de medianoche)
-                let horasTrabajadas = 'Pendiente';
-                if (entry && exit && entry.timestamp?.toMillis && exit.timestamp?.toMillis) {
-                    const diffMs = exit.timestamp.toMillis() - entry.timestamp.toMillis();
-                    if (diffMs >= 0) {
-                        const totalSec = Math.floor(diffMs / 1000);
-                        const hh = Math.floor(totalSec / 3600).toString().padStart(2, '0');
-                        const mm = Math.floor((totalSec % 3600) / 60).toString().padStart(2, '0');
-                        const ss = (totalSec % 60).toString().padStart(2, '0');
-                        horasTrabajadas = `${hh}:${mm}:${ss}`;
-                    } else {
-                        horasTrabajadas = 'Error';
-                    }
-                } else if (!entry) {
-                    horasTrabajadas = 'Sin Entrada';
-                }
-
-                const row = [
-                    refRec?.usuario || '',
-                    emp.firstName || '',
-                    emp.lastName || '',
-                    diaNombre,
-                    entry?.fecha || '-',
-                    entry?.hora || '-',
-                    entry?.localidad || '-',
-                    exit?.fecha || '-',
-                    exit?.hora || '-',
-                    exit?.localidad || '-',
-                    horasTrabajadas
+            if (attendanceReportType === 'estandar') {
+                headers = [
+                    'Usuario', 'Nombres', 'Apellidos',
+                    'Dia Entrada', 'Fecha Entrada', 'Hora Entrada', 'Localidad Entrada',
+                    'Fecha Salida', 'Hora Salida', 'Localidad Salida',
+                    'Horas Trabajadas'
                 ];
-                rows.push(row);
-            });
+                shifts.forEach(({ entry, exit, email }) => {
+                    const emailKey = email || '';
+                    const emp = employeesMap[emailKey] || { firstName: '', lastName: '' };
+
+                    let diaNombre = 'N/A';
+                    const refRec = entry || exit;
+                    if (refRec?.fecha) {
+                        const d = parseSpanishDate(refRec.fecha);
+                        if (d) {
+                            diaNombre = dayFormatter.format(d);
+                            diaNombre = diaNombre.charAt(0).toUpperCase() + diaNombre.slice(1);
+                        }
+                    }
+
+                    let horasTrabajadas = 'Pendiente';
+                    if (entry && exit && entry.timestamp?.toMillis && exit.timestamp?.toMillis) {
+                        const diffMs = exit.timestamp.toMillis() - entry.timestamp.toMillis();
+                        if (diffMs >= 0) {
+                            const totalSec = Math.floor(diffMs / 1000);
+                            const hh = Math.floor(totalSec / 3600).toString().padStart(2, '0');
+                            const mm = Math.floor((totalSec % 3600) / 60).toString().padStart(2, '0');
+                            const ss = (totalSec % 60).toString().padStart(2, '0');
+                            horasTrabajadas = `${hh}:${mm}:${ss}`;
+                        } else {
+                            horasTrabajadas = 'Error';
+                        }
+                    } else if (!entry) {
+                        horasTrabajadas = 'Sin Entrada';
+                    }
+
+                    rows.push([
+                        refRec?.usuario || '', emp.firstName || '', emp.lastName || '', diaNombre,
+                        entry?.fecha || '-', entry?.hora || '-', entry?.localidad || '-',
+                        exit?.fecha || '-', exit?.hora || '-', exit?.localidad || '-',
+                        horasTrabajadas
+                    ]);
+                });
+
+            } else if (attendanceReportType === 'detallado_horas') {
+                headers = [
+                    'Usuario', 'Nombres', 'Apellidos', 'Dia',
+                    'Fecha Ingreso', 'Hora Ingreso', 'Fecha Salida', 'Hora Salida',
+                    'Horas Diurnas', 'Horas Nocturnas', 'Horas Dom/Fest Diurnas', 'Horas Dom/Fest Nocturnas', 'Total Horas'
+                ];
+
+                shifts.forEach(({ entry, exit, email }) => {
+                    const emailKey = email || '';
+                    const emp = employeesMap[emailKey] || { firstName: '', lastName: '' };
+
+                    let diaNombre = 'N/A';
+                    const refRec = entry || exit;
+                    if (refRec?.fecha) {
+                        const d = parseSpanishDate(refRec.fecha);
+                        if (d) {
+                            diaNombre = dayFormatter.format(d);
+                            diaNombre = diaNombre.charAt(0).toUpperCase() + diaNombre.slice(1);
+                        }
+                    }
+
+                    let horas = { diurnas: '-', nocturnas: '-', domDiurnas: '-', domNocturnas: '-', totalHHMM: 'Pendiente/Sin Salida' };
+
+                    if (entry?.timestamp && exit?.timestamp) {
+                        // Usamos la nueva utilidad de calculo de tiempo
+                        const calc = calculateLaborHours(
+                            entry.timestamp.toDate(),
+                            exit.timestamp.toDate(),
+                            timeConfig
+                        );
+                        if (!calc.error) {
+                            horas = calc.format;
+                        } else {
+                            horas.totalHHMM = 'Error: ' + calc.error;
+                        }
+                    }
+
+                    rows.push([
+                        refRec?.usuario || '', emp.firstName || '', emp.lastName || '', diaNombre,
+                        entry?.fecha || '-', entry?.hora || '-',
+                        exit?.fecha || '-', exit?.hora || '-',
+                        horas.diurnas, horas.nocturnas, horas.domDiurnas, horas.domNocturnas, horas.totalHHMM
+                    ]);
+                });
+
+            } else if (attendanceReportType === 'resumen') {
+                headers = [
+                    'Usuario', 'Nombres', 'Apellidos',
+                    'Total Horas Diurnas', 'Total Horas Nocturnas',
+                    'Total Dom/Fest Diurnas', 'Total Dom/Fest Nocturnas', 'Total General'
+                ];
+
+                // Agrupar por email
+                const summaryMap = {};
+
+                shifts.forEach(({ entry, exit, email }) => {
+                    const emailKey = email || 'Desconocido';
+                    if (!summaryMap[emailKey]) {
+                        summaryMap[emailKey] = {
+                            usuario: (entry || exit)?.usuario || '',
+                            firstName: employeesMap[emailKey]?.firstName || '',
+                            lastName: employeesMap[emailKey]?.lastName || '',
+                            rawDiurnas: 0, rawNocturnas: 0, rawDomDiurnas: 0, rawDomNocturnas: 0
+                        };
+                    }
+
+                    if (entry?.timestamp && exit?.timestamp) {
+                        const calc = calculateLaborHours(entry.timestamp.toDate(), exit.timestamp.toDate(), timeConfig);
+                        if (!calc.error) {
+                            summaryMap[emailKey].rawDiurnas += calc.raw.diurnas;
+                            summaryMap[emailKey].rawNocturnas += calc.raw.nocturnas;
+                            summaryMap[emailKey].rawDomDiurnas += calc.raw.domDiurnas;
+                            summaryMap[emailKey].rawDomNocturnas += calc.raw.domNocturnas;
+                        }
+                    }
+                });
+
+                // Func de apoyo
+                const fHHMM = (m) => {
+                    const hh = Math.floor(m / 60).toString().padStart(2, '0');
+                    const mm = Math.floor(m % 60).toString().padStart(2, '0');
+                    return `${hh}:${mm}`;
+                };
+
+                Object.values(summaryMap).forEach(suma => {
+                    const totalMins = suma.rawDiurnas + suma.rawNocturnas + suma.rawDomDiurnas + suma.rawDomNocturnas;
+                    rows.push([
+                        suma.usuario, suma.firstName, suma.lastName,
+                        fHHMM(suma.rawDiurnas), fHHMM(suma.rawNocturnas),
+                        fHHMM(suma.rawDomDiurnas), fHHMM(suma.rawDomNocturnas),
+                        fHHMM(totalMins)
+                    ]);
+                });
+            }
 
             const filterPart = csvUserFilter ? `_${csvUserFilter.replace(/[@.]/g, '')}` : '';
             const ts = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
@@ -983,11 +1078,21 @@ export default function Datos() {
                                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                             />
                         </div>
-                        <div className="flex gap-2 w-full">
+                        <div className="flex gap-2 w-full mt-2 md:mt-0 col-span-1 md:col-span-4">
+                            <select
+                                value={attendanceReportType}
+                                onChange={(e) => setAttendanceReportType(e.target.value)}
+                                className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500"
+                                title="Tipo de Reporte"
+                            >
+                                <option value="estandar">Detallado Estándar</option>
+                                <option value="detallado_horas">Detallado con Horas (Leg. Colombiana)</option>
+                                <option value="resumen">Resumen de Horas (Agrupado)</option>
+                            </select>
                             <select
                                 value={exportFormatAttendance}
                                 onChange={(e) => setExportFormatAttendance(e.target.value)}
-                                className="px-3 py-2 h-[42px] border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-green-500"
+                                className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-green-500"
                                 title="Formato de archivo"
                             >
                                 <option value="csv">CSV</option>
@@ -996,10 +1101,10 @@ export default function Datos() {
                             <button
                                 onClick={exportToCSV}
                                 disabled={exporting}
-                                className="flex-1 px-4 py-2 h-[42px] bg-green-600 text-white font-bold rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition"
+                                className="flex-1 px-4 py-2 bg-green-600 text-white font-bold rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition"
                             >
-                                <Download size={20} />
-                                {exporting ? 'Exportando...' : 'Exportar'}
+                                {exporting ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />}
+                                Exportar
                             </button>
                         </div>
                     </div>
