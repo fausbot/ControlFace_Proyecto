@@ -21,9 +21,7 @@ export const roundDateToNearest = (dateObj, intervalMinutes) => {
  * Formatea un número de minutos a String HH:MM
  */
 const formatMinutesToHHMM = (totalMins) => {
-    const hh = Math.floor(totalMins / 60).toString().padStart(2, '0');
-    const mm = Math.floor(totalMins % 60).toString().padStart(2, '0');
-    return `${hh}h ${mm}m`;
+    return (totalMins / 60).toFixed(2);
 };
 
 /**

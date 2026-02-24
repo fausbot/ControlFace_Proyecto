@@ -439,10 +439,8 @@ export default function Datos() {
                         const diffMs = exit.timestamp.toMillis() - entry.timestamp.toMillis();
                         if (diffMs >= 0) {
                             const totalSec = Math.floor(diffMs / 1000);
-                            const hh = Math.floor(totalSec / 3600).toString().padStart(2, '0');
-                            const mm = Math.floor((totalSec % 3600) / 60).toString().padStart(2, '0');
-                            const ss = (totalSec % 60).toString().padStart(2, '0');
-                            horasTrabajadas = `${hh}h ${mm}m ${ss}s`;
+                            const decimalHours = (totalSec / 3600).toFixed(2);
+                            horasTrabajadas = decimalHours;
                         } else {
                             horasTrabajadas = 'Error';
                         }
@@ -537,9 +535,7 @@ export default function Datos() {
 
                 // Func de apoyo
                 const fHHMM = (m) => {
-                    const hh = Math.floor(m / 60).toString().padStart(2, '0');
-                    const mm = Math.floor(m % 60).toString().padStart(2, '0');
-                    return `${hh}h ${mm}m`;
+                    return (m / 60).toFixed(2);
                 };
 
                 Object.values(summaryMap).forEach(suma => {
