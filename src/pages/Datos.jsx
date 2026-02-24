@@ -418,7 +418,7 @@ export default function Datos() {
                     'Usuario', 'Nombres', 'Apellidos',
                     'Dia Entrada', 'Fecha Entrada', 'Hora Entrada', 'Localidad Entrada',
                     'Fecha Salida', 'Hora Salida', 'Localidad Salida',
-                    'Horas Trabajadas'
+                    'Almuerzo Descontado', 'Horas Trabajadas'
                 ];
                 shifts.forEach(({ entry, exit, email }) => {
                     const emailKey = email || '';
@@ -435,12 +435,19 @@ export default function Datos() {
                     }
 
                     let horasTrabajadas = 'Pendiente';
+                    let almuerzoText = 'No';
                     if (entry && exit && entry.timestamp?.toMillis && exit.timestamp?.toMillis) {
-                        const diffMs = exit.timestamp.toMillis() - entry.timestamp.toMillis();
-                        if (diffMs >= 0) {
-                            const totalSec = Math.floor(diffMs / 1000);
-                            const decimalHours = (totalSec / 3600).toFixed(2);
-                            horasTrabajadas = decimalHours;
+                        const calc = calculateLaborHours(
+                            entry.timestamp.toDate(),
+                            exit.timestamp.toDate(),
+                            timeConfig
+                        );
+                        if (!calc.error) {
+                            horasTrabajadas = (calc.raw.totalMins / 60).toFixed(2);
+                            if (calc.appliedLunchDeduction) {
+                                const deductionHours = (parseInt(timeConfig.calc_lunchMins, 10) || 60) / 60;
+                                almuerzoText = `${deductionHours}h`;
+                            }
                         } else {
                             horasTrabajadas = '0';
                         }
@@ -452,7 +459,7 @@ export default function Datos() {
                         refRec?.usuario || '', emp.firstName || '', emp.lastName || '', diaNombre,
                         entry?.fecha || '-', entry?.hora || '-', entry?.localidad || '-',
                         exit?.fecha || '-', exit?.hora || '-', exit?.localidad || '-',
-                        horasTrabajadas
+                        almuerzoText, horasTrabajadas
                     ]);
                 });
 
