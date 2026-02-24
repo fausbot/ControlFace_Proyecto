@@ -441,7 +441,7 @@ export default function Datos() {
                             const hh = Math.floor(totalSec / 3600).toString().padStart(2, '0');
                             const mm = Math.floor((totalSec % 3600) / 60).toString().padStart(2, '0');
                             const ss = (totalSec % 60).toString().padStart(2, '0');
-                            horasTrabajadas = `${hh}:${mm}:${ss}`;
+                            horasTrabajadas = `${hh}h ${mm}m ${ss}s`;
                         } else {
                             horasTrabajadas = 'Error';
                         }
@@ -538,7 +538,7 @@ export default function Datos() {
                 const fHHMM = (m) => {
                     const hh = Math.floor(m / 60).toString().padStart(2, '0');
                     const mm = Math.floor(m % 60).toString().padStart(2, '0');
-                    return `${hh}:${mm}`;
+                    return `${hh}h ${mm}m`;
                 };
 
                 Object.values(summaryMap).forEach(suma => {

@@ -23,7 +23,7 @@ export const roundDateToNearest = (dateObj, intervalMinutes) => {
 const formatMinutesToHHMM = (totalMins) => {
     const hh = Math.floor(totalMins / 60).toString().padStart(2, '0');
     const mm = Math.floor(totalMins % 60).toString().padStart(2, '0');
-    return `${hh}:${mm}`;
+    return `${hh}h ${mm}m`;
 };
 
 /**
