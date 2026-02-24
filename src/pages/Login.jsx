@@ -139,7 +139,7 @@ export default function Login() {
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-lg border border-white/30 backdrop-blur-sm transition text-xs font-bold"
                 >
                     <Settings size={14} />
-                    DATOS
+                    INFORMES
                 </button>
                 <button
                     onClick={() => { setAdminTarget('/configuracion'); setShowAdminModal(true); }}

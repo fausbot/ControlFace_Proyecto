@@ -151,6 +151,7 @@ export const calculateLaborHours = (entry, exit, config = {}) => {
             domNocturnas: formatMinutesToHHMM(buckets.domNocturnas),
             totalHHMM: formatMinutesToHHMM(buckets.diurnas + buckets.nocturnas + buckets.domDiurnas + buckets.domNocturnas)
         },
+        appliedLunchDeduction,
         error: null
     };
 };
