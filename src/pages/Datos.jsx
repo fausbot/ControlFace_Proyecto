@@ -8,7 +8,9 @@ import { Download, Calendar, Trash2, ChevronLeft, ChevronRight, AlertTriangle, T
 import DeleteEmployeeModal from '../components/DeleteEmployeeModal';
 import { listPhotosByFilter, downloadPhotosAsZip } from '../services/storageService';
 import { httpsCallable } from 'firebase/functions';
-import { functions } from '../firebaseConfig';
+import { functions, db } from '../firebaseConfig';
+import { exportToExcelHTML } from '../utils/exportUtils';
+import { calculateLaborHours } from '../utils/timeCalculator';
 
 // ─── Definición de campos opcionales ─────────
 const FIELD_DEFS = [
