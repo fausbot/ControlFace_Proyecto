@@ -1,7 +1,7 @@
 {
   "name": "attendance-pwa-dev",
   "private": true,
-  "version": "1.4.9",
+  "version": "1.4.11",
   "type": "module",
   "scripts": {
     "dev": "vite --host",
