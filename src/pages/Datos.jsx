@@ -945,7 +945,7 @@ export default function Datos() {
                 <div className="bg-white rounded-xl shadow-lg p-6 mb-6 border-l-4 border-green-500">
                     <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
                         <Download size={24} />
-                        Exportar Registros de Entrada y Salida a CSV
+                        Exportar Registros de Entrada y Salida
                     </h2>
 
                     <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end mb-2">
@@ -1035,7 +1035,7 @@ export default function Datos() {
                 <div className="bg-white rounded-xl shadow-lg p-6 mb-6 border-l-4 border-orange-400">
                     <h2 className="text-xl font-bold text-orange-700 mb-4 flex items-center gap-2">
                         <TriangleAlert size={24} />
-                        Exportar Registro de Novedades a CSV
+                        Exportar Registro de Novedades
                     </h2>
 
                     <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
