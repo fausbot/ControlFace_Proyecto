@@ -10,7 +10,7 @@ import { listPhotosByFilter, downloadPhotosAsZip } from '../services/storageServ
 import { httpsCallable } from 'firebase/functions';
 import { functions, db } from '../firebaseConfig';
 import { exportToExcelHTML } from '../utils/exportUtils';
-import { calculateLaborHours } from '../utils/timeCalculator';
+import { calculateLaborHours, parseStringDate } from '../utils/timeCalculator';
 
 // ─── Definición de campos opcionales ─────────
 const FIELD_DEFS = [
@@ -436,20 +436,23 @@ export default function Datos() {
 
                     let horasTrabajadas = 'Pendiente';
                     let almuerzoText = 'No';
-                    if (entry && exit && entry.timestamp?.toMillis && exit.timestamp?.toMillis) {
-                        const calc = calculateLaborHours(
-                            entry.timestamp.toDate(),
-                            exit.timestamp.toDate(),
-                            timeConfig
-                        );
-                        if (!calc.error) {
-                            horasTrabajadas = (calc.raw.totalMins / 60).toFixed(2);
-                            if (calc.appliedLunchDeduction) {
-                                const deductionHours = (parseInt(timeConfig.calc_lunchMins, 10) || 60) / 60;
-                                almuerzoText = `${deductionHours}h`;
-                            }
-                        } else {
+                    if (entry && exit && (entry.fecha && entry.hora || entry.timestamp) && (exit.fecha && exit.hora || exit.timestamp)) {
+                        const dStart = parseStringDate(entry.fecha, entry.hora) || (entry.timestamp ? entry.timestamp.toDate() : null);
+                        const dEnd = parseStringDate(exit.fecha, exit.hora) || (exit.timestamp ? exit.timestamp.toDate() : null);
+
+                        if (!dStart || !dEnd) {
                             horasTrabajadas = '0';
+                        } else {
+                            const calc = calculateLaborHours(dStart, dEnd, timeConfig);
+                            if (!calc.error) {
+                                horasTrabajadas = (calc.raw.totalMins / 60).toFixed(2);
+                                if (calc.appliedLunchDeduction) {
+                                    const deductionHours = (parseInt(timeConfig.calc_lunchMins, 10) || 60) / 60;
+                                    almuerzoText = `${deductionHours}h`;
+                                }
+                            } else {
+                                horasTrabajadas = '0';
+                            }
                         }
                     } else if (!entry) {
                         horasTrabajadas = 'Sin Entrada';
@@ -486,21 +489,22 @@ export default function Datos() {
 
                     let horas = { diurnas: '-', nocturnas: '-', domDiurnas: '-', domNocturnas: '-', totalHHMM: 'Pendiente/Sin Salida' };
 
-                    if (entry?.timestamp && exit?.timestamp) {
-                        // Usamos la nueva utilidad de calculo de tiempo
-                        const calc = calculateLaborHours(
-                            entry.timestamp.toDate(),
-                            exit.timestamp.toDate(),
-                            timeConfig
-                        );
-                        if (!calc.error) {
-                            horas = calc.format;
-                        } else {
-                            horas.diurnas = '0';
-                            horas.nocturnas = '0';
-                            horas.domDiurnas = '0';
-                            horas.domNocturnas = '0';
-                            horas.totalHHMM = '0';
+                    if (entry && exit && (entry.fecha && entry.hora || entry.timestamp) && (exit.fecha && exit.hora || exit.timestamp)) {
+                        const dStart = parseStringDate(entry.fecha, entry.hora) || (entry.timestamp ? entry.timestamp.toDate() : null);
+                        const dEnd = parseStringDate(exit.fecha, exit.hora) || (exit.timestamp ? exit.timestamp.toDate() : null);
+
+                        if (dStart && dEnd) {
+                            // Usamos la nueva utilidad de calculo de tiempo
+                            const calc = calculateLaborHours(dStart, dEnd, timeConfig);
+                            if (!calc.error) {
+                                horas = calc.format;
+                            } else {
+                                horas.diurnas = '0';
+                                horas.nocturnas = '0';
+                                horas.domDiurnas = '0';
+                                horas.domNocturnas = '0';
+                                horas.totalHHMM = '0';
+                            }
                         }
                     }
 
@@ -533,13 +537,18 @@ export default function Datos() {
                         };
                     }
 
-                    if (entry?.timestamp && exit?.timestamp) {
-                        const calc = calculateLaborHours(entry.timestamp.toDate(), exit.timestamp.toDate(), timeConfig);
-                        if (!calc.error) {
-                            summaryMap[emailKey].rawDiurnas += calc.raw.diurnas;
-                            summaryMap[emailKey].rawNocturnas += calc.raw.nocturnas;
-                            summaryMap[emailKey].rawDomDiurnas += calc.raw.domDiurnas;
-                            summaryMap[emailKey].rawDomNocturnas += calc.raw.domNocturnas;
+                    if (entry && exit && (entry.fecha && entry.hora || entry.timestamp) && (exit.fecha && exit.hora || exit.timestamp)) {
+                        const dStart = parseStringDate(entry.fecha, entry.hora) || (entry.timestamp ? entry.timestamp.toDate() : null);
+                        const dEnd = parseStringDate(exit.fecha, exit.hora) || (exit.timestamp ? exit.timestamp.toDate() : null);
+
+                        if (dStart && dEnd) {
+                            const calc = calculateLaborHours(dStart, dEnd, timeConfig);
+                            if (!calc.error) {
+                                summaryMap[emailKey].rawDiurnas += calc.raw.diurnas;
+                                summaryMap[emailKey].rawNocturnas += calc.raw.nocturnas;
+                                summaryMap[emailKey].rawDomDiurnas += calc.raw.domDiurnas;
+                                summaryMap[emailKey].rawDomNocturnas += calc.raw.domNocturnas;
+                            }
                         }
                     }
                 });

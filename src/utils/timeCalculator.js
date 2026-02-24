@@ -1,6 +1,25 @@
 import { isSundayOrHoliday } from './colombiaHolidays';
 
 /**
+ * Convierte las cadenas de fecha (DD/MM/YYYY) y hora (HH:MM:SS) a un objeto Date real.
+ * Esto asegura que los cálculos matemáticos cuadren exactamente con lo visualizado, 
+ * sin verse afectados por las demoras de latencia de red en serverTimestamp().
+ */
+export const parseStringDate = (fechaStr, horaStr) => {
+    if (!fechaStr || !horaStr) return null;
+    try {
+        const [day, month, year] = fechaStr.split('/');
+        const [h, m, s] = horaStr.split(':');
+        // El formato es DD/MM/YYYY, pero Date usa (YYYY, MM - 1, DD)
+        const d = new Date(year, month - 1, day, h, m, s || 0);
+        if (isNaN(d.getTime())) return null;
+        return d;
+    } catch {
+        return null; // fallback will be used
+    }
+};
+
+/**
  * Redondea un objeto Date al intervalo de minutos más cercano.
  * Ejemplo (15 min): 07:52 -> 07:45, 07:58 -> 08:00
  * @param {Date} dateObj - Fecha original
