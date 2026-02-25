@@ -11,6 +11,7 @@ const Datos = React.lazy(() => import('./pages/Datos'));
 const Register = React.lazy(() => import('./pages/Register'));
 const ChangeAdminPassword = React.lazy(() => import('./pages/ChangeAdminPassword'));
 const Configuracion = React.lazy(() => import('./pages/Configuracion'));
+const Informes = React.lazy(() => import('./pages/Informes'));
 
 function PrivateRoute({ children }) {
   const { currentUser } = useAuth();
@@ -40,6 +41,7 @@ function App() {
             </PrivateRoute>
           } />
           <Route path="/datos" element={<Datos />} />
+          <Route path="/informes" element={<Informes />} />
           <Route path="/cambiar-clave-admin" element={<ChangeAdminPassword />} />
           <Route path="/configuracion" element={<Configuracion />} />
           <Route path="/" element={<Navigate to="/login" />} />

@@ -18,6 +18,7 @@ export function AuthProvider({ children }) {
     const [adminAccess, setAdminAccess] = useState({
         '/registro': false,
         '/datos': false,
+        '/informes': false,
         '/configuracion': false
     });
 
@@ -29,7 +30,7 @@ export function AuthProvider({ children }) {
     }
 
     function revokeAllAccess() {
-        setAdminAccess({ '/registro': false, '/datos': false, '/configuracion': false });
+        setAdminAccess({ '/registro': false, '/datos': false, '/informes': false, '/configuracion': false });
     }
 
     function login(email, password) {

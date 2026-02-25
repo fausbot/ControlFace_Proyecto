@@ -78,7 +78,7 @@ export default function ChangeAdminPassword() {
     };
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center p-4">
+        <div className="min-h-screen bg-gradient-to-b from-[#3C7DA6] to-[#6FAF6B] flex items-center justify-center p-4">
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8">
                 <button
                     onClick={() => navigate('/login')}
@@ -126,6 +126,7 @@ export default function ChangeAdminPassword() {
                             <option value="todas">Cambiar para Todas las Secciones</option>
                             <option value="/registro">Contraseña de Registro</option>
                             <option value="/datos">Contraseña de Datos</option>
+                            <option value="/informes">Contraseña de Informes</option>
                             <option value="/configuracion">Contraseña de Configuración</option>
                         </select>
                     </div>

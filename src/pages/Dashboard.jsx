@@ -492,7 +492,7 @@ export default function Dashboard() {
     };
 
     return (
-        <div className="min-h-screen bg-gray-100 flex flex-col">
+        <div className="min-h-screen bg-gradient-to-b from-[#3C7DA6] to-[#6FAF6B] flex flex-col">
             {/* Header */}
             <div className="bg-white shadow p-4 flex justify-between items-center gap-2 overflow-x-auto">
                 <h1 className="text-lg font-bold text-gray-800 flex-1 text-left truncate">Control Asistencia</h1>

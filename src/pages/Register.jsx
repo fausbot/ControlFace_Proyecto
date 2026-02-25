@@ -266,7 +266,7 @@ export default function Register() {
 
     // ─── Render ───────────────────────────────────────────────────────────────
     return (
-        <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-green-500 to-teal-600 p-4">
+        <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-[#3C7DA6] to-[#6FAF6B] p-4">
             <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-lg backdrop-blur-sm bg-opacity-90">
                 <div className="flex justify-center mb-4">
                     <div className="bg-green-100 p-3 rounded-full">

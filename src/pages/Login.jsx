@@ -123,12 +123,12 @@ export default function Login() {
     };
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-500 to-purple-600 p-4 relative">
-            <div className="absolute top-4 right-4 flex gap-2">
+        <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-[#3C7DA6] to-[#6FAF6B] p-4 relative">
+            <div className="absolute top-4 left-0 right-0 px-4 flex justify-center gap-1.5 sm:gap-4 flex-wrap">
                 {isLicenseValid && (
                     <button
                         onClick={() => { setAdminTarget('/registro'); setShowAdminModal(true); }}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-lg border border-white/30 backdrop-blur-sm transition text-xs font-bold"
+                        className="flex items-center gap-1.5 px-2.5 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-lg border border-white/30 backdrop-blur-sm transition text-[10px] sm:text-xs font-bold whitespace-nowrap"
                     >
                         <Settings size={14} />
                         REGISTRO
@@ -136,14 +136,21 @@ export default function Login() {
                 )}
                 <button
                     onClick={() => { setAdminTarget('/datos'); setShowAdminModal(true); }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-lg border border-white/30 backdrop-blur-sm transition text-xs font-bold"
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-lg border border-white/30 backdrop-blur-sm transition text-[10px] sm:text-xs font-bold whitespace-nowrap"
+                >
+                    <Settings size={14} />
+                    DATOS
+                </button>
+                <button
+                    onClick={() => { setAdminTarget('/informes'); setShowAdminModal(true); }}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-lg border border-white/30 backdrop-blur-sm transition text-[10px] sm:text-xs font-bold whitespace-nowrap"
                 >
                     <Settings size={14} />
                     INFORMES
                 </button>
                 <button
                     onClick={() => { setAdminTarget('/configuracion'); setShowAdminModal(true); }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-500/80 hover:bg-purple-600/80 text-white rounded-lg border border-purple-300/50 backdrop-blur-sm transition text-xs font-bold"
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 bg-purple-500/80 hover:bg-purple-600/80 text-white rounded-lg border border-purple-300/50 backdrop-blur-sm transition text-[10px] sm:text-xs font-bold whitespace-nowrap"
                 >
                     <Settings size={14} />
                     CONFIG
@@ -160,7 +167,12 @@ export default function Login() {
                 }}
             />
 
-            <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md backdrop-blur-sm bg-opacity-90 flex flex-col items-center">
+            <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md backdrop-blur-sm bg-opacity-90 flex flex-col items-center relative overflow-hidden">
+                <img
+                    src="/LogoCoontrolFace.jpeg"
+                    alt="ControlFace Logo"
+                    className="absolute top-4 left-4 w-24 object-contain opacity-80"
+                />
                 <img
                     src={import.meta.env.VITE_CLIENT_LOGO_URL || "/logo.jpg"}
                     alt="Logo"
