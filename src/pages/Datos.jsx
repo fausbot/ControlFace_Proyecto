@@ -174,9 +174,9 @@ export default function Datos() {
             return;
         }
 
-        // Formatear fecha de YYYY-MM-DD a dd/mm/aaaa (con ceros a la izquierda)
+        // Formatear fecha de YYYY-MM-DD a d/m/aaaa (sin ceros a la izquierda) para coincidir con el resto del app
         const [y, m, d] = mDate.split('-');
-        const dateStr = `${d}/${m}/${y}`;
+        const dateStr = `${parseInt(d)}/${parseInt(m)}/${y}`;
         const timeStr = mTime.length === 5 ? `${mTime}:00` : mTime;
 
         try {
@@ -428,11 +428,11 @@ export default function Datos() {
             const employeesMap = await getEmployeesMap();
             const dayFormatter = new Intl.DateTimeFormat('es-ES', { weekday: 'long' });
 
-            // 2. Ordenar todos los registros de más antiguo a más reciente
+            // 2. Ordenar todos los registros por FECHA Y HORA lógica (para que registros manuales se inserten donde corresponden)
             const sorted = [...filtered].sort((a, b) => {
-                const tA = (a.timestamp && a.timestamp.toMillis) ? a.timestamp.toMillis() : 0;
-                const tB = (b.timestamp && b.timestamp.toMillis) ? b.timestamp.toMillis() : 0;
-                return tA - tB;
+                const dateA = parseStringDate(a.fecha, a.hora) || (a.timestamp ? a.timestamp.toDate() : new Date(0));
+                const dateB = parseStringDate(b.fecha, b.hora) || (b.timestamp ? b.timestamp.toDate() : new Date(0));
+                return dateA - dateB;
             });
 
             // 3. Agrupar registros por usuario
@@ -798,7 +798,7 @@ export default function Datos() {
                 <div className="flex justify-between items-center mb-8">
                     <h1 className="text-3xl font-bold text-gray-800 flex items-baseline gap-2">
                         Centro de Datos
-                        <span className="text-sm font-normal text-gray-500 bg-gray-200 px-2 py-0.5 rounded-full">v{import.meta.env.VITE_APP_VERSION || '1.3.1'}</span>
+                        <span className="text-sm font-normal text-gray-500 bg-gray-200 px-2 py-0.5 rounded-full">v1.4.14</span>
                     </h1>
                     <div className="flex gap-3">
                         <button
