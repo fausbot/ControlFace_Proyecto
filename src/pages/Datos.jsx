@@ -174,9 +174,9 @@ export default function Datos() {
             return;
         }
 
-        // Formatear fecha de YYYY-MM-DD a dd/mm/aaaa
+        // Formatear fecha de YYYY-MM-DD a dd/mm/aaaa (con ceros a la izquierda)
         const [y, m, d] = mDate.split('-');
-        const dateStr = `${parseInt(d)}/${parseInt(m)}/${y}`;
+        const dateStr = `${d}/${m}/${y}`;
         const timeStr = mTime.length === 5 ? `${mTime}:00` : mTime;
 
         try {
