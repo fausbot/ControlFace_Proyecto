@@ -1,0 +1,29 @@
+Módulo de Cálculo de Horas Trabajadas (ControlFace v1.4.11)
+---------------------------------------------------------
+
+Se ha actualizado el motor interno de liquidación de tiempos a la versión 1.4.11. Este módulo opera garantizando los siguientes cuatro pilares matemáticos:
+
+1. Días Festivos y Ley Colombiana Nativos: 
+   Toda la lógica de festivos en Colombia está codificada dentro de la aplicación.
+   Utilizamos herramientas como las "Leyes Emiliani" y el algoritmo computacional de Pascua (calculado hasta 2035). 
+   De esta manera, el sistema sabe exactamente cuándo un rango de horas cae en:
+   - Diurno ordinario.
+   - Nocturno ordinario (comprendido entre las 9:00 PM y las 6:00 AM).
+   - Dominical o Festivo.
+
+2. Descuentos y Redondeo Parametrizables: 
+   A través de la pestaña CONFIG, ubicada dentro del panel de INFORMES, el administrador puede ajustar nuevas reglas:
+   - Descuento automatizado de almuerzo (por ejemplo, 60 minutos), el cual se aplica única y exclusivamente a jornadas mayores a 8 horas de trabajo contínuo.
+   - Redondeo fraccional paramétrico (por ejemplo, al bloque de 15 minutos más cercano).
+   
+   *Nota: La prioridad matemática al momento de restar el tiempo de almuerzo siempre será: Diurnas Ordinarias > Nocturnas Ordinarias > Dominicales Diurnas > Dominicales Nocturnas.*
+
+3. Justicia Laboral (Desacople Visual): 
+   A partir de la versión 1.4.9, el reloj matemático procesa exclusivamente la hora "In-Situ". 
+   Esto significa que el Excel lee la fecha y hora que quedó impresa visualmente en la fotografía, ignorando el "timestamp" u hora de llegada al servidor. 
+   Gracias a esto, el trabajador no pierde minutos valiosos de su pago si, al momento de marcar, el restaurante no tenía buen wifi o la tablet se quedó "pensando" en subir el registro.
+
+4. Exportaciones Nativas y Sin Dependencias Externas: 
+   El sistema está diseñado para compilar reportes pesados de Excel (.xlsx) y archivos CSV directamente "dentro del navegador" usando la tecnología SheetJS. 
+   Esto elimina la necesidad de enviar datos a servidores externos para procesarlos, asegurando que la información de la nómina y asistencia jamás viaje sin encriptar, preservando la privacidad absoluta de los trabajadores. 
+   Los reportes ahora incluyen de forma granular: el conteo en formato HH.MM decimal, y una columna adicional indicando a qué turnos sí se les restó correctamente el "Almuerzo".

@@ -4,7 +4,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Download, Calendar, Trash2, ChevronLeft, ChevronRight, AlertTriangle, TriangleAlert, Image, Loader2, UserMinus, FileText } from 'lucide-react';
+import { Download, Calendar, Trash2, ChevronLeft, ChevronRight, AlertTriangle, TriangleAlert, Image, Loader2, UserMinus, FileText, CheckCircle } from 'lucide-react';
 import DeleteEmployeeModal from '../components/DeleteEmployeeModal';
 import { listPhotosByFilter, downloadPhotosAsZip } from '../services/storageService';
 import { httpsCallable } from 'firebase/functions';
@@ -58,7 +58,7 @@ import {
     checkAndRestoreEmployees
 } from '../services/employeeService';
 
-import { collection, getDocs, query, where, orderBy, getDoc, doc } from 'firebase/firestore';
+import { collection, getDocs, query, where, orderBy, getDoc, doc, addDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 
 const PAGE_SIZE = 100;
 
@@ -157,6 +157,76 @@ export default function Datos() {
             }
         } catch (err) {
             console.error("Error cargando Storage Config en Datos:", err);
+        }
+    };
+
+    // ─── Estado para Entrada Manual ──────────────────────────────────────────
+    const [mUser, setMUser] = useState('');
+    const [mType, setMType] = useState('Entrada');
+    const [mDate, setMDate] = useState('');
+    const [mTime, setMTime] = useState('');
+    const [mSaving, setMSaving] = useState(false);
+
+    const handleManualEntry = async (e) => {
+        e.preventDefault();
+        if (!mUser || !mType || !mDate || !mTime) {
+            alert('Por favor completa todos los campos.');
+            return;
+        }
+
+        // Formatear fecha de YYYY-MM-DD a dd/mm/aaaa
+        const [y, m, d] = mDate.split('-');
+        const dateStr = `${parseInt(d)}/${parseInt(m)}/${y}`;
+        const timeStr = mTime.length === 5 ? `${mTime}:00` : mTime;
+
+        try {
+            setMSaving(true);
+
+            // 1. Buscar si ya existe para ese usuario, fecha y tipo
+            const q = query(
+                collection(db, "attendance"),
+                where("usuario", "==", mUser.toLowerCase().trim()),
+                where("fecha", "==", dateStr),
+                where("tipo", "==", mType)
+            );
+            const snap = await getDocs(q);
+
+            if (!snap.empty) {
+                const confirmed = window.confirm('Ya existe un registro con estos datos. ¿Está interesado en sobreescribir la base de datos?');
+                if (!confirmed) {
+                    setMSaving(false);
+                    return;
+                }
+                // Borrar los registros anteriores (usualmente solo debería haber uno)
+                for (const docSnap of snap.docs) {
+                    await deleteAttendanceLog(docSnap.id);
+                }
+            }
+
+            // 2. Crear nuevo registro
+            const newData = {
+                usuario: mUser.toLowerCase().trim(),
+                tipo: mType,
+                fecha: dateStr,
+                hora: timeStr,
+                localidad: "ENTRADA MANUAL DE DATOS",
+                timestamp: serverTimestamp()
+            };
+
+            await addDoc(collection(db, "attendance"), newData);
+            alert('✅ Registro adicionado correctamente.');
+
+            // Limpiar form y recargar logs
+            setMUser('');
+            setMDate('');
+            setMTime('');
+            loadLogs();
+
+        } catch (error) {
+            console.error('Error en entrada manual:', error);
+            alert('Error al guardar el registro manual.');
+        } finally {
+            setMSaving(false);
         }
     };
 
@@ -1131,6 +1201,68 @@ export default function Datos() {
                             : 'Exportará todos los registros disponibles'}
                     </p>
 
+                    {/* --- NUEVA SUB-SECCIÓN: ENTRADA MANUAL --- */}
+                    <div className="mt-8 pt-6 border-t border-green-100">
+                        <h3 className="text-green-700 font-bold flex items-center gap-2 mb-4">
+                            <FileText size={20} />
+                            Entrada Manual de Datos
+                        </h3>
+                        <form onSubmit={handleManualEntry} className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
+                            <div>
+                                <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Usuario (Email)</label>
+                                <input
+                                    type="text"
+                                    placeholder="ej: faus@bot.com"
+                                    value={mUser}
+                                    onChange={e => setMUser(e.target.value)}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-green-500"
+                                    required
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Evento</label>
+                                <select
+                                    value={mType}
+                                    onChange={e => setMType(e.target.value)}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
+                                >
+                                    <option value="Entrada">Entrada</option>
+                                    <option value="Salida">Salida</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Fecha</label>
+                                <input
+                                    type="date"
+                                    value={mDate}
+                                    onChange={e => setMDate(e.target.value)}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                                    required
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Hora</label>
+                                <input
+                                    type="time"
+                                    value={mTime}
+                                    onChange={e => setMTime(e.target.value)}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                                    required
+                                />
+                            </div>
+                            <div>
+                                <button
+                                    type="submit"
+                                    disabled={mSaving}
+                                    className="w-full h-[42px] bg-green-700 text-white font-bold rounded-lg hover:bg-green-800 transition flex items-center justify-center gap-2 disabled:opacity-50"
+                                >
+                                    {mSaving ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle size={16} />}
+                                    Adicionar
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+
                     <div className="mt-8 pt-6 border-t border-red-100">
                         <h3 className="text-red-600 font-bold flex items-center gap-2 mb-4">
                             <AlertTriangle size={20} />
@@ -1244,6 +1376,6 @@ export default function Datos() {
             </div>
 
             <DeleteEmployeeModal isOpen={showDeleteModal} onClose={() => setShowDeleteModal(false)} />
-        </div>
+        </div >
     );
 }
