@@ -169,7 +169,7 @@ export default function Login() {
 
             <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md backdrop-blur-sm bg-opacity-90 flex flex-col items-center relative overflow-hidden">
                 <img
-                    src="/LogoCoontrolFace.jpeg"
+                    src="/LogoCoontrolFace.png"
                     alt="ControlFace Logo"
                     className="absolute top-4 left-4 w-24 object-contain opacity-80"
                 />
