@@ -350,6 +350,15 @@ exports.createEmployeeSecure = functions.https.onCall(async (data, context) => {
             ...(extraFields || {})
         });
 
+        // C. LIMPIEZA: Si el usuario estaba en la cola de borrado, lo sacamos 
+        // (porque ahora vuelve a ser un empleado activo y válido)
+        const qSnap = await db.collection('deletionQueue').where('email', '==', email.toLowerCase().trim()).get();
+        if (!qSnap.empty) {
+            const batchRemove = db.batch();
+            qSnap.forEach(doc => batchRemove.delete(doc.ref));
+            await batchRemove.commit();
+        }
+
         return { success: true, uid: userRecord.uid, message: "Empleado creado exitosamente." };
 
     } catch (error) {
