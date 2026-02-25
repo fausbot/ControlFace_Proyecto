@@ -171,7 +171,7 @@ export default function Login() {
                 <img
                     src="/LogoCoontrolFace.png"
                     alt="ControlFace Logo"
-                    className="absolute top-4 left-4 w-24 object-contain opacity-80"
+                    className="absolute top-4 left-4 w-48 object-contain opacity-80"
                 />
                 <img
                     src={import.meta.env.VITE_CLIENT_LOGO_URL || "/logo.jpg"}
