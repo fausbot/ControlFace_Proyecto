@@ -147,7 +147,7 @@ export default function Datos() {
                 </div>
 
                 {/* Entrada Manual */}
-                <div className="bg-white rounded-xl shadow-lg p-6 mb-6 border-l-4 border-blue-500">
+                <div className="bg-white rounded-xl shadow-2xl p-6 mb-6 border-l-4 border-blue-500">
                     <h3 className="text-blue-700 font-bold flex items-center gap-2 mb-4">
                         <FileText size={20} />
                         Entrada Manual de Datos
@@ -179,7 +179,7 @@ export default function Datos() {
                 </div>
 
                 {/* Tabla */}
-                <div className="bg-white rounded-xl shadow-lg overflow-hidden">
+                <div className="bg-white rounded-xl shadow-2xl overflow-hidden">
                     <div className="overflow-x-auto">
                         <table className="w-full text-left">
                             <thead className="bg-gray-100 border-b">

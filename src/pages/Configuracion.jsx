@@ -175,7 +175,7 @@ export default function Configuracion() {
                 </div>
 
                 {/* ─── GESTIÓN DE LICENCIA ─── */}
-                <div className="bg-white rounded-xl shadow-lg p-6 mb-6 border-l-4 border-indigo-500">
+                <div className="bg-white rounded-xl shadow-2xl p-6 mb-6 border-l-4 border-indigo-500">
                     <h2 className="text-xl font-bold text-indigo-800 mb-2">Estado de la Licencia</h2>
                     <p className="text-sm text-gray-600 mb-4">
                         Información de su plan contratado y método para actualizar la suscripción.
@@ -222,7 +222,7 @@ export default function Configuracion() {
                 </div>
 
                 {/* ─── GESTIÓN DE ALMACENAMIENTO DE FOTOS ─── */}
-                <div className="bg-white rounded-xl shadow-lg p-6 mb-6 border-l-4 border-blue-500">
+                <div className="bg-white rounded-xl shadow-2xl p-6 mb-6 border-l-4 border-blue-500">
                     <h2 className="text-xl font-bold text-blue-800 mb-2">Almacenamiento de Evidencias (Fotos)</h2>
                     <p className="text-sm text-gray-600 mb-4">
                         Configura si el sistema guardará de forma permanente las fotos al momento de entrar o si solo verificará el rostro sin guardar archivos pesados. Además, define el tiempo (en meses) antes de que se borren y eliminen permanentemente.
@@ -294,7 +294,7 @@ export default function Configuracion() {
                 </div>
 
                 {/* ─── GESTIÓN DE CÁLCULO DE HORAS ─── */}
-                <div className="bg-white rounded-xl shadow-lg p-6 mb-6 border-l-4 border-teal-500">
+                <div className="bg-white rounded-xl shadow-2xl p-6 mb-6 border-l-4 border-teal-500">
                     <h2 className="text-xl font-bold text-teal-800 mb-2">Cálculo de Tiempo Laborado</h2>
                     <p className="text-sm text-gray-600 mb-4">
                         Configura el redondeo de entradas/salidas y el descuento automático de tiempo de almuerzo aplicable únicamente a turnos de más de 8 horas.
@@ -370,7 +370,7 @@ export default function Configuracion() {
 
                 {/* Secciones de campos configurables (Perfiles Empleado) */}
                 {FIELD_GROUPS.map(({ group, fields }) => (
-                    <div key={group} className="bg-white rounded-xl shadow-lg p-6 mb-6 border-l-4 border-purple-500">
+                    <div key={group} className="bg-white rounded-xl shadow-2xl p-6 mb-6 border-l-4 border-purple-500">
                         <h2 className="text-xl font-bold text-purple-700 mb-4">{group}</h2>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                             {fields.map(({ key, label }) => (
@@ -402,7 +402,7 @@ export default function Configuracion() {
                     <button
                         onClick={saveConfig}
                         disabled={saving}
-                        className="px-6 py-3 bg-purple-600 text-white font-bold rounded-lg hover:bg-purple-700 disabled:bg-gray-400 transition flex items-center gap-2 shadow-lg"
+                        className="px-6 py-3 bg-purple-600 text-white font-bold rounded-lg hover:bg-purple-700 disabled:bg-gray-400 transition flex items-center gap-2 shadow-2xl"
                     >
                         {saving ? <Loader2 size={20} className="animate-spin" /> : <Save size={20} />}
                         {saving ? 'Guardando...' : 'Guardar Configuración'}

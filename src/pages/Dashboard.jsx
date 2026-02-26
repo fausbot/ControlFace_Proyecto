@@ -520,7 +520,7 @@ export default function Dashboard() {
 
                 {step === 'idle' && (
                     <div className="grid grid-cols-1 gap-6 w-full">
-                        <div className="bg-white p-6 rounded-xl shadow-lg text-center">
+                        <div className="bg-white p-6 rounded-xl shadow-2xl text-center">
                             <h2 className="text-lg font-medium text-gray-600 mb-2">Bienvenido, {currentUser.email}</h2>
                             {loadingState ? (
                                 <p className="text-sm text-blue-500 animate-pulse">Verificando estado de asistencia...</p>
@@ -536,7 +536,7 @@ export default function Dashboard() {
                                 {!loadingState && allowedActions.entry && (
                                     <button
                                         onClick={() => handleStart('entry')}
-                                        className="group relative flex flex-col items-center justify-center p-8 bg-gradient-to-tr from-green-400 to-green-600 rounded-2xl shadow-lg hover:shadow-xl transition transform hover:scale-105 active:scale-95 animate-fade-in"
+                                        className="group relative flex flex-col items-center justify-center p-8 bg-gradient-to-tr from-green-400 to-green-600 rounded-2xl shadow-2xl hover:shadow-2xl transition transform hover:scale-105 active:scale-95 animate-fade-in"
                                     >
                                         <LogIn className="w-12 h-12 text-white mb-2" />
                                         <span className="text-2xl font-bold text-white">Registrar Entrada</span>
@@ -546,7 +546,7 @@ export default function Dashboard() {
                                 {!loadingState && allowedActions.exit && (
                                     <button
                                         onClick={() => handleStart('exit')}
-                                        className="group relative flex flex-col items-center justify-center p-8 bg-gradient-to-tr from-red-400 to-red-600 rounded-2xl shadow-lg hover:shadow-xl transition transform hover:scale-105 active:scale-95 animate-fade-in"
+                                        className="group relative flex flex-col items-center justify-center p-8 bg-gradient-to-tr from-red-400 to-red-600 rounded-2xl shadow-2xl hover:shadow-2xl transition transform hover:scale-105 active:scale-95 animate-fade-in"
                                     >
                                         <LogOut className="w-12 h-12 text-white mb-2" />
                                         <span className="text-2xl font-bold text-white">Registrar Salida</span>
@@ -570,7 +570,7 @@ export default function Dashboard() {
                                 {!loadingState && (
                                     <button
                                         onClick={() => handleStart('incident')}
-                                        className="group relative flex flex-col items-center justify-center p-5 bg-gradient-to-tr from-orange-400 to-orange-600 rounded-2xl shadow-lg hover:shadow-xl transition transform hover:scale-105 active:scale-95 animate-fade-in"
+                                        className="group relative flex flex-col items-center justify-center p-5 bg-gradient-to-tr from-orange-400 to-orange-600 rounded-2xl shadow-2xl hover:shadow-2xl transition transform hover:scale-105 active:scale-95 animate-fade-in"
                                     >
                                         <TriangleAlert className="w-8 h-8 text-white mb-1" />
                                         <span className="text-xl font-bold text-white">Reportar Novedad</span>
@@ -579,7 +579,7 @@ export default function Dashboard() {
                                 )}
                             </React.Fragment>
                         ) : (
-                            <div className="col-span-2 bg-red-50 border-2 border-red-500 rounded-2xl p-6 text-center shadow-lg animate-pulse">
+                            <div className="col-span-2 bg-red-50 border-2 border-red-500 rounded-2xl p-6 text-center shadow-2xl animate-pulse">
                                 <TriangleAlert className="w-12 h-12 text-red-500 mx-auto mb-3" />
                                 <h3 className="text-xl font-bold text-red-700 mb-2">Servicio Suspendido</h3>
                                 <p className="text-red-600 font-medium">
@@ -636,7 +636,7 @@ export default function Dashboard() {
                             <button
                                 onClick={capture}
                                 disabled={step === 'processing'}
-                                className={`px-8 py-3 rounded-full text-white font-bold shadow-lg transition transform active:translate-y-1 ${step === 'processing' ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}
+                                className={`px-8 py-3 rounded-full text-white font-bold shadow-2xl transition transform active:translate-y-1 ${step === 'processing' ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}
                             >
                                 {step === 'processing' ? 'Procesando...' : 'Capturar'}
                             </button>
@@ -678,7 +678,7 @@ export default function Dashboard() {
                             {!faceVerified && mode !== 'incident' && (
                                 <button
                                     onClick={handleStopCamera}
-                                    className="absolute top-4 left-4 flex items-center gap-2 px-4 py-2 bg-red-600 text-white font-bold rounded-lg shadow-lg hover:bg-red-700 transition transform hover:scale-105"
+                                    className="absolute top-4 left-4 flex items-center gap-2 px-4 py-2 bg-red-600 text-white font-bold rounded-lg shadow-2xl hover:bg-red-700 transition transform hover:scale-105"
                                 >
                                     <Camera size={20} />
                                     REPETIR FOTO
@@ -686,7 +686,7 @@ export default function Dashboard() {
                             )}
 
                             {(faceVerified || mode === 'incident') && (
-                                <div className={`absolute top-4 right-4 p-1 rounded-full shadow-lg ${mode === 'incident' ? 'bg-orange-500' : 'bg-green-500'} text-white`}>
+                                <div className={`absolute top-4 right-4 p-1 rounded-full shadow-2xl ${mode === 'incident' ? 'bg-orange-500' : 'bg-green-500'} text-white`}>
                                     {mode === 'incident' ? <TriangleAlert size={24} /> : <UserCheck size={24} />}
                                 </div>
                             )}
@@ -747,7 +747,7 @@ export default function Dashboard() {
                                         logout();
                                     }, 3000);
                                 }}
-                                className={`w-full flex items-center justify-center gap-2 px-6 py-3 rounded-xl text-white font-bold shadow-lg transition ${mode === 'incident'
+                                className={`w-full flex items-center justify-center gap-2 px-6 py-3 rounded-xl text-white font-bold shadow-2xl transition ${mode === 'incident'
                                     ? 'bg-orange-500 hover:bg-orange-600'
                                     : 'bg-green-600 hover:bg-green-700'
                                     }`}
@@ -766,7 +766,7 @@ export default function Dashboard() {
                 )}
 
                 {step === 'success' && (
-                    <div className="text-center p-10 bg-white rounded-2xl shadow-xl animate-fade-in">
+                    <div className="text-center p-10 bg-white rounded-2xl shadow-2xl animate-fade-in">
                         <CheckCircle className="w-20 h-20 text-green-500 mx-auto mb-4" />
                         <h2 className="text-2xl font-bold text-gray-800 mb-2">¡Registrado!</h2>
                         <p className="text-gray-600">Registro guardado exitosamente.</p>

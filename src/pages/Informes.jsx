@@ -433,7 +433,7 @@ export default function Informes() {
                 </div>
 
                 {/* 1. EXPORTAR FOTOS / EVIDENCIAS */}
-                <div className="bg-white rounded-xl shadow-lg p-6 mb-6 border-l-4 border-blue-500">
+                <div className="bg-white rounded-xl shadow-2xl p-6 mb-6 border-l-4 border-blue-500">
                     <div className="flex justify-between items-start mb-4">
                         <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
                             <Image size={24} className="text-blue-600" /> Evidencias Fotográficas
@@ -487,7 +487,7 @@ export default function Informes() {
                 </div>
 
                 {/* 2. EXPORTAR ASISTENCIA */}
-                <div className="bg-white rounded-xl shadow-lg p-6 mb-6 border-l-4 border-green-500">
+                <div className="bg-white rounded-xl shadow-2xl p-6 mb-6 border-l-4 border-green-500">
                     <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2"><Download size={24} className="text-green-600" /> Reportes de Asistencia</h2>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                         <div><label className="text-sm">Desde</label><input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-full px-4 py-2 border rounded-lg" /></div>
@@ -518,7 +518,7 @@ export default function Informes() {
                 </div>
 
                 {/* 3. EXPORTAR NOVEDADES */}
-                <div className="bg-white rounded-xl shadow-lg p-6 mb-6 border-l-4 border-orange-400">
+                <div className="bg-white rounded-xl shadow-2xl p-6 mb-6 border-l-4 border-orange-400">
                     <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2"><TriangleAlert size={24} className="text-orange-500" /> Reporte de Novedades</h2>
                     <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end mb-4">
                         <div className="md:col-span-1"><label className="text-sm">Desde</label><input type="date" value={incidentStartDate} onChange={e => setIncidentStartDate(e.target.value)} className="w-full px-4 py-2 border rounded-lg" /></div>
@@ -533,12 +533,12 @@ export default function Informes() {
                     </div>
                     <div className="mt-4 pt-4 border-t border-red-50 flex items-center justify-between">
                         <p className="text-xs text-gray-500">Borrar novedades permanentemente en el rango de fechas.</p>
-                        <button onClick={handleBulkDeleteIncidents} disabled={deletingIncidents || !incidentStartDate || !incidentEndDate} className="px-4 py-2 bg-red-50 text-red-600 rounded-lg text-xs font-bold hover:bg-red-100">Borrar Novedades</button>
+                        <button onClick={handleBulkDeleteIncidents} disabled={deletingIncidents || !incidentStartDate || !incidentEndDate} className="px-4 py-2 bg-red-100 text-red-700 rounded-lg font-bold hover:bg-red-200 transition">Borrar Rango</button>
                     </div>
                 </div>
 
                 {/* 4. GESTIÓN DE EMPLEADOS */}
-                <div className="bg-white rounded-xl shadow-lg p-6 mb-12 border-l-4 border-emerald-500">
+                <div className="bg-white rounded-xl shadow-2xl p-6 mb-12 border-l-4 border-emerald-500">
                     <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2"><UserMinus size={24} className="text-emerald-600" /> Personal y Empleados</h2>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
                         <div className="md:col-span-1"><input type="text" placeholder="Filtrar por email..." value={filterEmail} onChange={e => setFilterEmail(e.target.value)} className="w-full px-4 py-2 border rounded-lg" /></div>
