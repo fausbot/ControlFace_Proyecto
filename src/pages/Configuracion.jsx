@@ -1,7 +1,7 @@
 // src/pages/Configuracion.jsx
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Settings, Lock, Save, CheckSquare, Square, Loader2 } from 'lucide-react';
+import { Settings, Lock, Save, CheckSquare, Square, Loader2, LogIn, LogOut, TriangleAlert } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
@@ -55,6 +55,10 @@ const DEFAULT_CONFIG = {
     calc_roundingMins: 15,
     calc_lunch: false,
     calc_lunchMins: 60,
+    // defaults etiquetas botones
+    ui_labelEntry: "Registrar Entrada",
+    ui_labelExit: "Registrar Salida",
+    ui_labelIncident: "Reportar Novedad",
 };
 
 export default function Configuracion() {
@@ -101,6 +105,11 @@ export default function Configuracion() {
 
     const toggle = (key) => {
         setConfig(prev => ({ ...prev, [key]: !prev[key] }));
+        setSavedOk(false);
+    };
+
+    const handleTextChange = (key, value) => {
+        setConfig(prev => ({ ...prev, [key]: value }));
         setSavedOk(false);
     };
 
@@ -358,6 +367,54 @@ export default function Configuracion() {
                                     className="px-3 py-2 border border-indigo-200 rounded-lg focus:ring-2 focus:ring-indigo-500 disabled:bg-gray-200 disabled:opacity-50"
                                 />
                             </div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* ─── GESTIÓN DE ETIQUETAS DE BOTONES ─── */}
+                <div className="bg-white rounded-xl shadow-2xl p-6 mb-6 border-l-4 border-purple-600 overflow-hidden relative">
+                    <div className="absolute top-0 right-0 w-32 h-32 bg-purple-50 rounded-full -mr-16 -mt-16 opacity-50"></div>
+                    <h2 className="text-xl font-bold text-purple-800 mb-2 relative">Personalización de Botones</h2>
+                    <p className="text-sm text-gray-600 mb-6 relative">
+                        Cambia los textos de la pantalla principal para que sean más amigables con el empleado.
+                    </p>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 relative">
+                        <div className="space-y-1">
+                            <label className="text-xs font-bold text-purple-700 flex items-center gap-1">
+                                <LogIn size={14} /> Etiqueta Entrada
+                            </label>
+                            <input
+                                type="text"
+                                placeholder="Ej: ¡Hola! Ya llegué"
+                                value={config.ui_labelEntry || ""}
+                                onChange={(e) => handleTextChange('ui_labelEntry', e.target.value)}
+                                className="w-full px-3 py-2 border border-purple-200 rounded-lg focus:ring-2 focus:ring-purple-500 shadow-sm text-sm"
+                            />
+                        </div>
+                        <div className="space-y-1">
+                            <label className="text-xs font-bold text-red-700 flex items-center gap-1">
+                                <LogOut size={14} /> Etiqueta Salida
+                            </label>
+                            <input
+                                type="text"
+                                placeholder="Ej: ¡Hasta mañana!"
+                                value={config.ui_labelExit || ""}
+                                onChange={(e) => handleTextChange('ui_labelExit', e.target.value)}
+                                className="w-full px-3 py-2 border border-red-200 rounded-lg focus:ring-2 focus:ring-red-500 shadow-sm text-sm"
+                            />
+                        </div>
+                        <div className="space-y-1">
+                            <label className="text-xs font-bold text-orange-700 flex items-center gap-1">
+                                <TriangleAlert size={14} /> Etiqueta Novedad
+                            </label>
+                            <input
+                                type="text"
+                                placeholder="Ej: Algo ocurrió..."
+                                value={config.ui_labelIncident || ""}
+                                onChange={(e) => handleTextChange('ui_labelIncident', e.target.value)}
+                                className="w-full px-3 py-2 border border-orange-200 rounded-lg focus:ring-2 focus:ring-orange-500 shadow-sm text-sm"
+                            />
                         </div>
                     </div>
                 </div>

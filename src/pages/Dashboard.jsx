@@ -101,6 +101,11 @@ export default function Dashboard() {
                         storage_saveAsistencia: d.storage_saveAsistencia !== false,
                         storage_saveIncidentes: d.storage_saveIncidentes !== false
                     });
+                    setButtonLabels({
+                        entry: d.ui_labelEntry || "Registrar Entrada",
+                        exit: d.ui_labelExit || "Registrar Salida",
+                        incident: d.ui_labelIncident || "Reportar Novedad"
+                    });
                 }
 
                 // 1.5 Cargar Estado de la Licencia
@@ -539,7 +544,7 @@ export default function Dashboard() {
                                         className="group relative flex flex-col items-center justify-center p-8 bg-gradient-to-tr from-green-400 to-green-600 rounded-2xl shadow-2xl hover:shadow-2xl transition transform hover:scale-105 active:scale-95 animate-fade-in"
                                     >
                                         <LogIn className="w-12 h-12 text-white mb-2" />
-                                        <span className="text-2xl font-bold text-white">Registrar Entrada</span>
+                                        <span className="text-2xl font-bold text-white">{buttonLabels.entry}</span>
                                     </button>
                                 )}
 
@@ -549,7 +554,7 @@ export default function Dashboard() {
                                         className="group relative flex flex-col items-center justify-center p-8 bg-gradient-to-tr from-red-400 to-red-600 rounded-2xl shadow-2xl hover:shadow-2xl transition transform hover:scale-105 active:scale-95 animate-fade-in"
                                     >
                                         <LogOut className="w-12 h-12 text-white mb-2" />
-                                        <span className="text-2xl font-bold text-white">Registrar Salida</span>
+                                        <span className="text-2xl font-bold text-white">{buttonLabels.exit}</span>
                                     </button>
                                 )}
 
@@ -573,7 +578,7 @@ export default function Dashboard() {
                                         className="group relative flex flex-col items-center justify-center p-5 bg-gradient-to-tr from-orange-400 to-orange-600 rounded-2xl shadow-2xl hover:shadow-2xl transition transform hover:scale-105 active:scale-95 animate-fade-in"
                                     >
                                         <TriangleAlert className="w-8 h-8 text-white mb-1" />
-                                        <span className="text-xl font-bold text-white">Reportar Novedad</span>
+                                        <span className="text-xl font-bold text-white">{buttonLabels.incident}</span>
                                         <span className="text-xs text-orange-100 mt-1">Registro de Novedades, Mantenimientos o Incidentes.</span>
                                     </button>
                                 )}
@@ -597,7 +602,7 @@ export default function Dashboard() {
                 {step === 'camera' && (
                     <div className="w-full flex flex-col items-center animate-fade-in">
                         <h2 className="text-xl font-bold mb-4 capitalize text-gray-800">
-                            {mode === 'incident' ? '⚠️ Registrando Novedad' : `Registrando ${mode === 'entry' ? 'Entrada' : 'Salida'}`}
+                            {mode === 'incident' ? `⚠️ ${buttonLabels.incident}` : `${buttonLabels[mode === 'entry' ? 'entry' : 'exit']}`}
                         </h2>
 
                         {/* Native Video Element */}

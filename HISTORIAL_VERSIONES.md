@@ -1,24 +1,50 @@
 # Historial de Versiones: Control de Asistencia y Acceso 📋
 
-Esta guía documenta la evolución del sistema, detallando las características principales de cada versión desde la 1.0.0 hasta la 1.1.0 actual.
+Esta guía documenta la evolución del sistema, detallando las características principales de cada versión desde la 1.0.0 hasta la 1.6.7 actual.
 
 ---
 
-## Versión 1.1.0 (Actual) ✅
-**Fecha:** 15/02/2026
+## Versión 1.6.7 (Actual) ✅
+**Fecha:** 26/02/2026
 **Estado:** Estable - Producción
 
 ### Nuevas Características
-- **Gestión de Usuarios Completa**:
+- **Localización Completa al Español**: Toda el aplicativo (botones, mensajes, errores) ha sido traducido para facilitar su uso.
+- **Indicadores de Versión Visible**: Se agregó la etiqueta de versión en los encabezados de las páginas administrativas (`Registro`, `Configuración`, `Informes`) para facilitar el soporte técnico.
+- **Selector de Visibilidad de Contraseña**: Se integró un icono de "ojo" en los campos de contraseña del Administrador para evitar errores de escritura en dispositivos móviles.
+- **Refinamiento Lógico de Almuerzo**: Ajuste en el algoritmo de cálculo; el descuento de almuerzo ahora solo aplica estrictamente para turnos superiores a 8 horas, optimizando la precisión de los reportes.
+
+---
+
+## Versión 1.4.11 🛠️
+**Fecha:** 24/02/2026
+**Enfoque:** Licenciamiento y Flexibilidad
+
+### Nuevas Características
+- **Sistema de Licencia Buffer-Flex**:
+  - Implementación de un margen de cortesía (porcentaje extra) sobre el cupo contratado.
+  - Bloqueo automatizado de creación de empleados solo al agotar el margen absoluto.
+  - Alertas visuales dinámicas (Verde, Naranja, Rojo) según el consumo de cupos.
+- **Campos Dinámicos de Registro**:
+  - Posibilidad de activar/desactivar campos adicionales (identificación, contacto, formación) desde la pestaña Configuración.
+  - Los datos opcionales se integran automáticamente en los reportes de exportación.
+- **Seguridad en la Nube**:
+  - Migración de la lógica de creación de empleados a **Cloud Functions** para validaciones de seguridad robustas antes de afectar la base de datos.
+
+---
+
+## Versión 1.1.0 ✅
+**Fecha:** 15/02/2026
+**Estado:** Estable - Producción
+
+### Características Anteriores
+- **Gestión de Usuarios**:
   - Se agregaron campos obligatorios de **Nombres** y **Apellidos** en el registro.
-  - Se eliminó la restricción de dominio `@vertiaguas.com`, permitiendo el uso de correos personales o corporativos de cualquier dominio.
-  - La base de datos de empleados ahora almacena información personal completa para reportes.
+  - Se eliminó la restricción de dominio `@vertiaguas.com`.
 - **Mejoras en Login**:
-  - Eliminado el autocompletado de dominio. El usuario debe ingresar su correo completo (ej: `usuario@empresa.com`).
-  - Actualización visual de versión e instrucciones.
+  - Ingreso de correo completo sin autocompletado forzado de dominio.
 - **Reportes Avanzados**:
-  - **Exportación CSV Mejorada**: Incluye columnas de "Nombres" y "Apellidos".
-  - **Cruce de Datos Inteligente**: El sistema busca automáticamente los datos del empleado en la base de datos para completar el reporte de asistencia, incluso si el registro de asistencia original solo contenía el correo.
+  - Exportación CSV mejorada con nombres completos y cruce inteligente de datos.
 
 ---
 

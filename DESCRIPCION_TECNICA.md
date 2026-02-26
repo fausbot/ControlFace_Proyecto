@@ -1,7 +1,7 @@
 # ControlFace - PWA (Sistema de Control de Asistencia y Acceso)
 
 ## Descripción General 🌐
-Esta aplicación es una **Progressive Web App (PWA)** diseñada para el control de asistencia y acceso de empleados en tiempo real. Combina tecnologías de reconocimiento facial, geolocalización y sincronización en la nube para garantizar registros precisos y seguros desde cualquier dispositivo con navegador web (móviles, tablets o computadoras).
+Esta aplicación es una **Progressive Web App (PWA)** diseñada para el control de asistencia y acceso de empleados en tiempo real. La interfaz está **totalmente localizada al español**, facilitando su uso para todo el personal. Combina tecnologías de reconocimiento facial, geolocalización y sincronización en la nube para garantizar registros precisos y seguros desde cualquier dispositivo con navegador web (móviles, tablets o computadoras).
 
 ---
 
@@ -16,11 +16,13 @@ Esta aplicación es una **Progressive Web App (PWA)** diseñada para el control 
 *   **Marcaje Sencillo**: Botones grandes y claros para registrar "Entrada", "Salida", e "Incidente/Novedad".
 *   **Validación Horaria**: Registra la fecha y hora local del dispositivo, incrustándola en una foto con marca de agua, proveyendo inmutabilidad visual.
 *   **Compartir Comprobante**: Cada marcación genera una imagen con marca de agua (hora, lugar, usuario) que puede compartirse inmediatamente vía WhatsApp.
+*   **Seguimiento de Versión**: Los encabezados de las páginas de administración muestran claramente el indicador de versión (ej: `v1.6.7`) para asegurar que el sistema esté actualizado.
 
 ### 3. Administración Centralizada
-*   **Panel de Control (INFORMES y CONFIG)**: Vista exclusiva para administradores, protegida por contraseña local.
+*   **Panel de Control (INFORMES y CONFIG)**: Vista exclusiva para administradores, protegida por contraseña local con **selector de visibilidad** para facilitar el ingreso en móviles.
 *   **Gestión de Usuarios**:
     *   Registro de nuevos empleados con captura de nombre, apellido y datos biométricos.
+    *   Soporte para múltiples campos dinámicos (Personalización de Perfiles).
     *   Eliminación de usuarios (purgando base de datos y Auth).
 *   **Reportes**:
     *   Listado completo de todos los registros de asistencia y fotografías tomadas.
@@ -29,7 +31,7 @@ Esta aplicación es una **Progressive Web App (PWA)** diseñada para el control 
 
 ### 4. Tecnología PWA
 *   **Instalable**: Se puede "instalar" como una aplicación nativa en Android e iOS (botón superior) sin cruzar tiendas de aplicaciones de terceros.
-*   **Licenciamiento Seguro**: Sistema de control criptográfico modular e independiente de internet.
+*   **Licenciamiento Seguro (Buffer-Flex)**: Sistema de control criptográfico modular. Permite un margen de cortesía configurable (ej: +20%) sobre el límite contratado antes de bloquear nuevos registros.
 
 ---
 
@@ -85,10 +87,10 @@ Aquí se guardan las credenciales de acceso.
 
 ## Parámetros Lógicos ⚙️
 
-1. **Calculadora Colombiana**: El aplicativo evalúa la ley de corte colombiana (6:00 AM - 9:00 PM Diurno / 9:00 PM - 6:00 AM Nocturno), así como domingos y festivos definidos mediante el algoritmo _Computus_ de pascua y leyes Emiliani.
-2. **Descuento de Almuerzo Automático**: Se activa en CONFIG, de lo contrario reporta ("No") frente a jornadas menores a 8h. 
+1. **Calculadora Colombiana**: El aplicativo evalúa la ley de corte colombiana (6:00 AM - 7:00 PM Diurno / 7:00 PM - 6:00 AM Nocturno), así como domingos y festivos definidos mediante el algoritmo _Computus_.
+2. **Descuento de Almuerzo Automático**: Se activa en CONFIG. Solo aplica para jornadas **mayores a 8 horas** laboradas, priorizando el descuento en horas diurnas ordinarias.
 3. **Cálculos Aislados**: Para garantizar máxima precisión en auditorías frente al usuario, la liquidación matemática de tiempos toma el formato visual **texto (`hora`, `fecha`)** anclado físicamente en la foto en lugar del _Timestamp de red_, descartando latencia u off-grid del dispositivo remoto.
 4. **Licenciamiento (Buffer-Flex)**: Soporta licencias JSON cifradas que permiten un margen del (%x) de sobrepaso a la cuota global comprada antes de bloquear la creación del empleado N+1.
 
 ---
-*Documento actualizado el 24/02/2026 para la versión 1.4.11 de ControlFace*
+*Documento actualizado el 26/02/2026 para la versión 1.6.7 de ControlFace*
