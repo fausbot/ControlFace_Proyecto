@@ -156,6 +156,7 @@ export default function Configuracion() {
                     <h1 className="text-3xl font-bold text-gray-800 flex items-center gap-2">
                         <Settings size={30} className="text-purple-600" />
                         Configuración
+                        <span className="text-[10px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-mono ml-2 border border-gray-200">v{import.meta.env.VITE_APP_VERSION}</span>
                     </h1>
                     <div className="flex gap-3">
                         <button

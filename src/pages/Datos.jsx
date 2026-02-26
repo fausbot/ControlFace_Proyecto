@@ -139,11 +139,12 @@ export default function Datos() {
         <div className="min-h-screen bg-gradient-to-b from-[#3C7DA6] to-[#6FAF6B] p-6">
             <div className="max-w-6xl mx-auto">
                 <div className="flex justify-between items-center mb-8">
-                    <h1 className="text-3xl font-bold text-gray-800 flex items-baseline gap-2">
-                        Registros de Asistencia
-                        <span className="text-sm font-normal text-gray-500 bg-gray-200 px-2 py-0.5 rounded-full">v{import.meta.env.VITE_APP_VERSION || '1.6.0'}</span>
+                    <h1 className="text-3xl font-bold text-gray-800 flex items-center gap-2">
+                        <FileText size={30} className="text-blue-600" />
+                        Visor de Asistencia
+                        <span className="text-[10px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-mono ml-2 border border-gray-200">v{import.meta.env.VITE_APP_VERSION}</span>
                     </h1>
-                    <button onClick={() => navigate('/dashboard')} className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300">Volver</button>
+                    <button onClick={() => navigate('/dashboard')} className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 transition">Volver</button>
                 </div>
 
                 {/* Entrada Manual */}

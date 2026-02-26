@@ -273,7 +273,10 @@ export default function Register() {
                         <UserPlus className="text-green-600" size={32} />
                     </div>
                 </div>
-                <h2 className="text-3xl font-bold text-center mb-6 text-gray-800">Registrar Nuevo Empleado</h2>
+                <h2 className="text-3xl font-bold text-center mb-6 text-gray-800 flex items-center justify-center gap-2">
+                    Registrar Nuevo Empleado
+                    <span className="text-[10px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-mono border border-gray-200">v{import.meta.env.VITE_APP_VERSION}</span>
+                </h2>
 
                 {/* Panel Informativo Licencia */}
                 {licenseInfo?.decoded && (

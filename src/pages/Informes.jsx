@@ -428,6 +428,7 @@ export default function Informes() {
                     <h1 className="text-3xl font-bold text-gray-800 flex items-center gap-2">
                         <FileText size={30} className="text-blue-600" />
                         Centro de Informes y Reportes
+                        <span className="text-[10px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-mono ml-2 border border-gray-200">v{import.meta.env.VITE_APP_VERSION}</span>
                     </h1>
                     <button onClick={() => navigate('/dashboard')} className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 transition">Volver</button>
                 </div>
