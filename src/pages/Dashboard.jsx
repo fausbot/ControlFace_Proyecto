@@ -40,6 +40,11 @@ export default function Dashboard() {
         storage_saveIncidentes: true
     });
     const [isLicenseValid, setIsLicenseValid] = useState(true);
+    const [buttonLabels, setButtonLabels] = useState({
+        entry: "Registrar Entrada",
+        exit: "Registrar Salida",
+        incident: "Reportar Novedad"
+    });
 
     useEffect(() => {
         // Detectar si ya está instalada
