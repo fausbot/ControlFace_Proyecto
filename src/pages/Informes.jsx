@@ -304,7 +304,7 @@ export default function Informes() {
                         const calc = calculateLaborHours(start, end, timeConfig);
                         if (!calc.error) {
                             horasStr = (calc.raw.totalMins / 60).toFixed(2);
-                            if (calc.appliedLunchDeduction) lunch = `${(timeConfig.calc_lunchMins || 60) / 60}h`;
+                            if (calc.appliedLunchDeduction) lunch = `Sí (${(timeConfig.calc_lunchMins || 60) / 60} Hora${(timeConfig.calc_lunchMins || 60) / 60 > 1 ? 's' : ''})`;
                         }
                     }
                     return [
@@ -315,7 +315,7 @@ export default function Informes() {
                     ];
                 });
             } else if (attendanceReportType === 'detallado_horas') {
-                headers = ['Usuario', 'Nombres', 'Apellidos', 'Dia', 'F. Ingreso', 'H. Ingreso', 'F. Salida', 'H. Salida', 'Diurnas', 'Nocturnas', 'Dom Diu', 'Dom Noc', 'Total'];
+                headers = ['Usuario', 'Nombres', 'Apellidos', 'Dia', 'F. Ingreso', 'H. Ingreso', 'F. Salida', 'H. Salida', 'Almuerzo Aplicado', 'Diurnas', 'Nocturnas', 'Dom Diu', 'Dom Noc', 'Total'];
                 rows = shifts.map(({ entry, exit, email }) => {
                     const emp = employeesMap[email] || { firstName: '', lastName: '' };
                     let dia = '-';
@@ -324,14 +324,18 @@ export default function Informes() {
                         dia = d ? dayFormatter.format(d) : '-';
                     }
                     let h = { diurnas: '-', nocturnas: '-', domDiurnas: '-', domNocturnas: '-', totalHHMM: '-' };
+                    let lunchApplied = 'No';
                     if (entry && exit) {
                         const calc = calculateLaborHours(parseStringDate(entry.fecha, entry.hora), parseStringDate(exit.fecha, exit.hora), timeConfig);
-                        if (!calc.error) h = calc.format;
+                        if (!calc.error) {
+                            h = calc.format;
+                            if (calc.appliedLunchDeduction) lunchApplied = `Sí (${(timeConfig.calc_lunchMins || 60) / 60}h)`;
+                        }
                     }
                     return [
                         email, emp.firstName, emp.lastName, dia,
                         entry?.fecha || '-', entry?.hora || '-', exit?.fecha || '-', exit?.hora || '-',
-                        h.diurnas, h.nocturnas, h.domDiurnas, h.domNocturnas, h.totalHHMM
+                        lunchApplied, h.diurnas, h.nocturnas, h.domDiurnas, h.domNocturnas, h.totalHHMM
                     ];
                 });
             } else {

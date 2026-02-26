@@ -111,9 +111,9 @@ export const calculateLaborHours = (entry, exit, config = {}) => {
     // Total en minutos para validar el almuerzo
     const totalMinutes = buckets.diurnas + buckets.nocturnas + buckets.domDiurnas + buckets.domNocturnas;
 
-    // 3. Descuento de Almuerzo (Sólo para turnos mayores a 8 horas -> >480 min)
+    // 3. Descuento de Almuerzo (Sólo para turnos de 8 horas o más -> >= 480 min)
     let appliedLunchDeduction = false;
-    if (config.calc_lunch && config.calc_lunchMins && totalMinutes > 480) {
+    if (config.calc_lunch && config.calc_lunchMins && totalMinutes >= 480) {
         appliedLunchDeduction = true;
         let lunchToDeduct = parseInt(config.calc_lunchMins, 10) || 60;
 
