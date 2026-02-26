@@ -1,0 +1,6 @@
+git checkout v1.5.0-devpara ir a 1.5.0	
+git branch  para ver en que rama estoy	
+git checkout main  para ir a la rama principal
+
+npm run build
+firebase deploy --only hosting
