@@ -147,37 +147,6 @@ export default function Datos() {
                     <button onClick={() => navigate('/dashboard')} className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 transition">Volver</button>
                 </div>
 
-                {/* Entrada Manual */}
-                <div className="bg-white rounded-xl shadow-2xl p-6 mb-6 border-l-4 border-blue-500">
-                    <h3 className="text-blue-700 font-bold flex items-center gap-2 mb-4">
-                        <FileText size={20} />
-                        Entrada Manual de Datos
-                    </h3>
-                    <form onSubmit={handleManualEntry} className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
-                        <div>
-                            <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Usuario (Email)</label>
-                            <input type="text" placeholder="ej: faus@bot.com" value={mUser} onChange={e => setMUser(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" required />
-                        </div>
-                        <div>
-                            <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Evento</label>
-                            <select value={mType} onChange={e => setMType(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm bg-white">
-                                <option value="Entrada">Entrada</option>
-                                <option value="Salida">Salida</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Fecha</label>
-                            <input type="date" value={mDate} onChange={e => setMDate(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" required />
-                        </div>
-                        <div>
-                            <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Hora</label>
-                            <input type="time" value={mTime} onChange={e => setMTime(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" required />
-                        </div>
-                        <button type="submit" disabled={mSaving} className="w-full h-[42px] bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2">
-                            {mSaving ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle size={16} />} Adicionar
-                        </button>
-                    </form>
-                </div>
 
                 {/* Tabla */}
                 <div className="bg-white rounded-xl shadow-2xl overflow-hidden">
@@ -231,6 +200,38 @@ export default function Datos() {
                             <button onClick={() => setPageNumber(p => p + 1)} disabled={!hasMore} className="flex items-center gap-1 px-3 py-1 bg-blue-600 text-white rounded text-xs font-bold">Sig. <ChevronRight size={14} /></button>
                         </div>
                     </div>
+                </div>
+
+                {/* Entrada Manual al Final */}
+                <div className="bg-white rounded-xl shadow-2xl p-6 mt-8 border-l-4 border-blue-500">
+                    <h3 className="text-blue-700 font-bold flex items-center gap-2 mb-4">
+                        <FileText size={20} />
+                        Entrada Manual de Datos
+                    </h3>
+                    <form onSubmit={handleManualEntry} className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
+                        <div>
+                            <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Usuario (Email)</label>
+                            <input type="text" placeholder="ej: faus@bot.com" value={mUser} onChange={e => setMUser(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" required />
+                        </div>
+                        <div>
+                            <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Evento</label>
+                            <select value={mType} onChange={e => setMType(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm bg-white">
+                                <option value="Entrada">Entrada</option>
+                                <option value="Salida">Salida</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Fecha</label>
+                            <input type="date" value={mDate} onChange={e => setMDate(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" required />
+                        </div>
+                        <div>
+                            <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Hora</label>
+                            <input type="time" value={mTime} onChange={e => setMTime(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" required />
+                        </div>
+                        <button type="submit" disabled={mSaving} className="w-full h-[42px] bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2">
+                            {mSaving ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle size={16} />} Adicionar
+                        </button>
+                    </form>
                 </div>
             </div>
         </div >
