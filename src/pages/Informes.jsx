@@ -34,6 +34,8 @@ const FIELD_DEFS = [
     { key: 'estadoCivil', label: 'Estado civil', type: 'text', group: 'Identificación' },
     { key: 'hijos', label: 'Hijos y edades', type: 'text', group: 'Identificación' },
     { key: 'grupoSanguineo', label: 'Grupo sanguíneo', type: 'text', group: 'Identificación' },
+    { key: 'eps', label: 'EPS', type: 'text', group: 'Identificación' },
+    { key: 'arl', label: 'ARL', type: 'text', group: 'Identificación' },
     { key: 'direccion', label: 'Dirección de residencia', type: 'text', group: 'Contacto' },
     { key: 'telefono', label: 'Teléfono personal', type: 'tel', group: 'Contacto' },
     { key: 'correoPersonal', label: 'Correo electrónico personal', type: 'email', group: 'Contacto' },

@@ -23,6 +23,8 @@ const FIELD_GROUPS = [
             { key: 'estadoCivil', label: 'Estado civil' },
             { key: 'hijos', label: 'Hijos y edades' },
             { key: 'grupoSanguineo', label: 'Grupo sanguíneo' },
+            { key: 'eps', label: 'EPS' },
+            { key: 'arl', label: 'ARL' },
         ],
     },
     {
