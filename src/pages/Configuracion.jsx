@@ -48,8 +48,8 @@ const DEFAULT_CONFIG = {
     ...Object.fromEntries(FIELD_GROUPS.flatMap(g => g.fields.map(f => [f.key, false]))),
     storage_saveAsistencia: true,
     storage_saveIncidentes: true,
-    storage_retentionAsistencia: 3,
-    storage_retentionIncidentes: 18,
+    storage_retentionAsistencia: 90,
+    storage_retentionIncidentes: 540,
     // defaults calculo tiempo
     calc_rounding: false,
     calc_roundingMins: 15,
@@ -113,7 +113,7 @@ export default function Configuracion() {
         setSavedOk(false);
     };
 
-    const handleNumberChange = (key, value, maxVal = 60) => {
+    const handleNumberChange = (key, value, maxVal = 730) => {
         const val = parseInt(value, 10);
         setConfig(prev => ({ ...prev, [key]: isNaN(val) ? 1 : val > maxVal ? maxVal : val < 1 ? 1 : val }));
         setSavedOk(false);
@@ -235,7 +235,7 @@ export default function Configuracion() {
                 <div className="bg-white rounded-xl shadow-2xl p-6 mb-6 border-l-4 border-blue-500">
                     <h2 className="text-xl font-bold text-blue-800 mb-2">Almacenamiento de Evidencias (Fotos)</h2>
                     <p className="text-sm text-gray-600 mb-4">
-                        Configura si el sistema guardará de forma permanente las fotos al momento de entrar o si solo verificará el rostro sin guardar archivos pesados. Además, define el tiempo (en meses) antes de que se borren y eliminen permanentemente.
+                        Configura si el sistema guardará de forma permanente las fotos al momento de entrar o si solo verificará el rostro sin guardar archivos pesados. Además, define el tiempo (en días) antes de que se borren y eliminen permanentemente.
                     </p>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -258,10 +258,10 @@ export default function Configuracion() {
                             </button>
 
                             <div className="flex flex-col gap-1">
-                                <label className="text-xs font-bold text-blue-800 opacity-80">Meses de retención</label>
+                                <label className="text-xs font-bold text-blue-800 opacity-80">Días de retención</label>
                                 <input
                                     type="number"
-                                    min="1" max="60"
+                                    min="1" max="730"
                                     disabled={config.storage_saveAsistencia === false}
                                     value={config.storage_retentionAsistencia ?? 3}
                                     onChange={(e) => handleNumberChange('storage_retentionAsistencia', e.target.value)}
@@ -289,10 +289,10 @@ export default function Configuracion() {
                             </button>
 
                             <div className="flex flex-col gap-1">
-                                <label className="text-xs font-bold text-orange-800 opacity-80">Meses de retención</label>
+                                <label className="text-xs font-bold text-orange-800 opacity-80">Días de retención</label>
                                 <input
                                     type="number"
-                                    min="1" max="60"
+                                    min="1" max="730"
                                     disabled={config.storage_saveIncidentes === false}
                                     value={config.storage_retentionIncidentes ?? 18}
                                     onChange={(e) => handleNumberChange('storage_retentionIncidentes', e.target.value)}

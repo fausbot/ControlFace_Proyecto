@@ -1,0 +1,25 @@
+# 🚀 Plan de Arranque: Nuevos Proyectos ControlFace
+
+He diseñado un sistema de **"Auto-Bootstrap"** para que cuando crees un nuevo proyecto en Firebase (limpio y sin datos), puedas configurarlo sin errores de permisos ni bloqueos.
+
+### 1. Clave Maestra de Primer Inicio
+Si la base de datos está vacía, el sistema activará automáticamente el modo de emergencia:
+- **Clave:** `CF1234`
+- **Uso:** Sirve para entrar a **Configuración**, **Registro**, **Datos** e **Informes** por primera vez.
+- **Auto-Desactivación:** En el momento en que definas una contraseña real en la pestaña de Configuración, esta clave dejará de funcionar automáticamente por seguridad.
+
+### 2. Activación de Licencia sin Restricciones
+Las reglas de seguridad (`firestore.rules`) están configuradas para que:
+- La colección `settings/license` permita escritura pública inicial.
+- Esto evita el error de "Missing or insufficient permissions" cuando intentas activar el programa por primera vez.
+
+### 3. Pasos para cada Proyecto Nuevo
+Al clonar este código en un nuevo proyecto de Firebase:
+1. **Deploy Reglas y Funciones**: Ejecuta el deploy para que el backend reconozca la lógica de `CF1234`.
+2. **Entrar a Configuración**: Usa `CF1234` para acceder.
+3. **Pegar Licencia**: Activa tu código de licencia.
+4. **Cambiar Claves**: Define tus contraseñas reales (usando `CF1234` como clave actual para validar el cambio).
+
+---
+> [!IMPORTANT]
+> Este plan asegura que nunca te quedes "afuera" de un sistema recién creado. La clave `CF1234` es tu llave maestra universal para el día 1.
