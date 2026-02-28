@@ -3,7 +3,7 @@ export const addWatermarkToImage = async (imageSrc, data) => {
         const img = new Image();
         const logo = new Image();
         logo.crossOrigin = "anonymous";
-        logo.src = "/logo.jpg"; // Path to the uploaded logo
+        logo.src = import.meta.env.VITE_CLIENT_LOGO_URL || "/logo.jpg"; // Path to the logo from env or default
 
         img.onload = () => {
             // Wait for logo to load as well

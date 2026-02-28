@@ -1,5 +1,8 @@
 {
   "projects": {
-    "default": "attendance-pwa-dev"
-  }
+    "default": "attendance-pwa-dev",
+    "ContolFace": "proyecto-controlface-cliente"
+  },
+  "targets": {},
+  "etags": {}
 }

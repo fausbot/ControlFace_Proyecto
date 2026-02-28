@@ -176,7 +176,7 @@ export default function Login() {
                 <img
                     src={import.meta.env.VITE_CLIENT_LOGO_URL || "/logo.jpg"}
                     alt="Logo"
-                    className="w-24 h-24 mb-4 rounded-xl object-contain"
+                    className="w-40 h-40 mb-4 rounded-xl object-contain"
                 />
                 <h2 className="text-3xl font-bold text-center mb-2 text-gray-800 w-full">
                     {import.meta.env.VITE_CLIENT_NAME || "Acceso Empleados"}

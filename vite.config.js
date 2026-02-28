@@ -11,7 +11,7 @@ export default defineConfig(({ mode }) => {
       react(),
       VitePWA({
         registerType: 'autoUpdate',
-        includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg', 'logo.jpg'],
+        includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg', env.VITE_CLIENT_LOGO_URL],
         manifest: {
           name: env.VITE_PWA_NAME || 'Control de Asistencia',
           short_name: env.VITE_PWA_SHORT_NAME || 'Asistencia',
@@ -22,14 +22,14 @@ export default defineConfig(({ mode }) => {
           start_url: '/',
           icons: [
             {
-              src: 'logo.jpg',
+              src: env.VITE_CLIENT_LOGO_URL || 'logo.jpg',
               sizes: '192x192',
-              type: 'image/jpeg'
+              type: env.VITE_CLIENT_LOGO_URL?.endsWith('.png') ? 'image/png' : 'image/jpeg'
             },
             {
-              src: 'logo.jpg',
+              src: env.VITE_CLIENT_LOGO_URL || 'logo.jpg',
               sizes: '512x512',
-              type: 'image/jpeg'
+              type: env.VITE_CLIENT_LOGO_URL?.endsWith('.png') ? 'image/png' : 'image/jpeg'
             }
           ]
         },

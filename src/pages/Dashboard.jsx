@@ -17,6 +17,9 @@ export default function Dashboard() {
     const videoRef = useRef(null);
     const canvasRef = useRef(null);
     const streamRef = useRef(null);
+    const livenessIntervalRef = useRef(null);
+    const modeRef = useRef(null);
+    const isLivenessRunningRef = useRef(false);
 
     const [mode, setMode] = useState(null); // 'entry', 'exit', 'incident'
     const [allowedActions, setAllowedActions] = useState({ entry: true, exit: true });
@@ -31,6 +34,11 @@ export default function Dashboard() {
     const [verifyingFace, setVerifyingFace] = useState(false);
     const [faceError, setFaceError] = useState('');
     const [cameraReady, setCameraReady] = useState(false);
+    // Liveness detection states
+    const [blinkCount, setBlinkCount] = useState(0);
+    const [autoCapturePending, setAutoCapturePending] = useState(false);
+    const blinkCountRef = useRef(0);
+    const eyeClosedRef = useRef(false);
     const [deferredPrompt, setDeferredPrompt] = useState(null);
     const [showInstallBtn, setShowInstallBtn] = useState(false);
     const [isIOS, setIsIOS] = useState(false);
@@ -238,6 +246,104 @@ export default function Dashboard() {
         };
     }, [logout, currentUser]);
 
+    // --- LIVENESS: Eye Aspect Ratio helper ---
+    const calcEAR = (eyePts) => {
+        // eyePts: array of 6 {x, y} points (landmarks for one eye)
+        const dist = (a, b) => Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2);
+        const A = dist(eyePts[1], eyePts[5]);
+        const B = dist(eyePts[2], eyePts[4]);
+        const C = dist(eyePts[0], eyePts[3]);
+        return (A + B) / (2.0 * C);
+    };
+
+    // --- LIVENESS: Reto de Rotación de Cabeza ---
+    // Detecta el giro de la cabeza (Yaw) usando la posición de la nariz relativa a los ojos.
+    // Requiere: 1. Mirar al frente -> 2. Girar a la izquierda -> 3. Volver al frente.
+    const startLivenessCheck = () => {
+        isLivenessRunningRef.current = true;
+        setBlinkCount(0);
+        blinkCountRef.current = 0;
+
+        // Estados del reto: 0=Esperando frente, 1=Girando izquierda, 2=Volviendo al frente
+        let challengeState = 0;
+        let isDetecting = false;
+
+        const loop = async () => {
+            if (!isLivenessRunningRef.current) return;
+
+            if (!isDetecting && videoRef.current && videoRef.current.readyState === 4) {
+                isDetecting = true;
+                try {
+                    const detection = await faceapi
+                        .detectSingleFace(
+                            videoRef.current,
+                            new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.3 })
+                        )
+                        .withFaceLandmarks();
+
+                    if (detection) {
+                        const landmarks = detection.landmarks.positions;
+                        const leftEye = landmarks[36];  // Extremo ojo izq
+                        const rightEye = landmarks[45]; // Extremo ojo der
+                        const nose = landmarks[30];     // Punta nariz
+
+                        // Cálculo de Yaw simplificado (0.5 es centro, <0.3 es giro a izq, >0.7 es giro a der)
+                        // Usamos escala de pantalla (ojo izq tiene X menor que ojo der usualmente)
+                        const eyeDist = rightEye.x - leftEye.x;
+                        const noseFromLeft = nose.x - leftEye.x;
+                        const yawRatio = noseFromLeft / eyeDist;
+
+                        if (challengeState === 0) {
+                            // Paso 0: Mirar al frente
+                            if (yawRatio > 0.4 && yawRatio < 0.6) {
+                                challengeState = 1;
+                                blinkCountRef.current = 20;
+                                setBlinkCount(20);
+                                setStatusMessage('¡Bien! Ahora gire la cabeza a la IZQUIERDA');
+                            } else {
+                                setStatusMessage('Póngase de frente a la cámara');
+                            }
+                        } else if (challengeState === 1) {
+                            // Paso 1: Girar a la izquierda (yawRatio disminuye)
+                            if (yawRatio < 0.35) {
+                                challengeState = 2;
+                                blinkCountRef.current = 60;
+                                setBlinkCount(60);
+                                setStatusMessage('Excelente. Ahora vuelva al CENTRO');
+                            }
+                            // Si se queda demasiado tiempo o gira al revés, no hacemos nada, solo esperamos
+                        } else if (challengeState === 2) {
+                            // Paso 2: Volver al frente
+                            if (yawRatio > 0.45 && yawRatio < 0.65) {
+                                challengeState = 3;
+                                blinkCountRef.current = 100;
+                                setBlinkCount(100);
+                                setStatusMessage('¡Identidad confirmada!');
+                                isLivenessRunningRef.current = false;
+                                setAutoCapturePending(true);
+                                return;
+                            }
+                        }
+                    } else {
+                        // Rostro perdido - Opcional: Reiniciar si tarda mucho
+                        // setStatusMessage('Rostro no detectado');
+                    }
+                } catch (err) {
+                    console.error("Liveness Error:", err);
+                } finally {
+                    isDetecting = false;
+                }
+            }
+
+            if (isLivenessRunningRef.current) {
+                livenessIntervalRef.current = requestAnimationFrame(loop);
+            }
+        };
+
+        livenessIntervalRef.current = requestAnimationFrame(loop);
+    };
+
+
     const startCamera = async (facingMode = 'user') => {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({
@@ -250,6 +356,7 @@ export default function Dashboard() {
             console.error("Error accessing camera:", err);
             alert("No se pudo acceder a la cámara. Verifique los permisos.");
             setStatusMessage('');
+
             setStep('idle');
             setMode(null);
         }
@@ -258,13 +365,32 @@ export default function Dashboard() {
     // Efecto para asignar el flujo de video cuando el elemento esté montado
     useEffect(() => {
         if (step === 'camera' && cameraReady && videoRef.current && streamRef.current) {
-            console.log("Dashboard: Asignando stream al video...");
+            console.log('[Dashboard] Asignando stream al video, mode:', modeRef.current);
             videoRef.current.srcObject = streamRef.current;
-            videoRef.current.play().catch(e => console.error("Error auto-reproduciendo video:", e));
+            videoRef.current.play().catch(e => console.error('Error reproduciendo video:', e));
+
+            if (modeRef.current !== 'incident' && modelsLoaded) {
+                // Esperar a que el video tenga frames reales (readyState === 4)
+                const waitForVideo = setInterval(() => {
+                    if (videoRef.current && videoRef.current.readyState === 4) {
+                        clearInterval(waitForVideo);
+                        console.log('[Liveness] Video listo, iniciando detección de parpadeo...');
+                        startLivenessCheck();
+                    }
+                }, 100);
+            } else if (modeRef.current === 'incident') {
+                setLivenessVerified(true);
+            }
         }
-    }, [step, cameraReady]);
+    }, [step, cameraReady, modelsLoaded]);
 
     const stopCamera = () => {
+        // Detener el loop de liveness (requestAnimationFrame o intervalo)
+        isLivenessRunningRef.current = false;
+        if (livenessIntervalRef.current) {
+            cancelAnimationFrame(livenessIntervalRef.current);
+            livenessIntervalRef.current = null;
+        }
         if (streamRef.current) {
             streamRef.current.getTracks().forEach(track => track.stop());
             streamRef.current = null;
@@ -276,14 +402,26 @@ export default function Dashboard() {
         stopCamera();
         setStep('idle');
         setMode(null);
+        modeRef.current = null;
         setStatusMessage('');
+        setBlinkCount(0);
+        setAutoCapturePending(false);
+        blinkCountRef.current = 0;
+        eyeClosedRef.current = false;
     };
 
     const handleStart = async (selectedMode) => {
         setMode(selectedMode);
+        modeRef.current = selectedMode; // Ref para evitar stale closures
         setStep('camera');
         setStatusMessage('');
         setIncidentDescription('');
+        // Reset liveness for new session
+        isLivenessRunningRef.current = false;
+        setBlinkCount(0);
+        setAutoCapturePending(false);
+        blinkCountRef.current = 0;
+        eyeClosedRef.current = false;
 
         // Cámara trasera para incidentes, frontal para asistencia
         const facingMode = selectedMode === 'incident' ? 'environment' : 'user';
@@ -427,6 +565,14 @@ export default function Dashboard() {
             setIsCapturing(false);
         }
     }, [mode, currentUser, isCapturing]);
+
+    // Auto-captura al completar los 2 parpadeos
+    useEffect(() => {
+        if (autoCapturePending && !isCapturing) {
+            setAutoCapturePending(false);
+            capture();
+        }
+    }, [autoCapturePending, isCapturing, capture]);
 
     const shareImage = async () => {
         if (!capturedData || !capturedData.image) return;
@@ -611,8 +757,8 @@ export default function Dashboard() {
                         </h2>
 
                         {/* Native Video Element */}
-                        <div className="relative rounded-2xl overflow-hidden shadow-2xl border-4 border-white bg-black w-full aspect-[3/4] max-w-[280px]">
-                            {/* Overflow: mirror solo para cámara frontal */}
+                        <div className="relative rounded-2xl overflow-hidden shadow-2xl border-4 bg-black w-full aspect-[3/4] max-w-[280px]"
+                            style={{ borderColor: mode === 'incident' ? 'white' : blinkCount >= 1 ? '#22c55e' : '#3b82f6' }}>
                             <video
                                 ref={videoRef}
                                 autoPlay
@@ -620,10 +766,7 @@ export default function Dashboard() {
                                 muted
                                 className={`w-full h-full object-cover ${mode !== 'incident' ? 'transform scale-x-[-1]' : ''}`}
                             />
-
-                            {/* Hidden canvas for capture */}
                             <canvas ref={canvasRef} className="hidden" />
-
                             <div className="absolute inset-0 border-2 border-white/30 rounded-2xl pointer-events-none"></div>
 
                             {/* Overlay info */}
@@ -631,28 +774,65 @@ export default function Dashboard() {
                                 <div className="flex items-center gap-1"><MapPin size={12} /> Buscando GPS...</div>
                                 {mode === 'incident'
                                     ? <div className="flex items-center gap-1"><TriangleAlert size={12} /> Fotografía el área afectada</div>
-                                    : <div className="flex items-center gap-1"><Camera size={12} /> Rostro visible requerido</div>
+                                    : <div className="flex items-center gap-1"><Camera size={12} /> Mueva la cabeza para registrar</div>
                                 }
                             </div>
+
+                            {/* Progreso movimiento — top right badge */}
+                            {mode !== 'incident' && (
+                                <div className={`absolute top-3 right-3 text-white text-xs font-bold px-2 py-1 rounded-full shadow-lg ${blinkCount >= 100 ? 'bg-green-500' : 'bg-blue-500'}`}>
+                                    {blinkCount}%
+                                </div>
+                            )}
                         </div>
 
-                        <div className="mt-6 flex gap-4">
+                        {/* Barra de movimiento — solo asistencia */}
+                        {mode !== 'incident' && (
+                            <div className="mt-3 w-full max-w-[280px]">
+                                <div className="bg-blue-50 border border-blue-200 rounded-xl p-3">
+                                    <p className="text-xs font-bold text-blue-700 text-center mb-2">
+                                        {statusMessage || '🙂 Mueva la cabeza ligeramente'}
+                                    </p>
+                                    <div className="w-full bg-blue-100 rounded-full h-3">
+                                        <div
+                                            className="h-3 rounded-full transition-all duration-150"
+                                            style={{
+                                                width: `${blinkCount}%`,
+                                                background: blinkCount >= 100
+                                                    ? 'linear-gradient(90deg, #22c55e, #16a34a)'
+                                                    : 'linear-gradient(90deg, #3b82f6, #2563eb)'
+                                            }}
+                                        />
+                                    </div>
+                                    <p className="text-[10px] text-blue-400 text-center mt-1">
+                                        {blinkCount < 20 ? 'Mire al frente...' : blinkCount < 60 ? '¡Bien! Gire a la IZQUIERDA...' : blinkCount < 100 ? '¡Casi listo! Vuelva al CENTRO 🟢' : '✅ Identidad Confirmada'}
+                                    </p>
+                                </div>
+                            </div>
+                        )}
+
+
+                        <div className="mt-4 flex gap-4">
                             <button
                                 onClick={handleStopCamera}
                                 className="px-6 py-3 rounded-full bg-gray-200 text-gray-700 font-bold hover:bg-gray-300"
                             >
                                 Cancelar
                             </button>
-                            <button
-                                onClick={capture}
-                                disabled={step === 'processing'}
-                                className={`px-8 py-3 rounded-full text-white font-bold shadow-2xl transition transform active:translate-y-1 ${step === 'processing' ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}
-                            >
-                                {step === 'processing' ? 'Procesando...' : 'Capturar'}
-                            </button>
+                            {/* Solo mostrar "Capturar" para incidentes — asistencia es automática */}
+                            {mode === 'incident' && (
+                                <button
+                                    onClick={capture}
+                                    disabled={step === 'processing'}
+                                    className={`px-8 py-3 rounded-full text-white font-bold shadow-2xl transition transform active:translate-y-1 ${step === 'processing' ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}
+                                >
+                                    {step === 'processing' ? 'Procesando...' : 'Capturar'}
+                                </button>
+                            )}
                         </div>
                     </div>
                 )}
+
 
                 {step === 'processing' && (
                     <div className="text-center p-10">
