@@ -1,0 +1,60 @@
+name: Deploy to Tenants
+
+on:
+  workflow_dispatch:
+    inputs:
+      tenants:
+        description: 'JSON array of Firebase Project IDs'
+        required: true
+        type: string
+
+jobs:
+  deploy:
+    name: Deploy to Multiple Tenants
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Parse Tenants Payload
+        id: parse
+        run: |
+          # Convert string input to actual JSON array
+          echo "lista='${{ github.event.inputs.tenants }}'"
+          echo "TENANTS_JSON=${{ github.event.inputs.tenants }}" >> $GITHUB_ENV
+
+      - name: Build Application
+        run: npm run build
+        env:
+          VITE_APP_VERSION: 1.6.14 # Se puede automatizar luego
+
+      - name: Deploy to Firebase Projects
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+        run: |
+          # Install Firebase CLI
+          npm install -g firebase-tools
+          
+          # Read JSON array and iterate
+          echo $TENANTS_JSON | jq -r '.[]' | while read projectId; do
+            echo "========================================================"
+            echo "🚀  STARTING DEPLOYMENT FOR TENANT: $projectId"
+            echo "========================================================"
+            
+            # Switch to project
+            firebase use $projectId --token $FIREBASE_TOKEN
+            
+            # Deploy hosting only (assuming rules/indexes are handled separately)
+            firebase deploy --only hosting --project $projectId --token $FIREBASE_TOKEN -m "Automated Multi-Tenant Deploy"
+            
+            echo "✅  DEPLOYMENT SUCCESSFUL FOR: $projectId"
+          done
