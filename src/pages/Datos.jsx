@@ -10,7 +10,8 @@ import { useAuth } from '../contexts/AuthContext';
 import {
     getAllAttendanceLogs,
     paginateLogs,
-    deleteAttendanceLog
+    deleteAttendanceLog,
+    subscribeToAttendanceLogs
 } from '../services/attendanceService';
 
 import { getEmployeesMap } from '../services/employeeService';
@@ -41,27 +42,29 @@ export default function Datos() {
             navigate('/login');
             return;
         }
-        loadLogs();
+
+        // Cargar mapa de empleados una vez
+        const loadInitialData = async () => {
+            const map = await getEmployeesMap();
+            setEmployeesMap(map);
+        };
+        loadInitialData();
+
+        // Suscripción en tiempo real
+        setLoading(true);
+        const unsubscribe = subscribeToAttendanceLogs((updatedLogs) => {
+            setAllLogs(updatedLogs);
+            setLoading(false);
+        });
+
+        // Limpieza al desmontar
+        return () => unsubscribe();
     }, [adminAccess]);
 
     const loadLogs = async () => {
-        setLoading(true);
-        try {
-            const map = await getEmployeesMap();
-            setEmployeesMap(map);
-
-            const all = await getAllAttendanceLogs();
-            setAllLogs(all);
-            const { data, hasMore: more } = paginateLogs(all, 1, PAGE_SIZE);
-            setLogs(data);
-            setHasMore(more);
-            setPageNumber(1);
-        } catch (error) {
-            console.error('Error fetching logs:', error);
-            alert('Error al cargar registros.');
-        } finally {
-            setLoading(false);
-        }
+        // Esta función ahora solo es necesaria para manual entry si queremos forzar algo,
+        // pero la suscripción ya se encarga de actualizar allLogs.
+        // La dejamos vacía o la removemos si no se usa más que en el handleSubmit.
     };
 
     // Recalcular página cuando cambia pageNumber
@@ -114,7 +117,7 @@ export default function Datos() {
 
             alert('✅ Registro adicionado correctamente.');
             setMUser(''); setMDate(''); setMTime('');
-            loadLogs();
+            // No hace falta llamar a loadLogs() porque onSnapshot detectará el nuevo doc
         } catch (error) {
             console.error(error);
             alert('Error al guardar el registro manual.');
@@ -142,7 +145,11 @@ export default function Datos() {
                     <h1 className="text-3xl font-bold text-gray-800 flex items-center gap-2">
                         <FileText size={30} className="text-blue-600" />
                         Visor de Asistencia
-                        <span className="text-[10px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-mono ml-2 border border-gray-200">v{import.meta.env.VITE_APP_VERSION}</span>
+                        <div className="flex items-center gap-1.5 px-2 py-0.5 bg-red-50 text-red-600 rounded-full border border-red-100 animate-pulse ml-2">
+                            <span className="w-1.5 h-1.5 bg-red-600 rounded-full"></span>
+                            <span className="text-[10px] font-bold uppercase tracking-wider">Live</span>
+                        </div>
+                        <span className="text-[10px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-mono ml-1 border border-gray-200">v{import.meta.env.VITE_APP_VERSION}</span>
                     </h1>
                     <button onClick={() => navigate('/dashboard')} className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 transition">Volver</button>
                 </div>

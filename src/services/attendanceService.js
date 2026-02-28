@@ -8,10 +8,42 @@ import {
     getDocs,
     deleteDoc,
     doc,
-    writeBatch
+    writeBatch,
+    onSnapshot,
+    query,
+    orderBy
 } from 'firebase/firestore';
 
 const COLLECTION = 'attendance';
+
+// ─────────────────────────────────────────────
+// Escucha cambios en TIEMPO REAL de la colección attendance
+// ─────────────────────────────────────────────
+export const subscribeToAttendanceLogs = (callback) => {
+    const q = query(collection(db, COLLECTION), orderBy('timestamp', 'desc'));
+
+    return onSnapshot(q, (snapshot) => {
+        const allData = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+
+        // Nota: Seguimos ordenando en cliente para aquellos registros 
+        // que no tienen timestamp (ej: algunos manuales antiguos)
+        allData.sort((a, b) => {
+            if (a.timestamp && b.timestamp) {
+                return b.timestamp.toMillis() - a.timestamp.toMillis();
+            }
+            if (a.timestamp) return -1;
+            if (b.timestamp) return 1;
+
+            const dateTimeA = (a.fecha || '') + ' ' + (a.hora || '');
+            const dateTimeB = (b.fecha || '') + ' ' + (b.hora || '');
+            return dateTimeB.localeCompare(dateTimeA);
+        });
+
+        callback(allData);
+    }, (error) => {
+        console.error("Error en suscripción de asistencia:", error);
+    });
+};
 
 // ─────────────────────────────────────────────
 // Convierte "6/2/2026" → objeto Date
