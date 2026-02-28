@@ -117,15 +117,14 @@ exports.verifyAdminPassword = functions.https.onCall(async (data, context) => {
         const configRef = db.collection('settings').doc('config');
         const docSnap = await configRef.get();
 
-        let defaultStoredPassword = '$2b$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy'; // Hash de "perro456"
-        let storedPassword = defaultStoredPassword;
-        let isFallback = true;
+        const BOOTSTRAP_PASSWORD = "CF1234";
+        let storedPassword = null;
+        let configData = {};
 
         if (docSnap.exists) {
-            const configData = docSnap.data();
-            const defaultDBPassword = configData.adminPassword || defaultStoredPassword;
+            configData = docSnap.data();
 
-            // Mapear el target al nombre de la clave en DB
+            // Determinar qué campo de contraseña buscar según el target
             let specificField = null;
             if (target === '/registro') specificField = 'adminPassword_registro';
             if (target === '/datos') specificField = 'adminPassword_datos';
@@ -134,38 +133,33 @@ exports.verifyAdminPassword = functions.https.onCall(async (data, context) => {
 
             if (specificField && configData[specificField]) {
                 storedPassword = configData[specificField];
-                isFallback = false;
-            } else {
-                // Fallback a la clave de master general compartida
-                storedPassword = defaultDBPassword;
+            } else if (configData.adminPassword) {
+                storedPassword = configData.adminPassword;
             }
-
-            // Guardar solo si el master no estaba en BD y estamos usándolo
-            if (isFallback && !configData.adminPassword) {
-                await configRef.set({ adminPassword: defaultStoredPassword }, { merge: true });
-            }
-        } else {
-            // Si no existe el doc, lo creamos con el hash por defecto
-            await configRef.set({ adminPassword: defaultStoredPassword });
         }
 
-        // Verificar si es un hash de bcrypt (empieza con $2b$ o $2a$)
-        const isBcryptHash = storedPassword.startsWith('$2b$') || storedPassword.startsWith('$2a$');
+        // --- LÓGICA DE BOOTSTRAP (PRIMER INICIO) ---
+        // Si no hay ninguna contraseña guardada en el campo correspondiente (ni en el master), 
+        // permitimos entrar con la clave maestra CF1234.
+        if (!storedPassword) {
+            if (password.trim() === BOOTSTRAP_PASSWORD) {
+                return { success: true };
+            }
+            return { success: false, error: "No hay clave configurada. Use la clave maestra de primer inicio." };
+        }
 
+        // --- LÓGICA NORMAL (BCRYPT O PLANO) ---
+        const isBcryptHash = storedPassword.startsWith('$2b$') || storedPassword.startsWith('$2a$');
         let isValid = false;
+
         if (isBcryptHash) {
-            // Usar bcrypt para comparar
             isValid = await bcrypt.compare(password.trim(), storedPassword);
         } else {
-            // Compatibilidad temporal con texto plano
             isValid = password.trim() === storedPassword.trim();
         }
 
-        if (isValid) {
-            return { success: true };
-        } else {
-            return { success: false };
-        }
+        return { success: isValid };
+
     } catch (error) {
         console.error("Error verificando contraseña:", error);
         throw new functions.https.HttpsError(
@@ -201,14 +195,8 @@ exports.changeAdminPassword = functions.https.onCall(async (data, context) => {
         const configRef = db.collection('settings').doc('config');
         const docSnap = await configRef.get();
 
-        if (!docSnap.exists) {
-            throw new functions.https.HttpsError(
-                "not-found",
-                "Configuración no encontrada."
-            );
-        }
-
-        const configData = docSnap.data();
+        const configData = docSnap.exists ? docSnap.data() : {};
+        const BOOTSTRAP_PASSWORD = "CF1234";
 
         // Mapear el target actual al campo que debemos validar para autorizar el cambio
         let specificFieldValidation = null;
@@ -218,19 +206,26 @@ exports.changeAdminPassword = functions.https.onCall(async (data, context) => {
         if (target === '/configuracion') specificFieldValidation = 'adminPassword_configuracion';
 
         // Determinar qué contraseña se debe verificar como "Actual"
-        let storedPasswordToVerify = configData.adminPassword; // Fallback
+        let storedPasswordToVerify = null;
         if (specificFieldValidation && configData[specificFieldValidation]) {
             storedPasswordToVerify = configData[specificFieldValidation];
+        } else if (configData.adminPassword) {
+            storedPasswordToVerify = configData.adminPassword;
         }
 
         // Verificar contraseña actual
-        const isBcryptHash = storedPasswordToVerify.startsWith('$2b$') || storedPasswordToVerify.startsWith('$2a$');
         let isCurrentValid = false;
 
-        if (isBcryptHash) {
-            isCurrentValid = await bcrypt.compare(currentPassword.trim(), storedPasswordToVerify);
+        if (!storedPasswordToVerify) {
+            // Si no hay contraseña guardada, validamos contra la maestra de bootstrap
+            isCurrentValid = currentPassword.trim() === BOOTSTRAP_PASSWORD;
         } else {
-            isCurrentValid = currentPassword.trim() === storedPasswordToVerify.trim();
+            const isBcryptHash = storedPasswordToVerify.startsWith('$2b$') || storedPasswordToVerify.startsWith('$2a$');
+            if (isBcryptHash) {
+                isCurrentValid = await bcrypt.compare(currentPassword.trim(), storedPasswordToVerify);
+            } else {
+                isCurrentValid = currentPassword.trim() === storedPasswordToVerify.trim();
+            }
         }
 
         if (!isCurrentValid) {
@@ -258,7 +253,7 @@ exports.changeAdminPassword = functions.https.onCall(async (data, context) => {
             updates[specificFieldValidation] = newHash;
         }
 
-        await configRef.update(updates);
+        await configRef.set(updates, { merge: true });
 
         console.log("Contraseña de administrador cambiada exitosamente");
         return { success: true };

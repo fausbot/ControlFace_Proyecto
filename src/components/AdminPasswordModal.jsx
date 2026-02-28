@@ -29,7 +29,7 @@ export default function AdminPasswordModal({ isOpen, onClose, onSuccess, target 
                 setPassword('');
                 onClose();
             } else {
-                setError('Clave incorrecta');
+                setError(result.data.error || 'Clave incorrecta');
             }
         } catch (err) {
             console.error("Error verifying password:", err);
