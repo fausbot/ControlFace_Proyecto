@@ -14,8 +14,12 @@ Las reglas de seguridad (`firestore.rules`) están configuradas para que:
 - Esto evita el error de "Missing or insufficient permissions" cuando intentas activar el programa por primera vez.
 
 ### 3. Pasos para cada Proyecto Nuevo
-Al clonar este código en un nuevo proyecto de Firebase:
-1. **Deploy Reglas y Funciones**: Ejecuta el deploy para que el backend reconozca la lógica de `CF1234`.
+1. **Deploy Inicial del Backend**: La *primera vez* que despliegues, Firebase CLI te hará preguntas sobre inicializar Node.js y la zona de funciones. Usa este comando (te pedirá estar en plan Blaze):
+   ```bash
+   firebase deploy --only functions
+   firebase deploy --only firestore,storage
+   ```
+   *(Hacerlo la primera vez sin --non-interactive para responder "Y" a los permisos de IAM que pide Google Cloud).*
 2. **Entrar a Configuración**: Usa `CF1234` para acceder.
 3. **Pegar Licencia**: Activa tu código de licencia.
 4. **Cambiar Claves**: Define tus contraseñas reales (usando `CF1234` como clave actual para validar el cambio).

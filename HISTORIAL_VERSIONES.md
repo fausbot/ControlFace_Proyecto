@@ -4,9 +4,41 @@ Esta guía documenta la evolución del sistema, detallando las características 
 
 ---
 
-## Versión 1.6.7 (Actual) ✅
-**Fecha:** 26/02/2026
+## Versión 1.6.18 (Actual) ✅
+**Fecha:** 01/03/2026
 **Estado:** Estable - Producción
+
+### Mejoras de UX
+- **Ajuste de Velocidad en Actualización**: Se redujo el tiempo de visualización del mensaje de actualización a solo 400ms para una transición casi instantánea.
+- **Prevención de Bucles**: Corrección en la lógica de almacenamiento local para asegurar que la aplicación no se recargue infinitamente en ciertos navegadores.
+
+---
+
+## Versión 1.6.17 ✅
+**Fecha:** 01/03/2026
+**Estado:** Estable - Histórico
+
+### Nuevas Características
+- **Sistema de Auto-Actualización Inteligente**: Implementación de detección automática de versiones en la pantalla de login.
+- **Limpieza Profunda para iOS**: Lógica especializada para forzar la actualización en dispositivos iPhone/iPad eliminando el "Sticky Cache".
+- **Overlay de Actualización**: Nueva interfaz visual que informa al usuario mientras se aplica la actualización de forma silenciosa.
+
+---
+
+## Versión 1.6.8 ✅
+**Fecha:** 01/03/2026
+**Estado:** Estable - Histórico
+
+### Correcciones
+- **Fijada Pantalla en Blanco en Novedades**: Se corrigió un error que impedía cargar la cámara en el modo de reporte de novedades.
+- **Refuerzo de Seguridad Facial**: Se incrementó la exigencia del algoritmo de reconocimiento (umbral a 0.63) para evitar suplantaciones de identidad.
+- **Optimización de Cámara**: Se confirmó el uso de la cámara trasera para reportes de novedades, asegurando una captura clara de la evidencia.
+
+---
+
+## Versión 1.6.7 ✅
+**Fecha:** 26/02/2026
+**Estado:** Estable - Histórico
 
 ### Nuevas Características
 - **Localización Completa al Español**: Toda el aplicativo (botones, mensajes, errores) ha sido traducido para facilitar su uso.

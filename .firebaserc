@@ -1,7 +1,6 @@
 {
   "projects": {
-    "default": "attendance-pwa-dev",
-    "ContolFace": "proyecto-controlface-cliente"
+    "default": "bourboncafe-3983a"
   },
   "targets": {},
   "etags": {}

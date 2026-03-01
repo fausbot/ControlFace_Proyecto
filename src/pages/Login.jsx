@@ -19,6 +19,8 @@ export default function Login() {
     const [isIOS, setIsIOS] = useState(false);
     const [isStandalone, setIsStandalone] = useState(false);
     const [isLicenseValid, setIsLicenseValid] = useState(true);
+    const [isUpdating, setIsUpdating] = useState(false);
+    const [updateMessage, setUpdateMessage] = useState('Buscando actualizaciones...');
 
     useEffect(() => {
         // Detectar si ya está instalada
@@ -46,6 +48,37 @@ export default function Login() {
             }
         };
         checkLicense();
+
+        // LOGICA DE AUTO-ACTUALIZACION
+        const checkVersion = async () => {
+            const currentVersion = import.meta.env.VITE_APP_VERSION || '1.6.16';
+            const savedVersion = localStorage.getItem('app_version');
+
+            if (savedVersion && savedVersion !== currentVersion) {
+                setIsUpdating(true);
+                const userAgent = window.navigator.userAgent.toLowerCase();
+                const isiPhone = userAgent.includes('iphone');
+                const isAndroid = userAgent.includes('android');
+
+                if (isiPhone) {
+                    setUpdateMessage('iOS: Optimizando memoria...');
+                } else if (isAndroid) {
+                    setUpdateMessage('Android: Aplicando actualización...');
+                } else {
+                    setUpdateMessage('PC: Actualizando sistema...');
+                }
+
+                // Esperar un momento muy corto (0.4s) antes de recargar
+                setTimeout(() => {
+                    // Importante: Guardar la versión antes de recargar para no entrar en loop
+                    localStorage.setItem('app_version', currentVersion);
+                    window.location.reload(true);
+                }, 400);
+            } else {
+                localStorage.setItem('app_version', currentVersion);
+            }
+        };
+        checkVersion();
     }, []);
 
     const handleInstallClick = async () => {
@@ -124,6 +157,16 @@ export default function Login() {
 
     return (
         <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-[#3C7DA6] to-[#6FAF6B] p-4 relative">
+            {/* Overlay de Actualización */}
+            {isUpdating && (
+                <div className="fixed inset-0 z-[100] bg-blue-900/90 backdrop-blur-md flex flex-col items-center justify-center text-white p-6 text-center">
+                    <div className="w-16 h-16 border-4 border-white/30 border-t-white rounded-full animate-spin mb-6"></div>
+                    <h2 className="text-2xl font-bold mb-2">¡Nueva versión encontrada!</h2>
+                    <p className="text-blue-100 mb-4">{updateMessage}</p>
+                    <p className="text-xs opacity-50 italic">Esto solo tomará un segundo...</p>
+                </div>
+            )}
+
             <div className="absolute top-4 left-0 right-0 px-4 flex justify-center gap-1.5 sm:gap-4 flex-wrap">
                 {isLicenseValid && (
                     <button

@@ -379,7 +379,7 @@ export default function Dashboard() {
                     }
                 }, 100);
             } else if (modeRef.current === 'incident') {
-                setLivenessVerified(true);
+                // Incidencias no requieren validación de vida
             }
         }
     }, [step, cameraReady, modelsLoaded]);
@@ -476,9 +476,9 @@ export default function Dashboard() {
                     } else {
                         const distance = faceapi.euclideanDistance(detection.descriptor, savedDescriptor);
                         console.log("Distancia facial:", distance);
-                        // Umbral más permisivo: 0.68 (era 0.62)
-                        // Esto reduce falsos negativos por iluminación/ángulo
-                        if (distance < 0.68) {
+                        // Umbral más estricto: 0.63 (era 0.68)
+                        // Esto mejora la seguridad ante suplantaciones
+                        if (distance < 0.63) {
                             setFaceVerified(true);
                             setFaceError('');
                         } else {
