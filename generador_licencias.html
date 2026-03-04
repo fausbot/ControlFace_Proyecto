@@ -7,6 +7,8 @@
     <title>Generador de Licencias - Faustino Software</title>
     <!-- Importamos CryptoJS para encriptar en formato AES -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+    <!-- Importamos BCrypt para generar hashes de contraseñas -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/bcryptjs/2.4.3/bcrypt.min.js"></script>
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -155,6 +157,33 @@
             <textarea id="tokenOutput" class="result" readonly></textarea>
             <button class="copy-btn" onclick="copiarToken()">Copiar al Portapapeles</button>
         </div>
+
+        <hr style="margin: 40px 0; border: 0; border-top: 1px solid #e5e7eb;">
+
+        <h2 style="color: #991b1b;">🔑 Generador de Hash (Reset de Contraseñas)</h2>
+        <p style="font-size: 13px; color: #6b7280; text-align: center; margin-bottom: 20px;">
+            Ingresa una nueva contraseña para generar su "huella digital" (Hash BCrypt) y pegarla en Firebase.
+            <br><i>(Nota: Las contraseñas en BCrypt NO se pueden recuperar, solo se pueden sobrescribir).</i>
+        </p>
+
+        <div class="form-group">
+            <label>Nueva Contraseña a Hashear:</label>
+            <div style="display: flex; gap: 10px;">
+                <input type="text" id="newPasswordInput" placeholder="Ej: MiNuevaClave123" style="flex: 1;">
+                <button onclick="document.getElementById('newPasswordInput').value='CF1234'"
+                    style="width: auto; padding: 0 15px; background: #6b7280; font-size: 12px;">Usar CF1234</button>
+            </div>
+        </div>
+
+        <button onclick="generarHashBCrypt()" style="background-color: #ef4444;">Generar Hash BCrypt</button>
+
+        <div class="result-box" id="hashResultContainer">
+            <label style="color: #b91c1c;">✅ Hash Generado (Copia esto a Firestore):</label>
+            <textarea id="hashOutput" class="result" style="border-color: #ef4444; background: #fff1f2; height: 80px;"
+                readonly></textarea>
+            <button class="copy-btn" style="background: #ef4444;" onclick="copiarHash()">Copiar Hash al
+                Portapapeles</button>
+        </div>
     </div>
 
     <script>
@@ -180,6 +209,45 @@
             const output = document.getElementById('tokenOutput');
             output.value = encrypted;
             document.getElementById('resultContainer').style.display = 'block';
+        }
+
+        function generarHashBCrypt() {
+            const password = document.getElementById('newPasswordInput').value.trim();
+
+            if (!password) {
+                alert("Por favor, ingresa una contraseña.");
+                return;
+            }
+
+            // Identificar la librería (puede estar en dcodeIO.bcrypt o bcrypt)
+            let bLib = null;
+            if (typeof dcodeIO !== 'undefined' && dcodeIO.bcrypt) bLib = dcodeIO.bcrypt;
+            else if (typeof bcrypt !== 'undefined') bLib = bcrypt;
+
+            if (!bLib) {
+                alert("⚠️ Error: La librería de seguridad no ha cargado. Revisa tu conexión a internet o intenta recargar la página.");
+                return;
+            }
+
+            try {
+                // Generar el hash de forma síncrona (10 rondas)
+                const salt = bLib.genSaltSync(10);
+                const hash = bLib.hashSync(password, salt);
+
+                const output = document.getElementById('hashOutput');
+                output.value = hash;
+                document.getElementById('hashResultContainer').style.display = 'block';
+            } catch (error) {
+                console.error("Error al generar hash:", error);
+                alert("❌ Error interno: " + error.message);
+            }
+        }
+
+        function copiarHash() {
+            const output = document.getElementById('hashOutput');
+            output.select();
+            document.execCommand('copy');
+            alert("¡Hash copiado! Ahora pégalo en el campo adminPassword de Firestore.");
         }
 
         function copiarToken() {

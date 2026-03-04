@@ -1,29 +1,29 @@
-# 🚀 Plan de Arranque: Nuevos Proyectos ControlFace
+# 🚀 Plan de Arranque y Reset: ControlFace
 
-He diseñado un sistema de **"Auto-Bootstrap"** para que cuando crees un nuevo proyecto en Firebase (limpio y sin datos), puedas configurarlo sin errores de permisos ni bloqueos.
+Este sistema tiene una protección de **"Auto-Arranque"** diseñada para que nunca pierdas el acceso. Si borras las contraseñas en Firebase, el sistema vuelve a su estado inicial.
 
-### 1. Clave Maestra de Primer Inicio
-Si la base de datos está vacía, el sistema activará automáticamente el modo de emergencia:
-- **Clave:** `CF1234`
-- **Uso:** Sirve para entrar a **Configuración**, **Registro**, **Datos** e **Informes** por primera vez.
-- **Auto-Desactivación:** En el momento en que definas una contraseña real en la pestaña de Configuración, esta clave dejará de funcionar automáticamente por seguridad.
+### 1. Clave Maestra de Emergencia (Reset a Cero)
+Si borras los campos de contraseña en Firestore (`adminPassword`, etc.) o el documento `settings/config`, el sistema activará automáticamente:
+- **Clave Universal:** `CF1234`
+- **Uso:** Sirve para entrar a cualquier módulo (Configuración, Registro, etc.) cuando no hay claves configuradas en la base de datos.
+- **Seguridad:** Tan pronto como guardes una clave nueva desde el panel de Configuración de la App, `CF1234` dejará de funcionar.
 
-### 2. Activación de Licencia sin Restricciones
-Las reglas de seguridad (`firestore.rules`) están configuradas para que:
-- La colección `settings/license` permita escritura pública inicial.
-- Esto evita el error de "Missing or insufficient permissions" cuando intentas activar el programa por primera vez.
+### 2. Procedimiento para "Arrancar de Cero"
+Si deseas resetear todas las claves a la de fábrica:
+1. Ve a Firestore Database en la consola de Firebase.
+2. Navega a la colección `settings` -> documento `config`.
+3. Borra todos los campos que empiecen por `adminPassword_` y el campo `adminPassword`.
+4. ¡Listo! Al no haber claves guardadas, el sistema ahora aceptará `CF1234` para permitirte entrar y configurar todo de nuevo.
 
-### 3. Pasos para cada Proyecto Nuevo
-1. **Deploy Inicial del Backend**: La *primera vez* que despliegues, Firebase CLI te hará preguntas sobre inicializar Node.js y la zona de funciones. Usa este comando (te pedirá estar en plan Blaze):
+### 3. Pasos para Proyectos Nuevos o Limpios
+1. **Despliegue**: Asegúrate de tener las funciones y reglas al día:
    ```bash
-   firebase deploy --only functions
-   firebase deploy --only firestore,storage
+   firebase deploy --only functions,firestore
    ```
-   *(Hacerlo la primera vez sin --non-interactive para responder "Y" a los permisos de IAM que pide Google Cloud).*
-2. **Entrar a Configuración**: Usa `CF1234` para acceder.
-3. **Pegar Licencia**: Activa tu código de licencia.
-4. **Cambiar Claves**: Define tus contraseñas reales (usando `CF1234` como clave actual para validar el cambio).
+2. **Primer Ingreso**: Abre la App y usa `CF1234` para entrar a **Configuración**.
+3. **Activar Licencia**: Lo primero es pegar el token de licencia para habilitar el resto del sistema.
+4. **Definir Claves Finales**: Cambia `CF1234` por tus contraseñas definitivas en la pestaña de Configuración.
 
 ---
 > [!IMPORTANT]
-> Este plan asegura que nunca te quedes "afuera" de un sistema recién creado. La clave `CF1234` es tu llave maestra universal para el día 1.
+> **CF1234** es tu salvavidas. Si alguna vez te bloqueas o quieres entregar el proyecto "limpio", simplemente borra las claves en la consola de Firebase y el sistema volverá a pedir esta clave maestra universal.

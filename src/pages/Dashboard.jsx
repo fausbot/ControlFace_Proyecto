@@ -45,7 +45,8 @@ export default function Dashboard() {
     const [isStandalone, setIsStandalone] = useState(false);
     const [storageSettings, setStorageSettings] = useState({
         storage_saveAsistencia: true,
-        storage_saveIncidentes: true
+        storage_saveIncidentes: true,
+        security_liveness: true
     });
     const [isLicenseValid, setIsLicenseValid] = useState(true);
     const [buttonLabels, setButtonLabels] = useState({
@@ -112,7 +113,8 @@ export default function Dashboard() {
                     const d = snapSettings.data();
                     setStorageSettings({
                         storage_saveAsistencia: d.storage_saveAsistencia !== false,
-                        storage_saveIncidentes: d.storage_saveIncidentes !== false
+                        storage_saveIncidentes: d.storage_saveIncidentes !== false,
+                        security_liveness: d.security_liveness !== false
                     });
                     setButtonLabels({
                         entry: d.ui_labelEntry || "Registrar Entrada",
@@ -374,8 +376,13 @@ export default function Dashboard() {
                 const waitForVideo = setInterval(() => {
                     if (videoRef.current && videoRef.current.readyState === 4) {
                         clearInterval(waitForVideo);
-                        console.log('[Liveness] Video listo, iniciando detección de parpadeo...');
-                        startLivenessCheck();
+                        if (storageSettings.security_liveness !== false) {
+                            console.log('[Liveness] Video listo, iniciando detección de parpadeo...');
+                            startLivenessCheck();
+                        } else {
+                            console.log('[Liveness] Video listo, Liveness desactivado -> Captura manual habilitada.');
+                            setStatusMessage('Posicione su rostro y presione Tomar Foto Ahora');
+                        }
                     }
                 }, 100);
             } else if (modeRef.current === 'incident') {
@@ -774,20 +781,22 @@ export default function Dashboard() {
                                 <div className="flex items-center gap-1"><MapPin size={12} /> Buscando GPS...</div>
                                 {mode === 'incident'
                                     ? <div className="flex items-center gap-1"><TriangleAlert size={12} /> Fotografía el área afectada</div>
-                                    : <div className="flex items-center gap-1"><Camera size={12} /> Mueva la cabeza para registrar</div>
+                                    : storageSettings.security_liveness === false
+                                        ? <div className="flex items-center gap-1"><Camera size={12} /> Posicione su rostro</div>
+                                        : <div className="flex items-center gap-1"><Camera size={12} /> Mueva la cabeza para registrar</div>
                                 }
                             </div>
 
                             {/* Progreso movimiento — top right badge */}
-                            {mode !== 'incident' && (
+                            {mode !== 'incident' && storageSettings.security_liveness !== false && (
                                 <div className={`absolute top-3 right-3 text-white text-xs font-bold px-2 py-1 rounded-full shadow-lg ${blinkCount >= 100 ? 'bg-green-500' : 'bg-blue-500'}`}>
                                     {blinkCount}%
                                 </div>
                             )}
                         </div>
 
-                        {/* Barra de movimiento — solo asistencia */}
-                        {mode !== 'incident' && (
+                        {/* Barra de movimiento — solo si liveness está activo */}
+                        {mode !== 'incident' && storageSettings.security_liveness !== false && (
                             <div className="mt-3 w-full max-w-[280px]">
                                 <div className="bg-blue-50 border border-blue-200 rounded-xl p-3">
                                     <p className="text-xs font-bold text-blue-700 text-center mb-2">
@@ -819,17 +828,29 @@ export default function Dashboard() {
                             >
                                 Cancelar
                             </button>
-                            {/* Solo mostrar "Capturar" para incidentes — asistencia es automática */}
-                            {mode === 'incident' && (
+                            {/* Mostrar "Capturar" para incidentes o si la seguridad de movimiento está desactivada */}
+                            {(mode === 'incident' || (mode !== 'incident' && storageSettings.security_liveness === false)) && (
                                 <button
                                     onClick={capture}
                                     disabled={step === 'processing'}
-                                    className={`px-8 py-3 rounded-full text-white font-bold shadow-2xl transition transform active:translate-y-1 ${step === 'processing' ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}
+                                    className={`px-8 py-3 rounded-full text-white font-bold shadow-2xl transition transform active:translate-y-1 ${step === 'processing'
+                                            ? 'bg-gray-400 cursor-not-allowed'
+                                            : mode === 'incident'
+                                                ? 'bg-blue-600 hover:bg-blue-700'
+                                                : 'bg-[#2863eb] hover:bg-[#1d4ed8]' /* Un azul más similar a la imagen */
+                                        } ${mode !== 'incident' ? 'flex items-center gap-2 w-full max-w-[280px] justify-center' : ''}`}
                                 >
-                                    {step === 'processing' ? 'Procesando...' : 'Capturar'}
+                                    {mode !== 'incident' && <Camera size={20} />}
+                                    {step === 'processing' ? 'Procesando...' : mode === 'incident' ? 'Capturar' : 'Tomar Foto Ahora'}
                                 </button>
                             )}
                         </div>
+                        {/* Mensaje inferior si liveness está desactivado (similar a la imagen del usuario) */}
+                        {mode !== 'incident' && storageSettings.security_liveness === false && (
+                            <p className="text-xs text-gray-500 mt-3 max-w-[280px] text-center opacity-80">
+                                Asegúrese de que su rostro sea visible antes de capturar.
+                            </p>
+                        )}
                     </div>
                 )}
 

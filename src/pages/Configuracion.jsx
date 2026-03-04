@@ -61,6 +61,8 @@ const DEFAULT_CONFIG = {
     ui_labelEntry: "Registrar Entrada",
     ui_labelExit: "Registrar Salida",
     ui_labelIncident: "Reportar Novedad",
+    // defaults seguridad
+    security_liveness: true,
 };
 
 export default function Configuracion() {
@@ -369,6 +371,40 @@ export default function Configuracion() {
                                     className="px-3 py-2 border border-indigo-200 rounded-lg focus:ring-2 focus:ring-indigo-500 disabled:bg-gray-200 disabled:opacity-50"
                                 />
                             </div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* ─── GESTIÓN DE SEGURIDAD ─── */}
+                <div className="bg-white rounded-xl shadow-2xl p-6 mb-6 border-l-4 border-emerald-500">
+                    <h2 className="text-xl font-bold text-emerald-800 mb-2">Seguridad y Validaciones</h2>
+                    <p className="text-sm text-gray-600 mb-4">
+                        Configura las opciones de seguridad al momento de registrar asistencia.
+                    </p>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {/* LIVENESS DETECTION */}
+                        <div className="space-y-3 bg-emerald-50 p-4 rounded-xl border border-emerald-100">
+                            <h3 className="font-bold text-emerald-700">Prueba de Vida (Movimiento de Cabeza)</h3>
+                            <button
+                                onClick={() => toggle('security_liveness')}
+                                className={`w-full flex items-center justify-between px-4 py-3 rounded-lg border-2 text-left transition font-medium text-sm
+                                    ${config.security_liveness !== false
+                                        ? 'border-emerald-500 bg-white text-emerald-800'
+                                        : 'border-gray-300 bg-gray-100 text-gray-400 opacity-60'}`}
+                            >
+                                <span className="flex items-center gap-2">
+                                    {config.security_liveness !== false
+                                        ? <CheckSquare size={20} className="text-emerald-600" />
+                                        : <Square size={20} />}
+                                    Requerir girar la cabeza
+                                </span>
+                            </button>
+                            <p className="text-xs text-emerald-700 opacity-80 leading-tight">
+                                {config.security_liveness !== false
+                                    ? "Activo: Se pedirá girar la cabeza para evitar el uso de fotos falsas."
+                                    : "⚠️ Inactivo: Los empleados podrán registrar la asistencia tomando la foto manualmente sin comprobar movimiento."}
+                            </p>
                         </div>
                     </div>
                 </div>
