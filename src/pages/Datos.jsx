@@ -3,16 +3,16 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Trash2, ChevronLeft, ChevronRight, Loader2, FileText, CheckCircle } from 'lucide-react';
 import { db } from '../firebaseConfig';
-import { collection, query, where, addDoc, serverTimestamp, getDocs } from 'firebase/firestore';
+import { collection, query, where, addDoc, getDocs } from 'firebase/firestore';
 import { useAuth } from '../contexts/AuthContext';
 
 // ✅ Importamos desde los servicios
 import {
-    getAllAttendanceLogs,
     paginateLogs,
     deleteAttendanceLog,
     subscribeToAttendanceLogs
 } from '../services/attendanceService';
+
 
 import { getEmployeesMap } from '../services/employeeService';
 
@@ -30,7 +30,13 @@ export default function Datos() {
     const [mUser, setMUser] = useState('');
     const [mType, setMType] = useState('Entrada');
     const [mDate, setMDate] = useState('');
-    const [mTime, setMTime] = useState('');
+    const [mHour, setMHour] = useState(() => {
+        const h = new Date().getHours();
+        const h12 = h % 12 || 12;
+        return String(h12).padStart(2, '0');
+    });
+    const [mMinute, setMMinute] = useState(() => String(new Date().getMinutes()).padStart(2, '0'));
+    const [mAmPm, setMAmPm] = useState(() => new Date().getHours() < 12 ? 'AM' : 'PM');
     const [mSaving, setMSaving] = useState(false);
 
     const navigate = useNavigate();
@@ -59,13 +65,9 @@ export default function Datos() {
 
         // Limpieza al desmontar
         return () => unsubscribe();
-    }, [adminAccess]);
+    }, [adminAccess, navigate]);
 
-    const loadLogs = async () => {
-        // Esta función ahora solo es necesaria para manual entry si queremos forzar algo,
-        // pero la suscripción ya se encarga de actualizar allLogs.
-        // La dejamos vacía o la removemos si no se usa más que en el handleSubmit.
-    };
+    // (eliminado loadlogs y variables que no se usan)
 
     // Recalcular página cuando cambia pageNumber
     useEffect(() => {
@@ -77,14 +79,18 @@ export default function Datos() {
 
     const handleManualEntry = async (e) => {
         e.preventDefault();
-        if (!mUser || !mType || !mDate || !mTime) {
+        if (!mUser || !mType || !mDate) {
             alert('Por favor completa todos los campos.');
             return;
         }
 
         const [y, m, d] = mDate.split('-');
         const dateStr = `${parseInt(d)}/${parseInt(m)}/${y}`;
-        const timeStr = mTime.length === 5 ? `${mTime}:00` : mTime;
+        // Convertir de 12h a 24h para guardar
+        let h24 = parseInt(mHour, 10);
+        if (mAmPm === 'AM' && h24 === 12) h24 = 0;
+        if (mAmPm === 'PM' && h24 !== 12) h24 += 12;
+        const timeStr = `${String(h24).padStart(2, '0')}:${mMinute}:00`;
 
         try {
             setMSaving(true);
@@ -112,11 +118,15 @@ export default function Datos() {
                 fecha: dateStr,
                 hora: timeStr,
                 localidad: "ENTRADA MANUAL DE DATOS",
-                timestamp: serverTimestamp()
+                timestamp: new Date(`${mDate}T${mHour}:${mMinute}:00`)
             });
 
             alert('✅ Registro adicionado correctamente.');
-            setMUser(''); setMDate(''); setMTime('');
+            setMUser(''); setMDate('');
+            const h = new Date().getHours();
+            setMHour(String(h % 12 || 12).padStart(2, '0'));
+            setMMinute(String(new Date().getMinutes()).padStart(2, '0'));
+            setMAmPm(h < 12 ? 'AM' : 'PM');
             // No hace falta llamar a loadLogs() porque onSnapshot detectará el nuevo doc
         } catch (error) {
             console.error(error);
@@ -139,7 +149,7 @@ export default function Datos() {
     };
 
     return (
-        <div className="min-h-screen bg-gradient-to-b from-[#3C7DA6] to-[#6FAF6B] p-6">
+        <div className="min-h-screen bg-gradient-to-b from-[#3C7DA6] to-[#6FAF6B] p-6 pb-72">
             <div className="max-w-6xl mx-auto">
                 <div className="flex justify-between items-center mb-8">
                     <h1 className="text-3xl font-bold text-gray-800 flex items-center gap-2">
@@ -215,31 +225,86 @@ export default function Datos() {
                         <FileText size={20} />
                         Entrada Manual de Datos
                     </h3>
-                    <form onSubmit={handleManualEntry} className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
-                        <div>
+                    <form onSubmit={handleManualEntry} className="flex flex-wrap gap-4 items-end">
+                        {/* Email */}
+                        <div className="flex-1 min-w-[180px]">
                             <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Usuario (Email)</label>
-                            <input type="text" placeholder="ej: faus@bot.com" value={mUser} onChange={e => setMUser(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" required />
+                            <input
+                                type="text"
+                                placeholder="ej: faus@bot.com"
+                                value={mUser}
+                                onChange={e => setMUser(e.target.value)}
+                                className="w-full h-[42px] px-3 border rounded-lg text-sm"
+                                required
+                            />
                         </div>
-                        <div>
+                        {/* Evento */}
+                        <div className="w-[120px]">
                             <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Evento</label>
-                            <select value={mType} onChange={e => setMType(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm bg-white">
+                            <select
+                                value={mType}
+                                onChange={e => setMType(e.target.value)}
+                                className="w-full h-[42px] px-3 border rounded-lg text-sm bg-white"
+                            >
                                 <option value="Entrada">Entrada</option>
                                 <option value="Salida">Salida</option>
                             </select>
                         </div>
-                        <div>
+                        {/* Fecha */}
+                        <div className="w-[160px]">
                             <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Fecha</label>
-                            <input type="date" value={mDate} onChange={e => setMDate(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" required />
+                            <input
+                                type="date"
+                                value={mDate}
+                                onChange={e => setMDate(e.target.value)}
+                                className="w-full h-[42px] px-3 border rounded-lg text-sm"
+                                required
+                            />
                         </div>
+                        {/* Hora 12h con AM/PM */}
                         <div>
                             <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Hora</label>
-                            <input type="time" value={mTime} onChange={e => setMTime(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm" required />
+                            <div className="flex items-center gap-1 h-[42px]">
+                                <select
+                                    value={mHour}
+                                    onChange={e => setMHour(e.target.value)}
+                                    className="w-[58px] h-full px-1 border rounded-lg text-sm bg-white text-center"
+                                >
+                                    {Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, '0')).map(h => (
+                                        <option key={h} value={h}>{h}</option>
+                                    ))}
+                                </select>
+                                <span className="font-bold text-gray-400 text-base select-none">:</span>
+                                <select
+                                    value={mMinute}
+                                    onChange={e => setMMinute(e.target.value)}
+                                    className="w-[58px] h-full px-1 border rounded-lg text-sm bg-white text-center"
+                                >
+                                    {Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0')).map(m => (
+                                        <option key={m} value={m}>{m}</option>
+                                    ))}
+                                </select>
+                                <select
+                                    value={mAmPm}
+                                    onChange={e => setMAmPm(e.target.value)}
+                                    className="w-[60px] h-full px-1 border rounded-lg text-sm bg-white font-bold text-blue-600 text-center"
+                                >
+                                    <option value="AM">AM</option>
+                                    <option value="PM">PM</option>
+                                </select>
+                            </div>
                         </div>
-                        <button type="submit" disabled={mSaving} className="w-full h-[42px] bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2">
+                        {/* Botón */}
+                        <button
+                            type="submit"
+                            disabled={mSaving}
+                            className="h-[42px] px-6 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 flex items-center gap-2 whitespace-nowrap"
+                        >
                             {mSaving ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle size={16} />} Adicionar
                         </button>
                     </form>
                 </div>
+
             </div>
         </div >
     );
