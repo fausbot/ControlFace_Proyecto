@@ -63,6 +63,7 @@ const DEFAULT_CONFIG = {
     ui_labelIncident: "Reportar Novedad",
     // defaults seguridad
     security_liveness: true,
+    security_faceThreshold: 0.63,
 };
 
 export default function Configuracion() {
@@ -75,7 +76,7 @@ export default function Configuracion() {
     const [savingLicense, setSavingLicense] = useState(false);
     const [licenseError, setLicenseError] = useState('');
     const navigate = useNavigate();
-    const { adminAccess, currentUser } = useAuth();
+    const { adminAccess } = useAuth();
 
     useEffect(() => {
         if (!adminAccess['/configuracion']) {
@@ -83,7 +84,7 @@ export default function Configuracion() {
             return;
         }
         loadConfig();
-    }, [adminAccess]);
+    }, [adminAccess, navigate]);
 
     const loadConfig = async () => {
         try {
@@ -120,6 +121,12 @@ export default function Configuracion() {
     const handleNumberChange = (key, value, maxVal = 730) => {
         const val = parseInt(value, 10);
         setConfig(prev => ({ ...prev, [key]: isNaN(val) ? 1 : val > maxVal ? maxVal : val < 1 ? 1 : val }));
+        setSavedOk(false);
+    };
+
+    const handleFloatChange = (key, value, maxVal = 1.0, minVal = 0.0) => {
+        const val = parseFloat(value);
+        setConfig(prev => ({ ...prev, [key]: isNaN(val) ? minVal : val > maxVal ? maxVal : val < minVal ? minVal : val }));
         setSavedOk(false);
     };
 
@@ -383,6 +390,45 @@ export default function Configuracion() {
                     </p>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {/* FACE RECOGNITION THRESHOLD */}
+                        <div className="col-span-1 md:col-span-2 space-y-3 bg-blue-50 p-4 rounded-xl border border-blue-100">
+                            <h3 className="font-bold text-blue-700">Sensibilidad del Reconocimiento Facial</h3>
+                            <p className="text-sm text-blue-800 opacity-90 mb-2">
+                                Ajusta qué tan rigurosa es la comparación del rostro actual contra la foto registrada. <br />
+                                <span className="font-bold">Valor actual: {config.security_faceThreshold ?? 0.63}</span>
+                            </p>
+
+                            <input
+                                type="range"
+                                min="0.40"
+                                max="0.80"
+                                step="0.01"
+                                value={config.security_faceThreshold ?? 0.63}
+                                onChange={(e) => handleFloatChange('security_faceThreshold', e.target.value, 0.80, 0.40)}
+                                className="w-full h-2 bg-blue-200 rounded-lg appearance-none cursor-pointer"
+                            />
+
+                            <div className="flex justify-between text-xs text-blue-600 font-bold mt-1">
+                                <span>0.40 (Más estricto)</span>
+                                <span>0.60</span>
+                                <span>0.80 (Menos estricto)</span>
+                            </div>
+
+                            <div className="mt-2 p-3 rounded-xl text-sm transition-colors duration-300 border" style={{
+                                backgroundColor: (config.security_faceThreshold ?? 0.63) < 0.56 ? '#fef2f2' : (config.security_faceThreshold ?? 0.63) <= 0.68 ? '#fdf8e6' : '#fef2f2',
+                                color: (config.security_faceThreshold ?? 0.63) < 0.56 ? '#991b1b' : (config.security_faceThreshold ?? 0.63) <= 0.68 ? '#854d0e' : '#991b1b',
+                                borderColor: (config.security_faceThreshold ?? 0.63) < 0.56 ? '#fecaca' : (config.security_faceThreshold ?? 0.63) <= 0.68 ? '#fef08a' : '#fecaca'
+                            }}>
+                                {(config.security_faceThreshold ?? 0.63) < 0.56 && <b>🔴 MUY ESTRICTO:</b>}
+                                {(config.security_faceThreshold ?? 0.63) >= 0.56 && (config.security_faceThreshold ?? 0.63) <= 0.68 && <b>🟡 EQUILIBRADO (Recomendado):</b>}
+                                {(config.security_faceThreshold ?? 0.63) > 0.68 && <b>🔴 PERMISIVO:</b>}
+
+                                {(config.security_faceThreshold ?? 0.63) < 0.56 && " Solo aceptará coincidencias casi perfectas (buena luz, mismo ángulo). Puede generar rechazos falsos constantemente."}
+                                {(config.security_faceThreshold ?? 0.63) >= 0.56 && (config.security_faceThreshold ?? 0.63) <= 0.68 && " El sistema acepta variaciones normales de luz o pequeños cambios angulares manteniendo alta seguridad contra suplantaciones."}
+                                {(config.security_faceThreshold ?? 0.63) > 0.68 && " Mayor probabilidad de aceptar a personas con rasgos similares. Reduce la seguridad del sistema."}
+                            </div>
+                        </div>
+
                         {/* LIVENESS DETECTION */}
                         <div className="space-y-3 bg-emerald-50 p-4 rounded-xl border border-emerald-100">
                             <h3 className="font-bold text-emerald-700">Prueba de Vida (Movimiento de Cabeza)</h3>

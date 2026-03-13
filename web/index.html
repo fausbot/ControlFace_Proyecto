@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ControlFace - Biometría y Control de Asistencia Premium</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&family=Outfit:wght@400;700&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body>
+    <nav class="glass-nav">
+        <div class="container">
+            <div class="logo">
+                <span class="logo-text">Control<span>Face</span></span>
+            </div>
+            <div class="nav-links">
+                <a href="#features">Características</a>
+                <a href="#benefits">Beneficios</a>
+                <a href="../login" class="btn-secondary">Iniciar Sesión</a>
+                <a href="../registro" class="btn-primary">Prueba Gratis</a>
+            </div>
+        </div>
+    </nav>
+
+    <header class="hero">
+        <div class="container">
+            <div class="hero-content">
+                <h1 class="animate-up">Gestión de Personal con <span class="gradient-text">Certeza Biométrica</span></h1>
+                <p class="animate-up delay-1">Elimine el fraude de asistencia y automatice su nómina con reconocimiento facial e IA. Sin hardware, sin complicaciones.</p>
+                <div class="cta-group animate-up delay-2">
+                    <a href="../registro" class="btn-primary btn-large">Comenzar Ahora</a>
+                    <a href="#features" class="btn-secondary btn-large">Explorar Funciones</a>
+                </div>
+            </div>
+            <div class="hero-visual animate-fade delay-3">
+                <div class="glass-card">
+                    <div class="biometric-scan">
+                        <!-- Simulated face scan animation via CSS -->
+                        <div class="scan-line"></div>
+                        <div class="face-placeholder">
+                            <i data-lucide="user" class="icon-xl"></i>
+                        </div>
+                    </div>
+                    <div class="status-badge">
+                        <i data-lucide="check-circle"></i> Identidad Verificada
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <section id="features" class="features">
+        <div class="container">
+            <h2 class="section-title">Tecnología de Vanguardia</h2>
+            <div class="feature-grid">
+                <div class="feature-card glass-card">
+                    <i data-lucide="scan" class="feature-icon"></i>
+                    <h3>Biometría Facial IA</h3>
+                    <p>Verificación en tiempo real mediante face-api.js. Imposible de engañar con fotos o suplantaciones.</p>
+                </div>
+                <div class="feature-card glass-card">
+                    <i data-lucide="map-pin" class="feature-icon"></i>
+                    <h3>Geolocalización GPS</h3>
+                    <p>Sepa exactamente dónde se encuentra su personal al momento del marcaje. Ideal para equipos en campo.</p>
+                </div>
+                <div class="feature-card glass-card">
+                    <i data-lucide="smartphone" class="feature-icon"></i>
+                    <h3>Cero Hardware</h3>
+                    <p>Use los dispositivos que ya tiene. Funciona en cualquier navegador como una App Nativa (PWA).</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="benefits" class="benefits">
+        <div class="container">
+            <div class="benefit-row">
+                <div class="benefit-text">
+                    <h2 class="gradient-text">Ahorro Inmediato</h2>
+                    <p>Elimine el "Buddy Punching" y el robo de tiempo. Automatice reportes que antes tomaban horas de transcripción manual a Excel.</p>
+                    <ul class="check-list">
+                        <li><i data-lucide="check"></i> Cero inversión en relojes biométricos</li>
+                        <li><i data-lucide="check"></i> Reportes automáticos en CSV/XLSX</li>
+                        <li><i data-lucide="check"></i> Cálculo automático de horas extra y recargos</li>
+                    </ul>
+                </div>
+                <div class="benefit-visual">
+                    <div class="glass-card chart-mockup">
+                        <div class="bar-chart">
+                            <div class="bar" style="height: 40%"></div>
+                            <div class="bar" style="height: 70%"></div>
+                            <div class="bar" style="height: 55%"></div>
+                            <div class="bar highlight" style="height: 90%"></div>
+                        </div>
+                        <p>Productividad incrementada un 25%</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="cta-final">
+        <div class="container">
+            <div class="glass-card cta-box">
+                <h2>¿Listo para modernizar su empresa?</h2>
+                <p>Únase a las empresas que ya confían en ControlFace para su gestión de personal.</p>
+                <a href="../registro" class="btn-primary btn-large">Crear Cuenta Gratis</a>
+            </div>
+        </div>
+    </section>
+
+    <footer>
+        <div class="container">
+            <p>&copy; 2026 ControlFace. Todos los derechos reservados.</p>
+        </div>
+    </footer>
+
+    <script>
+        lucide.createIcons();
+    </script>
+    <script src="script.js"></script>
+</body>
+</html>

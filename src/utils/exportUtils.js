@@ -48,8 +48,6 @@ export const exportToExcelHTML = (filename, headers, rows) => {
                 ws[cellRef] = { t: 's', v: '' };
             }
 
-            // Force cell type to string to prevent dropping leading zeros or weird number formatting
-            ws[cellRef].t = 's';
             if (ws[cellRef].v !== undefined && ws[cellRef].v !== null) {
                 // Remove trailing/leading artificial quotes if inherited from previous CSV logic
                 let val = String(ws[cellRef].v);
@@ -57,7 +55,30 @@ export const exportToExcelHTML = (filename, headers, rows) => {
                     val = val.slice(1, -1);
                     val = val.replace(/""/g, '"');
                 }
-                ws[cellRef].v = val;
+
+                // Detect Time format HH:MM or HH:MM:SS
+                const timeMatch = val.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+                // Detect known numeric column headers
+                const isNumericCol = /^(Horas|Total|Diu|Noc|Dom Diu|Dom Noc|Diurnas|Nocturnas|TotalHHMM)$/i.test(headers[c] || '');
+
+                if (timeMatch) {
+                    const h = parseInt(timeMatch[1], 10);
+                    const m = parseInt(timeMatch[2], 10);
+                    const s = parseInt(timeMatch[3] || '0', 10);
+                    ws[cellRef].t = 'n';
+                    ws[cellRef].v = (h * 3600 + m * 60 + s) / 86400;
+                    ws[cellRef].z = timeMatch[3] ? 'hh:mm:ss' : 'hh:mm';
+                } else if (isNumericCol && !isNaN(val) && val.trim() !== '') {
+                    ws[cellRef].t = 'n';
+                    ws[cellRef].v = parseFloat(val);
+                    ws[cellRef].z = '0.00';
+                } else {
+                    // Default to string to protect user IDs from scientific format
+                    ws[cellRef].t = 's';
+                    ws[cellRef].v = val;
+                }
+            } else {
+                ws[cellRef].t = 's';
             }
 
             // Base style: just borders

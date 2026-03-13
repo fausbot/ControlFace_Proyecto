@@ -9,7 +9,7 @@ admin.initializeApp();
  * Función para obtener la lista de todos los usuarios de Authentication.
  * Útil para exportar CSV con la lista real de usuarios.
  */
-exports.getUsersList = functions.https.onCall(async (data, context) => {
+exports.getUsersList = functions.https.onCall(async () => {
     // Opcional: Verificar que el usuario esté autenticado (Se omite porque el admin usa React state)
     /* if (!context.auth) {
         throw new functions.https.HttpsError(
@@ -42,7 +42,7 @@ exports.getUsersList = functions.https.onCall(async (data, context) => {
  * Función para eliminar un usuario de Authentication.
  * Útil para gestionar usuarios desde el panel de administración.
  */
-exports.deleteUser = functions.https.onCall(async (data, context) => {
+exports.deleteUser = functions.https.onCall(async (data) => {
     /* if (!context.auth) {
         throw new functions.https.HttpsError(
             "unauthenticated",
@@ -103,7 +103,7 @@ exports.deleteUser = functions.https.onCall(async (data, context) => {
  * Función para verificar la contraseña de administrador de manera segura.
  * Usa bcrypt para comparar contraseñas hasheadas.
  */
-exports.verifyAdminPassword = functions.https.onCall(async (data, context) => {
+exports.verifyAdminPassword = functions.https.onCall(async (data) => {
     const { password, target = '' } = data;
     if (!password) {
         throw new functions.https.HttpsError(
@@ -173,7 +173,7 @@ exports.verifyAdminPassword = functions.https.onCall(async (data, context) => {
  * Función para cambiar la contraseña de administrador.
  * Requiere la contraseña actual para autorizar el cambio.
  */
-exports.changeAdminPassword = functions.https.onCall(async (data, context) => {
+exports.changeAdminPassword = functions.https.onCall(async (data) => {
     const { currentPassword, newPassword, target = 'todas' } = data;
 
     if (!currentPassword || !newPassword) {
@@ -273,7 +273,7 @@ exports.changeAdminPassword = functions.https.onCall(async (data, context) => {
  * Función protegida para crear empleados validando el Token de Licencia.
  * Evita que un cliente cree usuarios superando su límite contratado.
  */
-exports.createEmployeeSecure = functions.https.onCall(async (data, context) => {
+exports.createEmployeeSecure = functions.https.onCall(async (data) => {
     // 1. Autorización: Opcional, asegurar que sea admin (Se omite porque el admin usa React state)
     /* if (!context.auth) {
         throw new functions.https.HttpsError("unauthenticated", "Debe iniciar sesión primero.");
@@ -302,7 +302,7 @@ exports.createEmployeeSecure = functions.https.onCall(async (data, context) => {
             const bytes = CryptoJS.AES.decrypt(rawToken, SECRET_KEY);
             const decryptedString = bytes.toString(CryptoJS.enc.Utf8);
             decoded = JSON.parse(decryptedString);
-        } catch (err) {
+        } catch (error) {
             throw new functions.https.HttpsError("permission-denied", "El token de licencia está corrupto o es inválido.");
         }
 

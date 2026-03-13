@@ -1,7 +1,7 @@
 @echo off
 echo =========================================
-echo  DEPLOY: El Bourbon Cafe
-echo  Proyecto: bourboncafe-3983a
+echo  DEPLOY: Restaurante Pepito (PRINCIPAL)
+echo  Proyecto: attendance-pwa-dev
 echo =========================================
 echo.
 
@@ -26,16 +26,15 @@ echo [2/4] Construyendo la aplicacion (npm run build)...
 call npm run build
 
 REM 5. Realizar el Deploy de Hosting
-echo [3/4] Desplegando Hosting a Firebase (bourboncafe-3983a)...
-call firebase deploy --only hosting --project bourboncafe-3983a
+echo [3/4] Desplegando Hosting a Firebase (attendance-pwa-dev)...
+call firebase deploy --only hosting --project attendance-pwa-dev
 
 REM 6. Desplegar Cloud Functions (contiene la logica de CF1234)
-echo [4/4] Desplegando Cloud Functions (bourboncafe-3983a)...
-call firebase deploy --only functions --project bourboncafe-3983a
+echo [4/4] Desplegando Cloud Functions (attendance-pwa-dev)...
+call firebase deploy --only functions --project attendance-pwa-dev
 
 echo.
 echo =========================================
-echo  Deploy de Bourbon Cafe COMPLETADO
+echo  Deploy de Restaurante Pepito COMPLETADO
 echo =========================================
-echo NOTA: Asegurate de que elbourboncafe911@gmail.com te tiene como Editor.
 pause

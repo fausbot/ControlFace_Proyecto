@@ -1,7 +1,7 @@
 // src/pages/Informes.jsx
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Download, Calendar, Trash2, AlertTriangle, TriangleAlert, Image, Loader2, UserMinus, FileText } from 'lucide-react';
+import { Download, Calendar, Trash2, AlertTriangle, TriangleAlert, Image, Loader2, UserMinus, FileText, Printer, Image as ImageIcon } from 'lucide-react';
 import DeleteEmployeeModal from '../components/DeleteEmployeeModal';
 import { listPhotosByFilter, downloadPhotosAsZip, cleanOldPhotos } from '../services/storageService';
 import { httpsCallable } from 'firebase/functions';
@@ -77,7 +77,7 @@ export default function Informes() {
     const [showDeleteModal, setShowDeleteModal] = useState(false);
     const [filterEmail, setFilterEmail] = useState('');
     const [exportingEmployees, setExportingEmployees] = useState(false);
-    const [exportFormatEmployees, setExportFormatEmployees] = useState('csv');
+    const [exportFormatEmployees] = useState('csv');
     const [exportFormatIncidents, setExportFormatIncidents] = useState('csv');
 
     // Descargador de fotos
@@ -92,11 +92,12 @@ export default function Informes() {
     const [storageConfig, setStorageConfig] = useState(null);
 
     const navigate = useNavigate();
-    const { adminAccess, currentUser } = useAuth();
+    const { adminAccess } = useAuth();
 
     useEffect(() => {
         if (!adminAccess['/informes']) {
-            navigate('/login');
+            // Reemplazado navigate por return al home en auth no autorizado.
+            window.location.href = '/login';
             return;
         }
         loadInitialData();
@@ -130,7 +131,7 @@ export default function Informes() {
 
     const handleManualCleanup = async () => {
         if (!storageConfig) return;
-        if (!window.confirm(`¿Ejecutar limpieza manual de fotos más antiguas de ${storageConfig.retentionAsistencia} meses (asistencia) y ${storageConfig.retentionIncidentes} meses (incidentes)?`)) return;
+        if (!window.confirm(`¿Ejecutar limpieza manual de fotos más antiguas de ${storageConfig.retentionAsistencia} meses(asistencia) y ${storageConfig.retentionIncidentes} meses(incidentes) ? `)) return;
 
         setCleaningStorage(true);
         try {
@@ -138,7 +139,7 @@ export default function Informes() {
                 asistencia: storageConfig.retentionAsistencia,
                 incidentes: storageConfig.retentionIncidentes
             });
-            alert(`✅ Limpieza completada. Se liberó espacio de ${deleted} fotos.`);
+            alert(`✅ Limpieza completada.Se liberó espacio de ${deleted} fotos.`);
         } catch (err) {
             alert('❌ Error en la limpieza: ' + err.message);
         } finally {
@@ -151,7 +152,7 @@ export default function Informes() {
             alert('Selecciona un rango de fechas para limpiar datos.');
             return;
         }
-        if (!window.confirm(`⚠️ Se borrarán TODOS los registros entre ${startDate} y ${endDate}. ¿Continuar?`)) return;
+        if (!window.confirm(`⚠️ Se borrarán TODOS los registros entre ${startDate} y ${endDate}. ¿Continuar ? `)) return;
 
         setDeleting(true);
         try {
@@ -171,7 +172,7 @@ export default function Informes() {
             alert('Debes seleccionar fecha de inicio y fin para borrar en lote.');
             return;
         }
-        const confirm1 = window.confirm(`⚠️ PELIGRO: Vas a borrar PERMANENTEMENTE las NOVEDADES desde ${incidentStartDate} hasta ${incidentEndDate}.\n\nEsta acción NO se puede deshacer.\n¿Deseas continuar?`);
+        const confirm1 = window.confirm(`⚠️ PELIGRO: Vas a borrar PERMANENTEMENTE las NOVEDADES desde ${incidentStartDate} hasta ${incidentEndDate}.\n\nEsta acción NO se puede deshacer.\n¿Deseas continuar ? `);
         if (!confirm1) return;
 
         setDeletingIncidents(true);
@@ -472,7 +473,7 @@ export default function Informes() {
                                     const { zipBlob, addedCount } = await downloadPhotosAsZip(lista, (c, t) => setPhotoProgress({ current: c, total: t }));
                                     const link = document.createElement('a'); link.href = URL.createObjectURL(zipBlob); link.download = `fotos_${photoDesde}_${photoHasta}.zip`; link.click();
                                     setPhotoMsg(`✅ Descargadas ${addedCount} fotos.`);
-                                } catch (e) { setPhotoMsg('❌ Error: ' + e.message); } finally { setPhotoSearching(false); }
+                                } catch (e) { setPhotoMsg('❌ Error: ' + e.message); console.error('Error en descarga de fotos:', e); } finally { setPhotoSearching(false); }
                             }}
                             className="w-full py-2 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2"
                         >

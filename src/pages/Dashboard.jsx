@@ -31,7 +31,6 @@ export default function Dashboard() {
     const [modelsLoaded, setModelsLoaded] = useState(false);
     const [savedDescriptor, setSavedDescriptor] = useState(null);
     const [faceVerified, setFaceVerified] = useState(false);
-    const [verifyingFace, setVerifyingFace] = useState(false);
     const [faceError, setFaceError] = useState('');
     const [cameraReady, setCameraReady] = useState(false);
     // Liveness detection states
@@ -54,6 +53,7 @@ export default function Dashboard() {
         exit: "Registrar Salida",
         incident: "Reportar Novedad"
     });
+    const [faceThreshold, setFaceThreshold] = useState(0.63);
 
     useEffect(() => {
         // Detectar si ya está instalada
@@ -121,6 +121,9 @@ export default function Dashboard() {
                         exit: d.ui_labelExit || "Registrar Salida",
                         incident: d.ui_labelIncident || "Reportar Novedad"
                     });
+                    if (d.security_faceThreshold !== undefined) {
+                        setFaceThreshold(d.security_faceThreshold);
+                    }
                 }
 
                 // 1.5 Cargar Estado de la Licencia
@@ -246,17 +249,7 @@ export default function Dashboard() {
                 streamRef.current.getTracks().forEach(track => track.stop());
             }
         };
-    }, [logout, currentUser]);
-
-    // --- LIVENESS: Eye Aspect Ratio helper ---
-    const calcEAR = (eyePts) => {
-        // eyePts: array of 6 {x, y} points (landmarks for one eye)
-        const dist = (a, b) => Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2);
-        const A = dist(eyePts[1], eyePts[5]);
-        const B = dist(eyePts[2], eyePts[4]);
-        const C = dist(eyePts[0], eyePts[3]);
-        return (A + B) / (2.0 * C);
-    };
+    }, [logout, currentUser, navigate]);
 
     // --- LIVENESS: Reto de Rotación de Cabeza ---
     // Detecta el giro de la cabeza (Yaw) usando la posición de la nariz relativa a los ojos.
@@ -389,7 +382,7 @@ export default function Dashboard() {
                 // Incidencias no requieren validación de vida
             }
         }
-    }, [step, cameraReady, modelsLoaded]);
+    }, [step, cameraReady, modelsLoaded, storageSettings.security_liveness]);
 
     const stopCamera = () => {
         // Detener el loop de liveness (requestAnimationFrame o intervalo)
@@ -464,11 +457,9 @@ export default function Dashboard() {
             const imageSrc = canvas.toDataURL('image/jpeg', 0.8); // Higher quality for sharing
             if (!imageSrc) throw new Error("Error generando imagen");
 
-            // --- NUEVO FLUJO: VERIFICACIÓN FACIAL INMEDIATA ---
             if (savedDescriptor) {
                 setStep('processing');
                 setStatusMessage('Verificando identidad facial...');
-                setVerifyingFace(true);
 
                 try {
                     // Detectar directamente desde el video (más rápido y preciso)
@@ -483,9 +474,9 @@ export default function Dashboard() {
                     } else {
                         const distance = faceapi.euclideanDistance(detection.descriptor, savedDescriptor);
                         console.log("Distancia facial:", distance);
-                        // Umbral más estricto: 0.63 (era 0.68)
+                        // Umbral configurable (por defecto 0.63)
                         // Esto mejora la seguridad ante suplantaciones
-                        if (distance < 0.63) {
+                        if (distance < faceThreshold) {
                             setFaceVerified(true);
                             setFaceError('');
                         } else {
@@ -497,8 +488,6 @@ export default function Dashboard() {
                     console.error("Error en detección facial:", faceErr);
                     setFaceError('Error en el sensor de reconocimiento. Reintenta.');
                     setFaceVerified(false);
-                } finally {
-                    setVerifyingFace(false);
                 }
             } else {
                 setFaceVerified(true); // Permitir si no hay registro previo
@@ -519,7 +508,7 @@ export default function Dashboard() {
                 });
             });
 
-            const { latitude, longitude, accuracy } = position.coords;
+            const { latitude, longitude } = position.coords;
 
             // 2. Get Time
             const serverTime = await fetchServerTime();
@@ -571,7 +560,7 @@ export default function Dashboard() {
             setStep('idle');
             setIsCapturing(false);
         }
-    }, [mode, currentUser, isCapturing]);
+    }, [mode, currentUser, isCapturing, savedDescriptor, faceThreshold]);
 
     // Auto-captura al completar los 2 parpadeos
     useEffect(() => {
@@ -834,10 +823,10 @@ export default function Dashboard() {
                                     onClick={capture}
                                     disabled={step === 'processing'}
                                     className={`px-8 py-3 rounded-full text-white font-bold shadow-2xl transition transform active:translate-y-1 ${step === 'processing'
-                                            ? 'bg-gray-400 cursor-not-allowed'
-                                            : mode === 'incident'
-                                                ? 'bg-blue-600 hover:bg-blue-700'
-                                                : 'bg-[#2863eb] hover:bg-[#1d4ed8]' /* Un azul más similar a la imagen */
+                                        ? 'bg-gray-400 cursor-not-allowed'
+                                        : mode === 'incident'
+                                            ? 'bg-blue-600 hover:bg-blue-700'
+                                            : 'bg-[#2863eb] hover:bg-[#1d4ed8]' /* Un azul más similar a la imagen */
                                         } ${mode !== 'incident' ? 'flex items-center gap-2 w-full max-w-[280px] justify-center' : ''}`}
                                 >
                                     {mode !== 'incident' && <Camera size={20} />}

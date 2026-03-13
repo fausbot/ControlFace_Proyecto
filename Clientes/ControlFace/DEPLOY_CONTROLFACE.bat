@@ -5,27 +5,32 @@ echo  Proyecto: proyecto-controlface-cliente
 echo =========================================
 echo.
 
-REM Ir a la carpeta raiz del proyecto
+REM 1. Verificar si el archivo .env existe en la carpeta de este script
+if not exist "%~dp0.env" (
+    echo [ERROR] No se encuentra el archivo .env junto a este script.
+    echo Carpeta buscada: %~dp0
+    echo El proceso se detendra para evitar un deploy erroneo.
+    pause
+    exit /b 1
+)
+
+REM 2. Ir a la carpeta raiz del proyecto
 cd /d "C:\Users\fausb\Downloads\Control de entrada"
 
-REM Copiar el .env del cliente
-echo [1/5] Copiando configuracion del cliente...
-copy /Y "Clientes\ControlFace\.env" ".env"
+REM 3. Copiar el .env desde la carpeta del script (donde esta el .bat) a la raiz
+echo [1/4] Configurando variables de entorno (.env)...
+copy /Y "%~dp0.env" "C:\Users\fausb\Downloads\Control de entrada\.env"
 
-REM Copiar logo del cliente a la carpeta public
-echo [2/5] Copiando logo del cliente...
-copy /Y "Clientes\ControlFace\LogoCoontrolFace.jpeg" "public\logo.jpg"
-
-REM Build del frontend
-echo [3/5] Construyendo la aplicacion...
+REM 4. Realizar el build
+echo [2/4] Construyendo la aplicacion (npm run build)...
 call npm run build
 
-REM Deploy del frontend (hosting)
-echo [4/5] Desplegando Hosting a Firebase (proyecto-controlface-cliente)...
+REM 5. Realizar el Deploy de Hosting
+echo [3/4] Desplegando Hosting a Firebase (proyecto-controlface-cliente)...
 call firebase deploy --only hosting --project proyecto-controlface-cliente
 
-REM Deploy del backend (Cloud Functions - contiene la logica de CF1234)
-echo [5/5] Desplegando Cloud Functions (proyecto-controlface-cliente)...
+REM 6. Desplegar Cloud Functions (contiene la logica de CF1234)
+echo [4/4] Desplegando Cloud Functions (proyecto-controlface-cliente)...
 call firebase deploy --only functions --project proyecto-controlface-cliente
 
 echo.

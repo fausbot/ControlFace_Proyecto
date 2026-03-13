@@ -1,0 +1,40 @@
+﻿
+> attendance-pwa-dev@1.6.30 lint
+> eslint .
+
+
+C:\Users\fausb\Downloads\Control de entrada\functions\index.js
+    1:19  error  'require' is not defined         no-undef
+    2:15  error  'require' is not defined         no-undef
+    3:16  error  'require' is not defined         no-undef
+    4:18  error  'require' is not defined         no-undef
+   12:1   error  'exports' is not defined         no-undef
+   45:1   error  'exports' is not defined         no-undef
+  106:1   error  'exports' is not defined         no-undef
+  176:1   error  'exports' is not defined         no-undef
+  276:1   error  'exports' is not defined         no-undef
+  305:18  error  'err' is defined but never used  no-unused-vars
+
+C:\Users\fausb\Downloads\Control de entrada\scripts\generateLicense.js
+  12:8  error  'fs' is defined but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+
+C:\Users\fausb\Downloads\Control de entrada\src\components\SubscriptionGuard.jsx
+  27:22  error  'err' is defined but never used  no-unused-vars
+
+C:\Users\fausb\Downloads\Control de entrada\src\contexts\AuthContext.jsx
+  7:17  error  Fast refresh only works when a file only exports components. Use a new file to share constants or functions between components  react-refresh/only-export-components
+
+C:\Users\fausb\Downloads\Control de entrada\src\pages\Datos.jsx
+  11:5   error    'getAllAttendanceLogs' is defined but never used. Allowed unused vars must match /^[A-Z_]/u                  no-unused-vars
+  62:8   warning  React Hook useEffect has a missing dependency: 'navigate'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  64:11  error    'loadLogs' is assigned a value but never used. Allowed unused vars must match /^[A-Z_]/u                     no-unused-vars
+
+C:\Users\fausb\Downloads\Control de entrada\src\pages\Informes.jsx
+    3:10  error  'useNavigate' is defined but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+  439:44  error  'navigate' is not defined                                                           no-undef
+
+C:\Users\fausb\Downloads\Control de entrada\src\pages\Register.jsx
+  6:10  error  'auth' is defined but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+
+Ô£û 19 problems (18 errors, 1 warning)
+

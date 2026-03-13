@@ -43,16 +43,17 @@ export const decodeLicenseToken = (token) => {
 export const fetchLicenseStatus = async () => {
     try {
         const docRef = doc(db, 'settings', 'license');
-        const snap = await getDoc(docRef);
+        const docSnap = await getDoc(docRef); // Corrected: used docRef instead of licenseDoc
 
-        if (snap.exists() && snap.data().token) {
-            const token = snap.data().token;
-            return {
-                rawToken: token,
-                decoded: decodeLicenseToken(token)
-            };
-        }
-        return { rawToken: null, decoded: null };
+        if (!docSnap.exists()) return { rawToken: null, decoded: null }; // Corrected: return object as per original function's return type
+        const token = docSnap.data().token;
+
+        if (!token) return { rawToken: null, decoded: null }; // Corrected: return object as per original function's return type
+
+        // Aquí desciframos la configuración contenida en el token maestro
+        // Assuming validateToken is meant to be decodeLicenseToken based on context
+        const decoded = decodeLicenseToken(token); // Corrected: used decodeLicenseToken
+        return { rawToken: token, decoded: decoded }; // Corrected: return object as per original function's return type
     } catch (error) {
         console.error("Error cargando licencia de la BD:", error);
         return { rawToken: null, decoded: null, error };
@@ -63,16 +64,12 @@ export const fetchLicenseStatus = async () => {
  * Instala un nuevo token de licencia provisto por el proveedor en la BD
  */
 export const applyNewLicenseToken = async (newToken) => {
-    try {
-        // Validación previa
-        const decoded = decodeLicenseToken(newToken);
-        if (!decoded) throw new Error("Token inválido o corrupto. Verifique copiado.");
+    // Validación previa
+    const decoded = decodeLicenseToken(newToken);
+    if (!decoded) throw new Error("Token inválido o corrupto. Verifique copiado.");
 
-        const docRef = doc(db, 'settings', 'license');
-        await setDoc(docRef, { token: newToken.trim() }, { merge: true });
+    const docRef = doc(db, 'settings', 'license');
+    await setDoc(docRef, { token: newToken.trim() }, { merge: true });
 
-        return decoded;
-    } catch (error) {
-        throw error;
-    }
+    return decoded;
 };

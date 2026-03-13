@@ -10,10 +10,9 @@ import {
     ref,
     uploadBytes,
     getDownloadURL,
-    getBlob,
-    getBytes,
     listAll,
     deleteObject,
+    getBlob,
 } from 'firebase/storage';
 import {
     collection,
@@ -159,7 +158,7 @@ export const listPhotosByFilter = async ({ tipo, desde, hasta, filtroUsuario }) 
                     const sRef = ref(storage, data.path);
                     let directUrl = data.url || null;
                     if (!directUrl) {
-                        try { directUrl = await getDownloadURL(sRef); } catch (e) { /* ignore */ }
+                        try { directUrl = await getDownloadURL(sRef); } catch { /* ignore */ }
                     }
 
                     resultsMap.set(data.path, {
@@ -219,7 +218,7 @@ export const listPhotosByFilter = async ({ tipo, desde, hasta, filtroUsuario }) 
                             const [hour, minute] = timePart.split('-');
                             fileDate = new Date(parseInt(yStr), parseInt(m) - 1, parseInt(day), parseInt(hour), parseInt(minute));
                         }
-                    } catch (e) {
+                    } catch {
                         // Si falla el parseo, asumimos que está en rango por estar en la carpeta
                     }
 
@@ -228,7 +227,7 @@ export const listPhotosByFilter = async ({ tipo, desde, hasta, filtroUsuario }) 
                     }
 
                     let directUrl = null;
-                    try { directUrl = await getDownloadURL(item); } catch (e) { /* skip */ }
+                    try { directUrl = await getDownloadURL(item); } catch { /* skip */ }
 
                     resultsMap.set(item.fullPath, {
                         name: item.name,
@@ -261,67 +260,68 @@ export const downloadPhotosAsZip = async (fileList, onProgress) => {
 
     console.log(`📦 Preparando descarga de ${fileList.length} fotos...`);
 
+    // Wrapper que cancela si una descarga individual tarda más de 30 segundos
+    const withTimeout = (promise, ms = 30000) => {
+        const timeout = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error(`Timeout (${ms / 1000}s) al descargar archivo`)), ms)
+        );
+        return Promise.race([promise, timeout]);
+    };
+
     const downloadWithRetry = async (file, retries = 1) => {
         const fullPath = file.ref?.fullPath || file.path;
         try {
-            // 1. Obtener la URL de descarga directa primero
-            const url = file.url || await getDownloadURL(file.ref);
+            let blob;
 
-            // 2. Forzar la descarga mediante XMLHttpRequest (XHR) o Fetch
-            // En navegadores, XHR suele ser más estable para blobs grandes que getBytes() del SDK
-            const blob = await new Promise((resolve, reject) => {
-                const xhr = new XMLHttpRequest();
-                xhr.responseType = 'blob';
-                xhr.onload = (event) => {
-                    const blob = xhr.response;
-                    if (xhr.status === 200) {
-                        resolve(blob);
-                    } else {
-                        reject(new Error(`HTTP Error ${xhr.status} fetching blob`));
-                    }
-                };
-                xhr.onerror = () => reject(new Error('Network Error fetching blob'));
-                xhr.open('GET', url);
-                xhr.send();
-            });
+            // Intento 1: getBlob() del SDK de Firebase (no depende de CORS del navegador)
+            try {
+                blob = await withTimeout(getBlob(file.ref), 30000);
+            } catch (sdkErr) {
+                console.warn(`⚠️ getBlob falló para ${fullPath}: ${sdkErr.message}. Intentando con URL...`);
+
+                // Intento 2: Fetch usando la URL de descarga, con AbortController para timeout
+                const controller = new AbortController();
+                const abortTimer = setTimeout(() => controller.abort(), 30000);
+                try {
+                    const url = file.url || await getDownloadURL(file.ref);
+                    const resp = await fetch(url, { signal: controller.signal });
+                    if (!resp.ok) throw new Error(`HTTP Error ${resp.status}`);
+                    blob = await resp.blob();
+                } finally {
+                    clearTimeout(abortTimer);
+                }
+            }
 
             if (blob && blob.size > 0) {
                 const fileName = fullPath.split('/').pop();
                 zip.file(fileName, blob);
                 addedCount++;
-                console.log(`✅ [${addedCount}] ${fileName} OK`);
+                console.log(`✅ [${addedCount}] ${fileName} (${Math.round(blob.size / 1024)}KB)`);
             } else {
-                throw new Error("Blob vacío");
+                throw new Error("Blob vacío o tamaño cero");
             }
 
         } catch (err) {
-            // Si el error es object-not-found, 404 o 403, NO reintentamos. El archivo fue borrado.
+            const msg = err.message || '';
             const isNotFound = err.code === 'storage/object-not-found' ||
-                err.message.includes('not found') ||
-                err.message.includes('404') ||
-                err.message.includes('403');
+                msg.includes('not found') || msg.includes('404') || msg.includes('403');
 
             if (isNotFound) {
-                console.warn(`🛑 Archivo no existe físicamente: ${fullPath} (borrado manual). Saltando...`);
+                console.warn(`🛑 Archivo no existe: ${fullPath}. Saltando...`);
                 if (file.id) {
-                    try {
-                        console.log(`🧹 Auto-limpiando registro huérfano en Firestore: ${file.id}`);
-                        await deleteDoc(doc(db, 'fotos', file.id));
-                    } catch (e) {
-                        console.warn("No se pudo limpiar registro huérfano:", e.message);
-                    }
+                    try { await deleteDoc(doc(db, 'fotos', file.id)); } catch { /* ignore */ }
                 }
-                return; // Salir silenciosamente para no detener el ZIP
+                return;
             }
 
             if (retries > 0) {
-                console.warn(`🔄 Reintentando ${fullPath} (${retries} restantes)...`);
-                await new Promise(r => setTimeout(r, 1000));
+                console.warn(`🔄 Reintentando ${fullPath} (${retries} restantes)... Error: ${msg}`);
+                await new Promise(r => setTimeout(r, 1500));
                 return downloadWithRetry(file, retries - 1);
             }
 
-            console.error(`❌ Falló definitivamente ${fullPath}:`, err.message);
-            if (!firstError) firstError = `${fullPath}: ${err.message}`;
+            console.error(`❌ Falló definitivamente ${fullPath}:`, msg);
+            if (!firstError) firstError = `${fullPath}: ${msg}`;
         }
     };
 

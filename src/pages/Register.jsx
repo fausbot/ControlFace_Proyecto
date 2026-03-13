@@ -1,12 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
-import { collection, addDoc, serverTimestamp, getDocs, query, where, doc, getDoc } from 'firebase/firestore';
-import { createUserWithEmailAndPassword } from 'firebase/auth';
+import { doc, getDoc } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
-import { auth, db, functions } from '../firebaseConfig';
+import { db, functions } from '../firebaseConfig';
 import { fetchLicenseStatus } from '../services/licenseService';
-import { UserPlus, LogOut, Loader2, Camera, UserCheck } from 'lucide-react';
+import { UserPlus, LogOut, Loader2, Camera, UserCheck, Download, Calendar, Trash2, AlertTriangle, TriangleAlert, Image, UserMinus, FileText, Printer, Image as ImageIcon } from 'lucide-react';
 import * as faceapi from '@vladmandic/face-api';
 
 // ─── Definición de campos opcionales (igual que en Configuracion.jsx) ─────────

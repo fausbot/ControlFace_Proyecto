@@ -11,6 +11,7 @@
  */
 
 import bcrypt from 'bcrypt';
+/* global process */
 
 // Obtener la contraseña del argumento de línea de comandos
 const password = process.argv[2];
