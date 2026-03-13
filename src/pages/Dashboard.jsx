@@ -3,12 +3,16 @@ import Webcam from 'react-webcam';
 import { useAuth } from '../contexts/AuthContext';
 import { addWatermarkToImage, fetchServerTime, fetchLocationName } from '../utils/watermark';
 import { db } from '../firebaseConfig';
-import { collection, addDoc, query, where, getDocs, serverTimestamp, doc, getDoc } from 'firebase/firestore';
+import { collection, addDoc, query, where, getDocs, serverTimestamp, doc, getDoc, orderBy, limit } from 'firebase/firestore';
 import { Camera, MapPin, CheckCircle, LogOut, LogIn, UserCheck, ShieldAlert, TriangleAlert } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import * as faceapi from '@vladmandic/face-api';
 import { uploadPhoto } from '../services/storageService';
 import { fetchLicenseStatus } from '../services/licenseService';
+import ActionButtons from '../components/dashboard/ActionButtons';
+import CameraView from '../components/dashboard/CameraView';
+import PreviewView from '../components/dashboard/PreviewView';
+import SuccessView from '../components/dashboard/SuccessView';
 
 export default function Dashboard() {
     const { currentUser, logout } = useAuth();
@@ -185,26 +189,19 @@ export default function Dashboard() {
                 return;
             }
             try {
-                // Solo WHERE sin orderBy = no necesita índice compuesto
+                // Consulta optimizada: Ordenar por servidor y limitar al último registro
                 const q = query(
                     collection(db, "attendance"),
-                    where("usuario", "==", currentUser.email)
+                    where("usuario", "==", currentUser.email),
+                    orderBy("timestamp", "desc"),
+                    limit(1)
                 );
                 const snap = await getDocs(q);
 
                 if (snap.empty) {
                     setAllowedActions({ entry: true, exit: false });
                 } else {
-                    const docs = snap.docs.map(d => d.data());
-
-                    // Ordenar del más reciente al más antiguo (manejo seguro si timestamp es null)
-                    docs.sort((a, b) => {
-                        const tA = (a.timestamp && a.timestamp.toMillis) ? a.timestamp.toMillis() : 0;
-                        const tB = (b.timestamp && b.timestamp.toMillis) ? b.timestamp.toMillis() : 0;
-                        return tB - tA;
-                    });
-
-                    const lastRecord = docs[0];
+                    const lastRecord = snap.docs[0].data();
                     const lastType = lastRecord.tipo;
                     console.log(`✅ Último registro: tipo=${lastType}`);
 
@@ -618,7 +615,6 @@ export default function Dashboard() {
         }
     };
 
-
     const saveRecord = async () => {
         if (!capturedData) return false;
         setStep('processing');
@@ -641,6 +637,44 @@ export default function Dashboard() {
             setStep('preview');
             return false;
         }
+    };
+
+    const handlePreviewSave = async () => {
+        if (mode !== 'incident' && !faceVerified) {
+            alert("Verificación facial fallida. No se puede guardar el registro.");
+            return;
+        }
+        if (mode === 'incident' && !incidentDescription.trim()) {
+            alert("Por favor describe la novedad antes de guardar.");
+            return;
+        }
+
+        const saved = await saveRecord();
+        if (!saved) return;
+
+        // ¿Debemos guardar la foto en Storage?
+        const isIncidente = mode === 'incident';
+        const savePhoto = isIncidente ? storageSettings.storage_saveIncidentes : storageSettings.storage_saveAsistencia;
+
+        if (savePhoto) {
+            uploadPhoto(
+                capturedData.image,
+                isIncidente ? 'incidente' : capturedData.metadata.tipo,
+                capturedData.metadata.usuario,
+                capturedData.metadata.fecha,
+                capturedData.metadata.hora,
+            ).catch(err => console.error('Storage upload failed:', err));
+        } else {
+            console.log('Almacenamiento de foto desactivado por configuración.');
+        }
+
+        await shareImage();
+
+        setStep('success');
+        setStatusMessage('¡Registro Exitoso!');
+        setTimeout(() => {
+            logout();
+        }, 3000);
     };
 
     return (
@@ -685,50 +719,12 @@ export default function Dashboard() {
 
                         {isLicenseValid ? (
                             <React.Fragment>
-                                {!loadingState && allowedActions.entry && (
-                                    <button
-                                        onClick={() => handleStart('entry')}
-                                        className="group relative flex flex-col items-center justify-center p-8 bg-gradient-to-tr from-green-400 to-green-600 rounded-2xl shadow-2xl hover:shadow-2xl transition transform hover:scale-105 active:scale-95 animate-fade-in"
-                                    >
-                                        <LogIn className="w-12 h-12 text-white mb-2" />
-                                        <span className="text-2xl font-bold text-white">{buttonLabels.entry}</span>
-                                    </button>
-                                )}
-
-                                {!loadingState && allowedActions.exit && (
-                                    <button
-                                        onClick={() => handleStart('exit')}
-                                        className="group relative flex flex-col items-center justify-center p-8 bg-gradient-to-tr from-red-400 to-red-600 rounded-2xl shadow-2xl hover:shadow-2xl transition transform hover:scale-105 active:scale-95 animate-fade-in"
-                                    >
-                                        <LogOut className="w-12 h-12 text-white mb-2" />
-                                        <span className="text-2xl font-bold text-white">{buttonLabels.exit}</span>
-                                    </button>
-                                )}
-
-                                {/* Mensaje visual de bloqueo si uno está deshabilitado */}
-                                {!loadingState && !allowedActions.entry && (
-                                    <div className="opacity-40 grayscale flex flex-col items-center justify-center p-4 border-2 border-dashed border-gray-300 rounded-xl">
-                                        <span className="text-gray-400 font-bold block mb-1">Entrada Bloqueada</span>
-                                        <span className="text-[10px] text-gray-400 text-center">Debes marcar salida primero o esperar 20h</span>
-                                    </div>
-                                )}
-                                {!loadingState && !allowedActions.exit && (
-                                    <div className="opacity-40 grayscale flex flex-col items-center justify-center p-4 border-2 border-dashed border-gray-300 rounded-xl">
-                                        <span className="text-gray-400 font-bold block mb-1">Salida Bloqueada</span>
-                                        <span className="text-[10px] text-gray-400 text-center">Debes marcar entrada primero</span>
-                                    </div>
-                                )}
-                                {/* Botón INCIDENTE — siempre visible, sin restricción de ciclo */}
-                                {!loadingState && (
-                                    <button
-                                        onClick={() => handleStart('incident')}
-                                        className="group relative flex flex-col items-center justify-center p-5 bg-gradient-to-tr from-orange-400 to-orange-600 rounded-2xl shadow-2xl hover:shadow-2xl transition transform hover:scale-105 active:scale-95 animate-fade-in"
-                                    >
-                                        <TriangleAlert className="w-8 h-8 text-white mb-1" />
-                                        <span className="text-xl font-bold text-white">{buttonLabels.incident}</span>
-                                        <span className="text-xs text-orange-100 mt-1">Registro de Novedades, Mantenimientos o Incidentes.</span>
-                                    </button>
-                                )}
+                                <ActionButtons
+                                    loadingState={loadingState}
+                                    allowedActions={allowedActions}
+                                    buttonLabels={buttonLabels}
+                                    handleStart={handleStart}
+                                />
                             </React.Fragment>
                         ) : (
                             <div className="col-span-2 bg-red-50 border-2 border-red-500 rounded-2xl p-6 text-center shadow-2xl animate-pulse">
@@ -747,100 +743,18 @@ export default function Dashboard() {
                 )}
 
                 {step === 'camera' && (
-                    <div className="w-full flex flex-col items-center animate-fade-in">
-                        <h2 className="text-xl font-bold mb-4 capitalize text-gray-800">
-                            {mode === 'incident' ? `⚠️ ${buttonLabels.incident}` : `${buttonLabels[mode === 'entry' ? 'entry' : 'exit']}`}
-                        </h2>
-
-                        {/* Native Video Element */}
-                        <div className="relative rounded-2xl overflow-hidden shadow-2xl border-4 bg-black w-full aspect-[3/4] max-w-[280px]"
-                            style={{ borderColor: mode === 'incident' ? 'white' : blinkCount >= 1 ? '#22c55e' : '#3b82f6' }}>
-                            <video
-                                ref={videoRef}
-                                autoPlay
-                                playsInline
-                                muted
-                                className={`w-full h-full object-cover ${mode !== 'incident' ? 'transform scale-x-[-1]' : ''}`}
-                            />
-                            <canvas ref={canvasRef} className="hidden" />
-                            <div className="absolute inset-0 border-2 border-white/30 rounded-2xl pointer-events-none"></div>
-
-                            {/* Overlay info */}
-                            <div className="absolute bottom-4 left-4 right-4 bg-black/50 backdrop-blur text-white p-2 rounded text-xs">
-                                <div className="flex items-center gap-1"><MapPin size={12} /> Buscando GPS...</div>
-                                {mode === 'incident'
-                                    ? <div className="flex items-center gap-1"><TriangleAlert size={12} /> Fotografía el área afectada</div>
-                                    : storageSettings.security_liveness === false
-                                        ? <div className="flex items-center gap-1"><Camera size={12} /> Posicione su rostro</div>
-                                        : <div className="flex items-center gap-1"><Camera size={12} /> Mueva la cabeza para registrar</div>
-                                }
-                            </div>
-
-                            {/* Progreso movimiento — top right badge */}
-                            {mode !== 'incident' && storageSettings.security_liveness !== false && (
-                                <div className={`absolute top-3 right-3 text-white text-xs font-bold px-2 py-1 rounded-full shadow-lg ${blinkCount >= 100 ? 'bg-green-500' : 'bg-blue-500'}`}>
-                                    {blinkCount}%
-                                </div>
-                            )}
-                        </div>
-
-                        {/* Barra de movimiento — solo si liveness está activo */}
-                        {mode !== 'incident' && storageSettings.security_liveness !== false && (
-                            <div className="mt-3 w-full max-w-[280px]">
-                                <div className="bg-blue-50 border border-blue-200 rounded-xl p-3">
-                                    <p className="text-xs font-bold text-blue-700 text-center mb-2">
-                                        {statusMessage || '🙂 Mueva la cabeza ligeramente'}
-                                    </p>
-                                    <div className="w-full bg-blue-100 rounded-full h-3">
-                                        <div
-                                            className="h-3 rounded-full transition-all duration-150"
-                                            style={{
-                                                width: `${blinkCount}%`,
-                                                background: blinkCount >= 100
-                                                    ? 'linear-gradient(90deg, #22c55e, #16a34a)'
-                                                    : 'linear-gradient(90deg, #3b82f6, #2563eb)'
-                                            }}
-                                        />
-                                    </div>
-                                    <p className="text-[10px] text-blue-400 text-center mt-1">
-                                        {blinkCount < 20 ? 'Mire al frente...' : blinkCount < 60 ? '¡Bien! Gire a la IZQUIERDA...' : blinkCount < 100 ? '¡Casi listo! Vuelva al CENTRO 🟢' : '✅ Identidad Confirmada'}
-                                    </p>
-                                </div>
-                            </div>
-                        )}
-
-
-                        <div className="mt-4 flex gap-4">
-                            <button
-                                onClick={handleStopCamera}
-                                className="px-6 py-3 rounded-full bg-gray-200 text-gray-700 font-bold hover:bg-gray-300"
-                            >
-                                Cancelar
-                            </button>
-                            {/* Mostrar "Capturar" para incidentes o si la seguridad de movimiento está desactivada */}
-                            {(mode === 'incident' || (mode !== 'incident' && storageSettings.security_liveness === false)) && (
-                                <button
-                                    onClick={capture}
-                                    disabled={step === 'processing'}
-                                    className={`px-8 py-3 rounded-full text-white font-bold shadow-2xl transition transform active:translate-y-1 ${step === 'processing'
-                                        ? 'bg-gray-400 cursor-not-allowed'
-                                        : mode === 'incident'
-                                            ? 'bg-blue-600 hover:bg-blue-700'
-                                            : 'bg-[#2863eb] hover:bg-[#1d4ed8]' /* Un azul más similar a la imagen */
-                                        } ${mode !== 'incident' ? 'flex items-center gap-2 w-full max-w-[280px] justify-center' : ''}`}
-                                >
-                                    {mode !== 'incident' && <Camera size={20} />}
-                                    {step === 'processing' ? 'Procesando...' : mode === 'incident' ? 'Capturar' : 'Tomar Foto Ahora'}
-                                </button>
-                            )}
-                        </div>
-                        {/* Mensaje inferior si liveness está desactivado (similar a la imagen del usuario) */}
-                        {mode !== 'incident' && storageSettings.security_liveness === false && (
-                            <p className="text-xs text-gray-500 mt-3 max-w-[280px] text-center opacity-80">
-                                Asegúrese de que su rostro sea visible antes de capturar.
-                            </p>
-                        )}
-                    </div>
+                    <CameraView
+                        mode={mode}
+                        buttonLabels={buttonLabels}
+                        videoRef={videoRef}
+                        canvasRef={canvasRef}
+                        blinkCount={blinkCount}
+                        statusMessage={statusMessage}
+                        storageSettings={storageSettings}
+                        handleStopCamera={handleStopCamera}
+                        capture={capture}
+                        step={step}
+                    />
                 )}
 
 
@@ -852,126 +766,19 @@ export default function Dashboard() {
                 )}
 
                 {step === 'preview' && capturedData && (
-                    <div className="w-full flex flex-col items-center animate-fade-in">
-                        <h2 className="text-xl font-bold mb-2 text-gray-800">
-                            {mode === 'incident' ? '⚠️ Vista Previa de la Novedad' : 'Vista Previa'}
-                        </h2>
-                        <p className="text-sm text-gray-500 mb-4 text-center">
-                            {mode === 'incident'
-                                ? 'Describe la novedad antes de guardar.'
-                                : faceVerified
-                                    ? 'Identidad verificada correctamente. Comparte esta imagen como evidencia.'
-                                    : 'No se pudo verificar tu identidad facial.'}
-                        </p>
-
-                        {!faceVerified && faceError && mode !== 'incident' && (
-                            <div className="bg-red-100 text-red-700 p-3 rounded-lg flex items-center gap-2 mb-4 w-full max-w-sm">
-                                <ShieldAlert size={20} />
-                                <span className="text-xs font-bold">{faceError}</span>
-                            </div>
-                        )}
-
-                        <div className="relative rounded-2xl overflow-hidden shadow-2xl border-4 bg-gray-900 w-full max-w-sm mb-4"
-                            style={{ borderColor: mode === 'incident' ? '#ea580c' : faceVerified ? '#22c55e' : '#ef4444' }}>
-                            <img src={capturedData.image} alt="Capture" className="w-full h-auto" />
-
-                            {!faceVerified && mode !== 'incident' && (
-                                <button
-                                    onClick={handleStopCamera}
-                                    className="absolute top-4 left-4 flex items-center gap-2 px-4 py-2 bg-red-600 text-white font-bold rounded-lg shadow-2xl hover:bg-red-700 transition transform hover:scale-105"
-                                >
-                                    <Camera size={20} />
-                                    REPETIR FOTO
-                                </button>
-                            )}
-
-                            {(faceVerified || mode === 'incident') && (
-                                <div className={`absolute top-4 right-4 p-1 rounded-full shadow-2xl ${mode === 'incident' ? 'bg-orange-500' : 'bg-green-500'} text-white`}>
-                                    {mode === 'incident' ? <TriangleAlert size={24} /> : <UserCheck size={24} />}
-                                </div>
-                            )}
-                        </div>
-
-                        {/* Campo de descripción SOLO para novedades */}
-                        {mode === 'incident' && (
-                            <div className="w-full max-w-sm mb-4">
-                                <label className="block text-sm font-bold text-orange-700 mb-1">📝 Descripción de la novedad *</label>
-                                <textarea
-                                    value={incidentDescription}
-                                    onChange={(e) => setIncidentDescription(e.target.value)}
-                                    placeholder="Describe detalladamente lo que ocurrió, el área afectada y el tipo de daño..."
-                                    rows={4}
-                                    className="w-full border-2 border-orange-300 rounded-xl p-3 text-sm focus:outline-none focus:border-orange-500 resize-none"
-                                />
-                            </div>
-                        )}
-
-                        <div className="flex flex-col gap-3 w-full max-w-xs">
-                            <button
-                                onClick={async () => {
-                                    if (mode !== 'incident' && !faceVerified) {
-                                        alert("Verificación facial fallida. No se puede guardar el registro.");
-                                        return;
-                                    }
-                                    if (mode === 'incident' && !incidentDescription.trim()) {
-                                        alert("Por favor describe la novedad antes de guardar.");
-                                        return;
-                                    }
-
-                                    const saved = await saveRecord();
-                                    if (!saved) return;
-
-                                    // ¿Debemos guardar la foto en Storage?
-                                    const isIncidente = mode === 'incident';
-                                    const savePhoto = isIncidente ? storageSettings.storage_saveIncidentes : storageSettings.storage_saveAsistencia;
-
-                                    if (savePhoto) {
-                                        // Subir foto a Storage en segundo plano (sin await)
-                                        // para no bloquear el selector de WhatsApp (navigator.share requiere gesto directo)
-                                        uploadPhoto(
-                                            capturedData.image,
-                                            isIncidente ? 'incidente' : capturedData.metadata.tipo,
-                                            capturedData.metadata.usuario,
-                                            capturedData.metadata.fecha,
-                                            capturedData.metadata.hora,
-                                        ).catch(err => console.error('Storage upload failed:', err));
-                                    } else {
-                                        console.log('Almacenamiento de foto desactivado por configuración.');
-                                    }
-
-                                    await shareImage();
-
-                                    setStep('success');
-                                    setStatusMessage('¡Registro Exitoso!');
-                                    setTimeout(() => {
-                                        logout();
-                                    }, 3000);
-                                }}
-                                className={`w-full flex items-center justify-center gap-2 px-6 py-3 rounded-xl text-white font-bold shadow-2xl transition ${mode === 'incident'
-                                    ? 'bg-orange-500 hover:bg-orange-600'
-                                    : 'bg-green-600 hover:bg-green-700'
-                                    }`}
-                            >
-                                <CheckCircle size={20} />
-                                {mode === 'incident' ? 'Guardar Novedad y Compartir' : 'Guardar y Compartir'}
-                            </button>
-                            <button
-                                onClick={() => { stopCamera(); setStep('idle'); setMode(null); }}
-                                className="w-full flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-gray-100 text-gray-600 font-bold hover:bg-gray-200 transition"
-                            >
-                                Cancelar
-                            </button>
-                        </div>
-                    </div>
+                    <PreviewView
+                        mode={mode}
+                        capturedData={capturedData}
+                        faceVerified={faceVerified}
+                        faceError={faceError}
+                        incidentDescription={incidentDescription}
+                        setIncidentDescription={setIncidentDescription}
+                        handleSave={handlePreviewSave}
+                        handleCancel={handleStopCamera}
+                    />
                 )}
 
-                {step === 'success' && (
-                    <div className="text-center p-10 bg-white rounded-2xl shadow-2xl animate-fade-in">
-                        <CheckCircle className="w-20 h-20 text-green-500 mx-auto mb-4" />
-                        <h2 className="text-2xl font-bold text-gray-800 mb-2">¡Registrado!</h2>
-                        <p className="text-gray-600">Registro guardado exitosamente.</p>
-                    </div>
-                )}
+                {step === 'success' && <SuccessView />}
             </div>
             {/* Version Indicator */}
             <div className="p-2 text-center flex flex-col items-center gap-1 opacity-50">
