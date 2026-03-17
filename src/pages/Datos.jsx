@@ -1,4 +1,4 @@
-﻿// src/pages/Datos.jsx
+// src/pages/Datos.jsx
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Trash2, ChevronLeft, ChevronRight, Loader2, FileText, CheckCircle } from 'lucide-react';
@@ -63,8 +63,16 @@ export default function Datos() {
             setLoading(false);
         });
 
+        // Timeout de seguridad para evitar "Cargando" infinito offline
+        const timer = setTimeout(() => {
+            setLoading(false);
+        }, 5000);
+
         // Limpieza al desmontar
-        return () => unsubscribe();
+        return () => {
+            unsubscribe();
+            clearTimeout(timer);
+        };
     }, [adminAccess, navigate]);
 
     // (eliminado loadlogs y variables que no se usan)
@@ -196,7 +204,7 @@ export default function Datos() {
                                             </td>
                                             <td className="p-4">{log.fecha}</td>
                                             <td className="p-4">{log.hora}</td>
-                                            <td className="p-4 text-xs text-gray-400 max-w-[200px] truncate" title={log.localidad}>{log.localidad}</td>
+                                            <td className="p-4 text-xs text-gray-400 max-w-[200px] truncate" title={log.localidad || log.ubicacion}>{log.localidad || log.ubicacion}</td>
                                             <td className="p-4 text-center">
                                                 <button onClick={() => handleDelete(log.id)} className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded transition">
                                                     <Trash2 size={16} />

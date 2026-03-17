@@ -1,7 +1,7 @@
 {
   "name": "attendance-pwa-dev",
   "private": true,
-  "version": "1.6.30",
+  "version": "1.6.99",
   "type": "module",
   "scripts": {
     "dev": "vite --host",
@@ -13,6 +13,7 @@
     "@vladmandic/face-api": "^1.7.15",
     "crypto-js": "^4.2.0",
     "firebase": "^12.7.0",
+    "idb": "^8.0.3",
     "jszip": "^3.10.1",
     "lucide-react": "^0.562.0",
     "react": "^19.2.1",

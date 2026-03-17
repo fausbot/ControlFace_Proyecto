@@ -3,7 +3,7 @@ import Webcam from 'react-webcam';
 import { useAuth } from '../contexts/AuthContext';
 import { addWatermarkToImage, fetchServerTime, fetchLocationName } from '../utils/watermark';
 import { db } from '../firebaseConfig';
-import { collection, addDoc, query, where, getDocs, serverTimestamp, doc, getDoc, orderBy, limit } from 'firebase/firestore';
+import { collection, addDoc, query, where, getDocs, serverTimestamp, doc, getDoc, Timestamp } from 'firebase/firestore';
 import { Camera, MapPin, CheckCircle, LogOut, LogIn, UserCheck, ShieldAlert, TriangleAlert } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import * as faceapi from '@vladmandic/face-api';
@@ -13,6 +13,8 @@ import ActionButtons from '../components/dashboard/ActionButtons';
 import CameraView from '../components/dashboard/CameraView';
 import PreviewView from '../components/dashboard/PreviewView';
 import SuccessView from '../components/dashboard/SuccessView';
+import SyncManager from '../components/dashboard/SyncManager';
+import { saveOfflineRecord, getPendingRecords } from '../services/offlineStorage';
 
 export default function Dashboard() {
     const { currentUser, logout } = useAuth();
@@ -49,7 +51,8 @@ export default function Dashboard() {
     const [storageSettings, setStorageSettings] = useState({
         storage_saveAsistencia: true,
         storage_saveIncidentes: true,
-        security_liveness: true
+        security_liveness: true,
+        security_faceRecognition: true
     });
     const [isLicenseValid, setIsLicenseValid] = useState(true);
     const [buttonLabels, setButtonLabels] = useState({
@@ -118,7 +121,8 @@ export default function Dashboard() {
                     setStorageSettings({
                         storage_saveAsistencia: d.storage_saveAsistencia !== false,
                         storage_saveIncidentes: d.storage_saveIncidentes !== false,
-                        security_liveness: d.security_liveness !== false
+                        security_liveness: d.security_liveness !== false,
+                        security_faceRecognition: d.security_faceRecognition !== false
                     });
                     setButtonLabels({
                         entry: d.ui_labelEntry || "Registrar Entrada",
@@ -136,8 +140,8 @@ export default function Dashboard() {
                     setIsLicenseValid(false);
                 }
 
-                // 2. Cargar Modelos Faciales
-                const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
+                // 2. Cargar Modelos Faciales (DESDE LOCAL PARA OFFLINE)
+                const MODEL_URL = '/models/';
                 await Promise.all([
                     faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
                     faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
@@ -147,12 +151,23 @@ export default function Dashboard() {
 
                 // 3. Cargar datos del empleado actual
                 if (currentUser) {
+                    // Intento cargar desde Cache Local primero (Offline Ready)
+                    const cachedDescriptor = localStorage.getItem(`face_descriptor_${currentUser.email}`);
+                    if (cachedDescriptor) {
+                        setSavedDescriptor(new Float32Array(JSON.parse(cachedDescriptor)));
+                        console.log("🧬 Descriptor facial cargado desde cache local.");
+                    }
+
+                    // Intentar actualizar desde Firestore si hay red
                     const q = query(collection(db, "employees"), where("email", "==", currentUser.email));
                     const snap = await getDocs(q);
                     if (!snap.empty) {
                         const data = snap.docs[0].data();
                         if (data.faceDescriptor) {
-                            setSavedDescriptor(new Float32Array(data.faceDescriptor));
+                            const desc = new Float32Array(data.faceDescriptor);
+                            setSavedDescriptor(desc);
+                            // Actualizar cache local
+                            localStorage.setItem(`face_descriptor_${currentUser.email}`, JSON.stringify(Array.from(desc)));
                         }
                     }
                 }
@@ -175,7 +190,8 @@ export default function Dashboard() {
                     navigate('/login');
                 }
             } catch (err) {
-                console.error("Error verificando acceso:", err);
+                // OFFLINE SAFETY: Si no hay internet, permitimos seguir
+                console.warn("Error verificando acceso (probablemente offline):", err);
             }
         };
 
@@ -188,65 +204,136 @@ export default function Dashboard() {
                 setLoadingState(false);
                 return;
             }
-            try {
-                // Consulta optimizada: Ordenar por servidor y limitar al último registro
-                const q = query(
-                    collection(db, "attendance"),
-                    where("usuario", "==", currentUser.email),
-                    orderBy("timestamp", "desc"),
-                    limit(1)
-                );
-                const snap = await getDocs(q);
 
-                if (snap.empty) {
+            // Helper para fecha + hora
+            const getMillisFromDateTime = (fecha, hora) => {
+                if (!fecha || !hora) return 0;
+                try {
+                    const [d, m, y] = fecha.split('/');
+                    const [h, min, s] = hora.split(':');
+                    return new Date(y, m - 1, d, h, min, s).getTime();
+                } catch {
+                    return 0;
+                }
+            };
+
+            // Helper para obtener milisegundos de timestamp
+            const getMillisLocal = (ts) => {
+                if (!ts) return 0;
+                if (typeof ts.toMillis === 'function') return ts.toMillis();
+                if (ts instanceof Date) return ts.getTime();
+                if (typeof ts === 'number') return ts;
+                if (typeof ts === 'string') return new Date(ts).getTime();
+                return Date.now();
+            };
+
+            // Función para determinar acciones basadas en tipo (sin sobrescribir localStorage)
+            const setActionsFromType = (lastType, lastTime, updateLS = true) => {
+                const normalizedType = (lastType || '').trim().toLowerCase();
+                
+                if (normalizedType === 'salida') {
                     setAllowedActions({ entry: true, exit: false });
-                } else {
-                    const lastRecord = snap.docs[0].data();
-                    const lastType = lastRecord.tipo;
-                    console.log(`✅ Último registro: tipo=${lastType}`);
-
-                    if (lastType === 'Salida') {
+                    if (updateLS) {
+                        localStorage.setItem(`lastAttendanceType_${currentUser.email}`, 'Salida');
+                        localStorage.setItem(`lastAttendanceTime_${currentUser.email}`, Date.now().toString());
+                    }
+                } else if (normalizedType === 'entrada') {
+                    // Convertir lastTime a timestamp
+                    let lastTimeNum = 0;
+                    if (lastTime) {
+                        lastTimeNum = typeof lastTime === 'number' ? lastTime : parseInt(lastTime, 10);
+                    }
+                    
+                    const diffHours = lastTimeNum > 0 ? (Date.now() - lastTimeNum) / (1000 * 60 * 60) : 0;
+                    
+                    if (diffHours > 20) {
                         setAllowedActions({ entry: true, exit: false });
-                    } else if (lastType === 'Entrada') {
-                        const lastTime = (lastRecord.timestamp && lastRecord.timestamp.toDate)
-                            ? lastRecord.timestamp.toDate()
-                            : new Date(0); // Si no hay timestamp, forzar reinicio
-
-                        const diffHours = (new Date() - lastTime) / (1000 * 60 * 60);
-
-                        if (diffHours > 20) {
-                            console.log("⚠️ Ciclo reiniciado por tiempo (>20h)");
-                            setAllowedActions({ entry: true, exit: false });
-                        } else {
-                            setAllowedActions({ entry: false, exit: true });
+                        if (updateLS) {
+                            localStorage.setItem(`lastAttendanceType_${currentUser.email}`, 'Entrada');
+                            localStorage.setItem(`lastAttendanceTime_${currentUser.email}`, Date.now().toString());
                         }
                     } else {
-                        // Tipo desconocido o incidente -> permitir entrada
-                        setAllowedActions({ entry: true, exit: false });
+                        setAllowedActions({ entry: false, exit: true });
+                        if (updateLS) {
+                            localStorage.setItem(`lastAttendanceType_${currentUser.email}`, 'Entrada');
+                            localStorage.setItem(`lastAttendanceTime_${currentUser.email}`, lastTimeNum || Date.now().toString());
+                        }
+                    }
+                } else {
+                    // Cualquier otro caso: Forzar a Entrada por defecto (nunca permitir ambos juntos)
+                    setAllowedActions({ entry: true, exit: false });
+                    if (updateLS) {
+                        localStorage.setItem(`lastAttendanceType_${currentUser.email}`, 'Salida'); // Como si hubiera salido
+                        localStorage.setItem(`lastAttendanceTime_${currentUser.email}`, Date.now().toString());
                     }
                 }
+            };
+
+            // Bandera para evitar sobrescribir estado ya establecido
+            let stateAlreadySet = false;
+
+            // 1. PRIMERO: Cargar desde localStorage INMEDIATAMENTE (para velocidad)
+            const lastTypeLS = localStorage.getItem(`lastAttendanceType_${currentUser.email}`);
+            const lastTimeLS = localStorage.getItem(`lastAttendanceTime_${currentUser.email}`);
+            
+            // 2. Consultar Firestore para obtener el último registro real
+            try {
+                // Un solo where por usuario — NO requiere índice compuesto.
+                // Usamos limitToLast(10) ordenando por __name__ como trick, pero más fácil:
+                // traemos todos del usuario y ordenamos en memoria; Firebase cachea bien esto.
+                const q = query(
+                    collection(db, "attendance"),
+                    where("usuario", "==", currentUser.email)
+                );
+                const snap = await getDocs(q);
+                
+                if (!snap.empty) {
+                    // Ordenar en memoria: el más reciente primero
+                    const records = snap.docs.map(d => d.data());
+                    records.sort((a, b) => {
+                        // Utilizar los helper methods getMillisLocal y getMillisFromDateTime
+                        const tA = getMillisLocal(a.timestamp) || getMillisFromDateTime(a.fecha, a.hora) || 0;
+                        const tB = getMillisLocal(b.timestamp) || getMillisFromDateTime(b.fecha, b.hora) || 0;
+                        return tB - tA; 
+                    });
+                    
+                    const lastDoc = records[0];
+                    const lastTipo = lastDoc.tipo;
+                    
+                    let firestoreTime = getMillisLocal(lastDoc.timestamp) || getMillisFromDateTime(lastDoc.fecha, lastDoc.hora) || 0;
+                    
+                    console.log("📡 Firestore manda. Último registro:", lastTipo);
+                    // Firestore SIMPRE gana si hay conexión y encuentra datos recientes.
+                    setActionsFromType(lastTipo, firestoreTime, true);
+                    stateAlreadySet = true;
+                }
             } catch (err) {
-                console.error("❌ Error verificando estado:", err);
-                setAllowedActions({ entry: true, exit: false }); // Fallback seguro
-            } finally {
-                setLoadingState(false); // SIEMPRE - pase lo que pase
+                console.warn("⚠️ Sin conexión a Firestore o error. Fallback a memoria local:", err);
             }
+
+            // 3. Fallback: Si no hay internet o no hay registros recientes en Firebase, usar localStorage o Entrada por defecto
+            if (!stateAlreadySet) {
+                if (lastTypeLS) {
+                    console.log("📱 Usando memoria local por falta de conexión/datos recientes");
+                    setActionsFromType(lastTypeLS, lastTimeLS ? parseInt(lastTimeLS) : null, false);
+                } else {
+                    setAllowedActions({ entry: true, exit: false });
+                }
+            }
+            
+            setLoadingState(false);
         };
         checkLastStatus();
 
-
-        const handleUnload = () => {
-            logout();
-        };
-        window.addEventListener('beforeunload', handleUnload);
-
         return () => {
-            window.removeEventListener('beforeunload', handleUnload);
             if (streamRef.current) {
-                streamRef.current.getTracks().forEach(track => track.stop());
+                streamRef.current.getTracks().forEach(track => {
+                    track.stop();
+                    try { track.enabled = false; } catch (e) { }
+                });
             }
         };
-    }, [logout, currentUser, navigate]);
+    }, [logout, currentUser, navigate, isLicenseValid]);
 
     // --- LIVENESS: Reto de Rotación de Cabeza ---
     // Detecta el giro de la cabeza (Yaw) usando la posición de la nariz relativa a los ojos.
@@ -263,12 +350,22 @@ export default function Dashboard() {
         const loop = async () => {
             if (!isLivenessRunningRef.current) return;
 
-            if (!isDetecting && videoRef.current && videoRef.current.readyState === 4) {
+            if (!isDetecting && videoRef.current && videoRef.current.readyState >= 2) {
                 isDetecting = true;
                 try {
+                    const videoEl = videoRef.current;
+                    // Asegurarnos de que el video tiene dimensiones válidas antes de detectar
+                    if (videoEl.videoWidth === 0 || videoEl.videoHeight === 0) {
+                        isDetecting = false;
+                        if (isLivenessRunningRef.current) {
+                            livenessIntervalRef.current = requestAnimationFrame(loop);
+                        }
+                        return;
+                    }
+
                     const detection = await faceapi
                         .detectSingleFace(
-                            videoRef.current,
+                            videoEl,
                             new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.3 })
                         )
                         .withFaceLandmarks();
@@ -338,17 +435,63 @@ export default function Dashboard() {
 
     const startCamera = async (facingMode = 'user') => {
         try {
+            // Técnica para forzar diálogo de permisos en móviles
+            // Crear video temporal oculto para forzar el prompt
+            const tempVideo = document.createElement('video');
+            tempVideo.setAttribute('playsinline', '');
+            tempVideo.setAttribute('autoplay', '');
+            tempVideo.style.display = 'none';
+            document.body.appendChild(tempVideo);
+            
+            try {
+                const tempStream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode },
+                    audio: false
+                });
+                
+                // Asignar al video temporal y esperar un frame
+                tempVideo.srcObject = tempStream;
+                await new Promise(resolve => setTimeout(resolve, 100));
+                
+                // Detener stream temporal
+                tempStream.getTracks().forEach(track => track.stop());
+                tempVideo.srcObject = null;
+            } catch (tempErr) {
+                document.body.removeChild(tempVideo);
+                throw tempErr; // Re-lanzar para manejo de errores
+            }
+            
+            document.body.removeChild(tempVideo);
+            
+            // Ahora sí, obtener el stream real
             const stream = await navigator.mediaDevices.getUserMedia({
                 video: { facingMode },
                 audio: false
             });
+            
+            // Si había un stream anterior que no se cerró bien, forzar cierre
+            if (streamRef.current) {
+                streamRef.current.getTracks().forEach(track => {
+                    track.stop();
+                    // Importante para algunos navegadores móviles que dejan la cámara activa:
+                    try { track.enabled = false; } catch(e){}
+                });
+            }
+            
             streamRef.current = stream;
             setCameraReady(true);
         } catch (err) {
             console.error("Error accessing camera:", err);
-            alert("No se pudo acceder a la cámara. Verifique los permisos.");
+            
+            if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+                alert("⚠️ Por favor permite el acceso a la cámara cuando se te pregunte");
+            } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+                alert("❌ No se encontró ninguna cámara en este dispositivo.");
+            } else {
+                alert("Error al acceder a la cámara: " + err.message);
+            }
+            
             setStatusMessage('');
-
             setStep('idle');
             setMode(null);
         }
@@ -362,9 +505,9 @@ export default function Dashboard() {
             videoRef.current.play().catch(e => console.error('Error reproduciendo video:', e));
 
             if (modeRef.current !== 'incident' && modelsLoaded) {
-                // Esperar a que el video tenga frames reales (readyState === 4)
+                // Esperar a que el video tenga frames reales (readyState >= 2)
                 const waitForVideo = setInterval(() => {
-                    if (videoRef.current && videoRef.current.readyState === 4) {
+                    if (videoRef.current && videoRef.current.readyState >= 2) {
                         clearInterval(waitForVideo);
                         if (storageSettings.security_liveness !== false) {
                             console.log('[Liveness] Video listo, iniciando detección de parpadeo...');
@@ -389,8 +532,16 @@ export default function Dashboard() {
             livenessIntervalRef.current = null;
         }
         if (streamRef.current) {
-            streamRef.current.getTracks().forEach(track => track.stop());
+            console.log("🛑 Deteniendo cámara...");
+            const tracks = streamRef.current.getTracks();
+            tracks.forEach(track => {
+                track.stop();
+                try { track.enabled = false; } catch (e) { }
+            });
             streamRef.current = null;
+        }
+        if (videoRef.current) {
+            videoRef.current.srcObject = null;
         }
         setCameraReady(false);
     };
@@ -454,70 +605,87 @@ export default function Dashboard() {
             const imageSrc = canvas.toDataURL('image/jpeg', 0.8); // Higher quality for sharing
             if (!imageSrc) throw new Error("Error generando imagen");
 
-            if (savedDescriptor) {
-                setStep('processing');
-                setStatusMessage('Verificando identidad facial...');
+            // INICIO DE PROCESAMIENTO PARALELO
+            setStatusMessage('Verificando identidad y ubicación...');
 
+            // Definimos las promesas para ganar tiempo
+            const facePromise = savedDescriptor 
+                ? faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceDescriptor()
+                : Promise.resolve(true);
+
+            const locationPromise = (async () => {
                 try {
-                    // Detectar directamente desde el video (más rápido y preciso)
-                    const detection = await faceapi.detectSingleFace(
-                        video,
-                        new faceapi.TinyFaceDetectorOptions()
-                    ).withFaceLandmarks().withFaceDescriptor();
+                    return await new Promise((resolve, reject) => {
+                        navigator.geolocation.getCurrentPosition(resolve, reject, {
+                            enableHighAccuracy: true,
+                            timeout: 5000, // Bajado a 5s para no desesperar
+                            maximumAge: 0
+                        });
+                    });
+                } catch (gpsError) {
+                    console.warn("Alta precisión GPS falló, modo rápido...", gpsError);
+                    return await new Promise((resolve, reject) => {
+                        navigator.geolocation.getCurrentPosition(resolve, reject, {
+                            enableHighAccuracy: false,
+                            timeout: 3000, // Solo 3s para el modo rápido
+                            maximumAge: 60000
+                        });
+                    });
+                }
+            })();
 
-                    if (!detection) {
-                        setFaceError('No se pudo detectar tu rostro. Asegúrate de tener buena luz y estar frente a la cámara.');
-                        setFaceVerified(false);
-                    } else {
-                        const distance = faceapi.euclideanDistance(detection.descriptor, savedDescriptor);
-                        console.log("Distancia facial:", distance);
-                        // Umbral configurable (por defecto 0.63)
-                        // Esto mejora la seguridad ante suplantaciones
-                        if (distance < faceThreshold) {
-                            setFaceVerified(true);
-                            setFaceError('');
-                        } else {
-                            setFaceError('La identidad facial no coincide con el registro.');
-                            setFaceVerified(false);
-                        }
-                    }
-                } catch (faceErr) {
-                    console.error("Error en detección facial:", faceErr);
-                    setFaceError('Error en el sensor de reconocimiento. Reintenta.');
+            const timePromise = fetchServerTime();
+
+            // Ejecutamos todo al mismo tiempo
+            const [detection, position, serverTime] = await Promise.all([
+                facePromise,
+                locationPromise,
+                timePromise
+            ]);
+
+            // 1. Validar Rostro
+            const faceRecognitionEnabled = storageSettings.security_faceRecognition !== false;
+            if (savedDescriptor && faceRecognitionEnabled) {
+                // Reconocimiento facial activo: verificar que el rostro coincida
+                if (!detection) {
+                    setFaceError('No se pudo detectar tu rostro. Reintenta.');
                     setFaceVerified(false);
+                } else {
+                    const distance = faceapi.euclideanDistance(detection.descriptor, savedDescriptor);
+                    if (distance < faceThreshold) {
+                        setFaceVerified(true);
+                        setFaceError('');
+                    } else {
+                        setFaceError('La identidad facial no coincide.');
+                        setFaceVerified(false);
+                    }
                 }
             } else {
-                setFaceVerified(true); // Permitir si no hay registro previo
+                // Reconocimiento facial desactivado: solo verificar que hay un rostro
+                if (!savedDescriptor) {
+                    setFaceVerified(true); // Sin descriptor, permitir
+                } else if (!faceRecognitionEnabled) {
+                    setFaceVerified(true); // Desactivado por config
+                    console.log('🔓 Reconocimiento facial desactivado por configuración');
+                } else {
+                    setFaceVerified(false); // Hay descriptor pero no hubo detección
+                    setFaceError('No se pudo detectar tu rostro. Reintenta.');
+                }
             }
-
-            // AHORA DETENEMOS LA CÁMARA
-            stopCamera();
-
-            // CONTINUAMOS CON LOS DATOS LENTOS (GPS, HORA)
-            setStatusMessage('Obteniendo ubicación y hora...');
-
-            // 1. Get Location
-            const position = await new Promise((resolve, reject) => {
-                navigator.geolocation.getCurrentPosition(resolve, reject, {
-                    enableHighAccuracy: true,
-                    timeout: 8000, // Aumentado timeout para móviles lentos
-                    maximumAge: 0
-                });
-            });
 
             const { latitude, longitude } = position.coords;
 
-            // 2. Get Time
-            const serverTime = await fetchServerTime();
-
+            // 2. Obtener dirección con timeout corto para no bloquear
             setStatusMessage('Obteniendo dirección...');
-
-            // 3. Get Address
-            const address = await fetchLocationName(latitude, longitude);
+            
+            // Creamos un timeout para la dirección
+            const addressPromise = fetchLocationName(latitude, longitude);
+            const timeoutPromise = new Promise(resolve => setTimeout(() => resolve("Obteniendo dirección..."), 3000));
+            const address = await Promise.race([addressPromise, timeoutPromise]);
 
             setStatusMessage('Procesando marca de agua...');
 
-            // 4. Watermark
+            // 3. Marca de Agua
             const watermarkedImage = await addWatermarkToImage(imageSrc, {
                 employeeId: currentUser.email,
                 timestamp: serverTime,
@@ -526,7 +694,7 @@ export default function Dashboard() {
                 mode: mode
             });
 
-            // STORE DATA FOR PREVIEW, DONT SAVE YET
+            // STORE DATA FOR PREVIEW
             const now = new Date();
             const dateStr = now.toLocaleDateString('es-ES');
             const timeStr = now.toLocaleTimeString('es-ES');
@@ -543,7 +711,9 @@ export default function Dashboard() {
                     fecha: dateStr,
                     hora: timeStr,
                     localidad: address,
-                    timestamp: serverTimestamp()
+                    timestamp: serverTimestamp(),
+                    latitud: latitude,
+                    longitud: longitude
                 }
             });
 
@@ -649,32 +819,65 @@ export default function Dashboard() {
             return;
         }
 
-        const saved = await saveRecord();
-        if (!saved) return;
-
-        // ¿Debemos guardar la foto en Storage?
         const isIncidente = mode === 'incident';
         const savePhoto = isIncidente ? storageSettings.storage_saveIncidentes : storageSettings.storage_saveAsistencia;
 
-        if (savePhoto) {
-            uploadPhoto(
-                capturedData.image,
-                isIncidente ? 'incidente' : capturedData.metadata.tipo,
-                capturedData.metadata.usuario,
-                capturedData.metadata.fecha,
-                capturedData.metadata.hora,
-            ).catch(err => console.error('Storage upload failed:', err));
-        } else {
-            console.log('Almacenamiento de foto desactivado por configuración.');
+        try {
+            // USAR TIMEOUT DE 3s PARA FIRESTORE: Si no responde, forzar offline
+            const saveTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error("Firebase Timeout")), 3000));
+            const saved = await Promise.race([saveRecord(), saveTimeout]);
+            
+            if (!saved) throw new Error("Firestore save failed");
+
+            if (savePhoto) {
+                uploadPhoto(
+                    capturedData.image,
+                    isIncidente ? 'incidente' : capturedData.metadata.tipo,
+                    capturedData.metadata.usuario,
+                    capturedData.metadata.fecha,
+                    capturedData.metadata.hora,
+                ).catch(err => {
+                    console.warn('Storage upload failed, will be retried if possible:', err);
+                });
+            }
+        } catch (err) {
+            console.warn('Forcing Offline Storage due to network/timeout:', err);
+            // Guardar en IndexedDB de forma silenciosa
+            await saveOfflineRecord({
+                image: capturedData.image,
+                metadata: {
+                    ...capturedData.metadata,
+                    descripcion: mode === 'incident' ? incidentDescription.trim() : null
+                },
+                mode: mode,
+                savePhoto: savePhoto,
+                latitude: capturedData.metadata.latitud,
+                longitude: capturedData.metadata.longitud
+            });
         }
 
         await shareImage();
 
         setStep('success');
         setStatusMessage('¡Registro Exitoso!');
+
+        const tipoActual = mode === 'exit' ? 'Salida' : mode === 'entry' ? 'Entrada' : null;
+        if (tipoActual) {
+            setAllowedActions(tipoActual === 'Entrada' 
+                ? { entry: false, exit: true } 
+                : { entry: true, exit: false });
+            // Guardar en localStorage como backup específico por usuario
+            localStorage.setItem(`lastAttendanceType_${currentUser.email}`, tipoActual);
+            localStorage.setItem(`lastAttendanceTime_${currentUser.email}`, Date.now().toString());
+        }
+        
+        // REGRESO RÁPIDO: Bajado a 2 segundos
         setTimeout(() => {
-            logout();
-        }, 3000);
+            setStep('idle');
+            setMode(null);
+            setCapturedData(null);
+            setIncidentDescription('');
+        }, 2000);
     };
 
     return (
@@ -779,6 +982,7 @@ export default function Dashboard() {
                 )}
 
                 {step === 'success' && <SuccessView />}
+                <SyncManager />
             </div>
             {/* Version Indicator */}
             <div className="p-2 text-center flex flex-col items-center gap-1 opacity-50">

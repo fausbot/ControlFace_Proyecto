@@ -105,6 +105,12 @@ export default function Informes() {
 
     const loadInitialData = async () => {
         setLoading(true);
+        
+        // Timeout de seguridad para no bloquearse offline
+        const timer = setTimeout(() => {
+            setLoading(false);
+        }, 5000);
+
         try {
             // Cargar logs para exportación
             const logs = await getAllAttendanceLogs();
@@ -125,6 +131,7 @@ export default function Informes() {
         } catch (err) {
             console.error(err);
         } finally {
+            clearTimeout(timer);
             setLoading(false);
         }
     };
@@ -273,19 +280,31 @@ export default function Informes() {
             });
 
             const shifts = [];
-            Object.entries(byUser).forEach(([email, records]) => {
+            // Ordenamos las llaves de byUser (emails) alfabéticamente
+            const sortedEmails = Object.keys(byUser).sort();
+
+            sortedEmails.forEach(email => {
+                const records = byUser[email];
+                // Usamos los registros en orden ASC (ya vienen así del sort de línea 262)
+                // para emparejar Entrada seguida de su Salida cronológica.
+                const chronoRecords = [...records];
+                
                 let pendingEntry = null;
-                records.forEach(rec => {
+                const userShifts = [];
+                chronoRecords.forEach(rec => {
                     if (rec.tipo === 'Entrada') {
-                        if (pendingEntry) shifts.push({ entry: pendingEntry, exit: null, email });
+                        if (pendingEntry) userShifts.push({ entry: pendingEntry, exit: null, email });
                         pendingEntry = rec;
                     } else if (rec.tipo === 'Salida') {
-                        if (pendingEntry) { shifts.push({ entry: pendingEntry, exit: rec, email }); pendingEntry = null; }
-                        else shifts.push({ entry: null, exit: rec, email });
+                        if (pendingEntry) { userShifts.push({ entry: pendingEntry, exit: rec, email }); pendingEntry = null; }
+                        else userShifts.push({ entry: null, exit: rec, email });
                     }
                 });
-                if (pendingEntry) shifts.push({ entry: pendingEntry, exit: null, email });
-            });
+                if (pendingEntry) userShifts.push({ entry: pendingEntry, exit: null, email });
+                
+                // Invertimos los turnos del usuario para que el más reciente esté arriba
+                shifts.push(...userShifts.reverse());
+            });;
 
             let headers = [];
             let rows = [];
@@ -312,8 +331,8 @@ export default function Informes() {
                     }
                     return [
                         email, emp.firstName, emp.lastName, dia,
-                        entry?.fecha || '-', entry?.hora || '-', entry?.localidad || '-',
-                        exit?.fecha || '-', exit?.hora || '-', exit?.localidad || '-',
+                        entry?.fecha || '-', entry?.hora || '-', (entry?.localidad || entry?.ubicacion) || '-',
+                        exit?.fecha || '-', exit?.hora || '-', (exit?.localidad || exit?.ubicacion) || '-',
                         lunch, horasStr
                     ];
                 });
@@ -384,8 +403,19 @@ export default function Informes() {
     const exportIncidentsToCSV = async () => {
         setExportingIncidents(true);
         try {
-            const snap = await getDocs(query(collection(db, 'incidents'), orderBy('timestamp', 'asc')));
+            const snap = await getDocs(collection(db, 'incidents')); // Sin orderBy para evitar error de índice
             let incidents = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+            // Ordenamiento por Usuario(A-Z) y luego Fecha(Desc)
+            incidents.sort((a, b) => {
+                const userA = (a.usuario || '').toLowerCase();
+                const userB = (b.usuario || '').toLowerCase();
+                if (userA !== userB) return userA.localeCompare(userB);
+
+                const timeA = a.timestamp ? (a.timestamp.toMillis ? a.timestamp.toMillis() : new Date(a.timestamp).getTime()) : 0;
+                const timeB = b.timestamp ? (b.timestamp.toMillis ? b.timestamp.toMillis() : new Date(b.timestamp).getTime()) : 0;
+                return timeB - timeA;
+            });
 
             if (incidentStartDate || incidentEndDate) {
                 incidents = incidents.filter(inc => {
@@ -404,7 +434,7 @@ export default function Informes() {
             if (incidents.length === 0) { alert('No hay novedades.'); return; }
 
             const headers = ['Usuario', 'Fecha', 'Hora', 'Localidad', 'Descripcion'];
-            const rows = incidents.map(inc => [inc.usuario || '', inc.fecha || '', inc.hora || '', inc.localidad || '', inc.descripcion || '']);
+            const rows = incidents.map(inc => [inc.usuario || '', inc.fecha || '', inc.hora || '', inc.localidad || inc.ubicacion || '', inc.descripcion || '']);
             const ts = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
             if (exportFormatIncidents === 'xlsx') {
                 exportToExcelHTML(`novedades_${ts}.xlsx`, headers, rows);

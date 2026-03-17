@@ -29,11 +29,12 @@ const LoadingFallback = () => (
 );
 
 function App() {
+  const { currentUser } = useAuth();
   return (
     <Suspense fallback={<LoadingFallback />}>
       <SubscriptionGuard>
         <Routes>
-          <Route path="/login" element={<Login />} />
+          <Route path="/login" element={currentUser ? <Navigate to="/dashboard" /> : <Login />} />
           <Route path="/registro" element={<Register />} />
           <Route path="/dashboard" element={
             <PrivateRoute>
@@ -44,7 +45,7 @@ function App() {
           <Route path="/informes" element={<Informes />} />
           <Route path="/cambiar-clave-admin" element={<ChangeAdminPassword />} />
           <Route path="/configuracion" element={<Configuracion />} />
-          <Route path="/" element={<Navigate to="/login" />} />
+          <Route path="/" element={<Navigate to={currentUser ? "/dashboard" : "/login"} />} />
         </Routes>
       </SubscriptionGuard>
     </Suspense>

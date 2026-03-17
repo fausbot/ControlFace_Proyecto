@@ -6,6 +6,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 import { fetchLicenseStatus, applyNewLicenseToken } from '../services/licenseService';
+import { syncDatabaseWithStorage } from '../services/storageService';
 
 // ─── Definición de todos los campos configurables ────────────────────────────
 const FIELD_GROUPS = [
@@ -63,6 +64,7 @@ const DEFAULT_CONFIG = {
     ui_labelIncident: "Reportar Novedad",
     // defaults seguridad
     security_liveness: true,
+    security_faceRecognition: true,
     security_faceThreshold: 0.63,
 };
 
@@ -71,6 +73,8 @@ export default function Configuracion() {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [savedOk, setSavedOk] = useState(false);
+    const [syncing, setSyncing] = useState(false);
+    const [syncProgress, setSyncProgress] = useState(null);
     const [licenseStatus, setLicenseStatus] = useState(null);
     const [licenseInput, setLicenseInput] = useState('');
     const [savingLicense, setSavingLicense] = useState(false);
@@ -157,6 +161,24 @@ export default function Configuracion() {
             setLicenseError(error.message || "Token inválido.");
         } finally {
             setSavingLicense(false);
+        }
+    };
+
+    const handleSyncDatabase = async () => {
+        if (!window.confirm("Esta operación revisará todos los registros en la base de datos y borrará aquellos cuya foto haya sido eliminada de Storage (por ejemplo, borrado manual). Puede tardar unos minutos dependiendo de la cantidad de fotos.\n\n¿Deseas continuar?")) return;
+        
+        setSyncing(true);
+        setSyncProgress({ checked: 0, total: 0, deleted: 0 });
+        try {
+            const result = await syncDatabaseWithStorage((checked, total, deleted) => {
+                setSyncProgress({ checked, total, deleted });
+            });
+            alert(`Sincronización completada.\n\n- Registros revisados: ${result.total}\n- Registros eliminados (huérfanos): ${result.deleted}`);
+        } catch (err) {
+            alert("Error durante la sincronización: " + err.message);
+        } finally {
+            setSyncing(false);
+            setSyncProgress(null);
         }
     };
 
@@ -312,6 +334,39 @@ export default function Configuracion() {
                             </div>
                         </div>
                     </div>
+
+                    {/* SINCRONIZACIÓN MANUAL */}
+                    <div className="mt-6 pt-6 border-t border-blue-100">
+                        <h3 className="font-bold text-blue-700 mb-2">Limpieza Manual de Base de Datos</h3>
+                        <p className="text-xs text-gray-600 mb-4">Si borraste fotos manualmente directamente desde la consola de Firebase Storage, usa esta herramienta para limpiar los registros "fantasma" que quedaron en la base de datos.</p>
+                        
+                        {syncing ? (
+                            <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg flex flex-col gap-2">
+                                <div className="flex justify-between text-xs font-bold text-blue-800">
+                                    <span>Revisando fotos para sincronizar...</span>
+                                    <span>{syncProgress?.checked || 0} / {syncProgress?.total || 0}</span>
+                                </div>
+                                <div className="w-full bg-blue-200 rounded-full h-2.5 overflow-hidden">
+                                    <div 
+                                        className="bg-blue-600 h-2.5 rounded-full transition-all duration-300" 
+                                        style={{ width: `${syncProgress?.total ? Math.round((syncProgress.checked / syncProgress.total) * 100) : 0}%` }}
+                                    ></div>
+                                </div>
+                                <div className="text-[11px] text-blue-700 flex justify-between font-medium">
+                                    <span>No cierre esta ventana</span>
+                                    {syncProgress?.deleted > 0 && <span className="text-red-600">Archivos fantasma encontrados y borrados: {syncProgress?.deleted}</span>}
+                                </div>
+                            </div>
+                        ) : (
+                            <button
+                                onClick={handleSyncDatabase}
+                                className="px-5 py-2.5 bg-white border-2 border-blue-500 text-blue-600 font-bold rounded-lg hover:bg-blue-50 transition text-sm flex items-center gap-2"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 21v-5h5"/></svg>
+                                Limpiar Registros Fantasma
+                            </button>
+                        )}
+                    </div>
                 </div>
 
                 {/* ─── GESTIÓN DE CÁLCULO DE HORAS ─── */}
@@ -448,8 +503,32 @@ export default function Configuracion() {
                             </button>
                             <p className="text-xs text-emerald-700 opacity-80 leading-tight">
                                 {config.security_liveness !== false
-                                    ? "Activo: Se pedirá girar la cabeza para evitar el uso de fotos falsas."
-                                    : "⚠️ Inactivo: Los empleados podrán registrar la asistencia tomando la foto manualmente sin comprobar movimiento."}
+                                    ? "Activo: Se pide girar la cabeza para evitar el uso de fotos falsas."
+                                    : "⚠️ Inactive: Los empleados pueden registrar sin comprobar movimiento."}
+                            </p>
+                        </div>
+
+                        {/* FACE RECOGNITION */}
+                        <div className="space-y-3 bg-purple-50 p-4 rounded-xl border border-purple-100">
+                            <h3 className="font-bold text-purple-700">Reconocimiento Facial</h3>
+                            <button
+                                onClick={() => toggle('security_faceRecognition')}
+                                className={`w-full flex items-center justify-between px-4 py-3 rounded-lg border-2 text-left transition font-medium text-sm
+                                    ${config.security_faceRecognition !== false
+                                        ? 'border-purple-500 bg-white text-purple-800'
+                                        : 'border-gray-300 bg-gray-100 text-gray-400 opacity-60'}`}
+                            >
+                                <span className="flex items-center gap-2">
+                                    {config.security_faceRecognition !== false
+                                        ? <CheckSquare size={20} className="text-purple-600" />
+                                        : <Square size={20} />}
+                                    Verificar identidad del rostro
+                                </span>
+                            </button>
+                            <p className="text-xs text-purple-700 opacity-80 leading-tight">
+                                {config.security_faceRecognition !== false
+                                    ? "Activo: Compara el rostro con la foto registrada para evitar suplantación."
+                                    : "⚠️ Inactive: Solo verifica que haya un rostro presente."}
                             </p>
                         </div>
                     </div>

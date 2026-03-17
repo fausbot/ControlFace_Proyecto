@@ -32,7 +32,7 @@
         ]
       },
       {
-        "source": "**/*.@(html|sw.js|service-worker.js)",
+        "source": "**/*.@(html|sw.js|service-worker.js|manifest.webmanifest)",
         "headers": [
           {
             "key": "Cache-Control",

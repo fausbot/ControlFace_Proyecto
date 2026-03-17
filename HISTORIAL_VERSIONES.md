@@ -2,14 +2,21 @@
 
 Esta guía documenta la evolución del sistema, detallando las características principales de cada versión desde la 1.0.0 hasta la 1.6.7 actual.
 
-## Versión 1.6.19 (Actual) ✅
-**Fecha:** 04/03/2026
+## Versión 1.6.99 (Actual) ✅
+**Fecha:** 17/03/2026
 **Estado:** Estable - Producción
 
-### Mejoras de UI/UX y Estabilidad
-- **Refinamiento de Interfaz**: Actualización de colores, estados de carga y transiciones en las pantallas de Login, Registro y Configuración.
-- **Manejo de Errores**: Mejora en la visualización de mensajes de error críticos para una mejor experiencia de usuario.
-- **Estandarización de Versión**: Sincronización de versión global en `package.json`, `.env` e historial.
+### Servicio Offline y Multi-Empleado
+- **Servicio Offline Transparente**: Mejora en la sincronización automática y gestión de registros sin conexión mediante IndexedDB y localStorage.
+- **Soporte Multi-Empleado**: Identificación inteligente de última entrada o salida para múltiples empleados en un solo dispositivo, utilizando el correo electrónico como identificador único para la persistencia del estado.
+- **Sincronización Inteligente**: Reintento automático de subida de datos y fotos al detectar recuperación de conexión a internet.
+- **Optimización de Estado**: El sistema recuerda si el último registro fue entrada o salida por cada usuario, evitando estados inconsistentes tras recargas de página o actualizaciones.
+
+---
+
+## Versión 1.6.19 ✅
+**Fecha:** 04/03/2026
+**Estado:** Estable - Histórico
 
 ---
 

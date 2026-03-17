@@ -35,7 +35,7 @@ const PHOTO_QUALITY = parseFloat(import.meta.env.VITE_PHOTO_QUALITY || '0.75');
 const sanitizeEmail = (email) =>
     (email || 'sin-email').replace('@', '_').replace(/\./g, '-');
 
-const buildPath = (tipo, year, month, email, fecha, hora) => {
+export const buildPath = (tipo, year, month, email, fecha, hora) => {
     // Normalizar carpeta: Entrada/Salida/asistencia van a 'asistencia'
     const isAsistencia = tipo === 'asistencia' || tipo === 'Entrada' || tipo === 'Salida';
     const folder = isAsistencia ? 'asistencia' : 'incidentes';
@@ -409,4 +409,94 @@ export const cleanOldPhotos = async (retentionOpts) => {
 
     console.log(`🧹 Limpieza completada. Fotos eliminadas: ${deletedCount}`);
     return deletedCount;
+};
+
+// ─── Sincronización Manual (Borrar registros de Firestore si la foto en Storage no existe) ───
+export const syncDatabaseWithStorage = async (onProgress) => {
+    console.log("🔄 Iniciando sincronización de base de datos con Storage...");
+    let checked = 0;
+    let deleted = 0;
+    let total = 0;
+
+    // ── Primera pasada: limpiar registros fantasma de 'fotos' ──
+    try {
+        const snap = await getDocs(collection(db, 'fotos'));
+        total += snap.size;
+
+        const chunks = [];
+        for (let i = 0; i < snap.docs.length; i += 10) {
+            chunks.push(snap.docs.slice(i, i + 10));
+        }
+
+        for (const chunk of chunks) {
+            await Promise.all(chunk.map(async (docSnap) => {
+                const data = docSnap.data();
+                if (data.path) {
+                    const fileRef = ref(storage, data.path);
+                    try {
+                        await getDownloadURL(fileRef);
+                    } catch (err) {
+                        const isNotFound = err.code === 'storage/object-not-found' ||
+                            err.message.includes('not found') || err.message.includes('403') || err.message.includes('404');
+                        if (isNotFound) {
+                            try {
+                                await deleteDoc(doc(db, 'fotos', docSnap.id));
+                                deleted++;
+                            } catch (e) {
+                                console.error(`No se pudo borrar el doc ${docSnap.id}:`, e);
+                            }
+                        }
+                    }
+                }
+                checked++;
+            }));
+            if (onProgress) onProgress(checked, total, deleted);
+        }
+    } catch (err) {
+        console.error("❌ Error en limpieza de fotos:", err);
+    }
+
+    // ── Segunda pasada: limpiar registros fantasma de 'incidents' ──
+    try {
+        const snapInc = await getDocs(collection(db, 'incidents'));
+        total += snapInc.size;
+
+        const chunksInc = [];
+        for (let i = 0; i < snapInc.docs.length; i += 10) {
+            chunksInc.push(snapInc.docs.slice(i, i + 10));
+        }
+
+        for (const chunk of chunksInc) {
+            await Promise.all(chunk.map(async (docSnap) => {
+                const data = docSnap.data();
+                if (data.fotoURL) {
+                    try {
+                        const urlPath = decodeURIComponent(data.fotoURL.split('/o/')[1]?.split('?')[0] || '');
+                        if (urlPath) {
+                            const fileRef = ref(storage, urlPath);
+                            await getDownloadURL(fileRef);
+                        }
+                    } catch (err) {
+                        const isNotFound = err.code === 'storage/object-not-found' ||
+                            err.message.includes('not found') || err.message.includes('403') || err.message.includes('404');
+                        if (isNotFound) {
+                            try {
+                                await deleteDoc(doc(db, 'incidents', docSnap.id));
+                                deleted++;
+                            } catch (e) {
+                                console.error(`No se pudo borrar el incidente ${docSnap.id}:`, e);
+                            }
+                        }
+                    }
+                }
+                checked++;
+            }));
+            if (onProgress) onProgress(checked, total, deleted);
+        }
+    } catch (err) {
+        console.error("❌ Error en limpieza de incidentes:", err);
+    }
+
+    console.log(`✅ Sincronización completada. Revisados: ${checked}. Eliminados: ${deleted}.`);
+    return { total: checked, deleted };
 };

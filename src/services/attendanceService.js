@@ -16,27 +16,51 @@ import {
 
 const COLLECTION = 'attendance';
 
+// Helper robusto para obtener milisegundos de cualquier tipo de dato de tiempo
+const getMillis = (ts) => {
+    if (!ts) return 0;
+    if (typeof ts.toMillis === 'function') return ts.toMillis();
+    if (ts instanceof Date) return ts.getTime();
+    if (typeof ts === 'number') return ts;
+    if (typeof ts === 'string') return new Date(ts).getTime();
+    return Date.now();
+};
+
+// Helper para convertir fecha/hora a milisegundos
+const getMillisFromDateTime = (fecha, hora) => {
+    if (!fecha || !hora) return 0;
+    try {
+        const [d, m, y] = fecha.split('/');
+        const [h, min, s] = hora.split(':');
+        return new Date(y, m - 1, d, h, min, s).getTime();
+    } catch {
+        return 0;
+    }
+};
+
 // ─────────────────────────────────────────────
 // Escucha cambios en TIEMPO REAL de la colección attendance
 // ─────────────────────────────────────────────
 export const subscribeToAttendanceLogs = (callback) => {
-    const q = query(collection(db, COLLECTION), orderBy('timestamp', 'desc'));
+    // Quitamos el orderBy de Firestore para evitar errores de índices y permitir registros offline/viejos
+    const q = query(collection(db, COLLECTION));
 
     return onSnapshot(q, (snapshot) => {
         const allData = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
 
-        // Nota: Seguimos ordenando en cliente para aquellos registros 
-        // que no tienen timestamp (ej: algunos manuales antiguos)
+        // Ordenamos por fecha/hora DESC (más reciente primero)
         allData.sort((a, b) => {
-            if (a.timestamp && b.timestamp) {
-                return b.timestamp.toMillis() - a.timestamp.toMillis();
-            }
-            if (a.timestamp) return -1;
-            if (b.timestamp) return 1;
+            // 1. Usar fecha + hora como fuente principal de verdad
+            const timeA = getMillisFromDateTime(a.fecha, a.hora);
+            const timeB = getMillisFromDateTime(b.fecha, b.hora);
+            if (timeA !== timeB) return timeB - timeA;
 
-            const dateTimeA = (a.fecha || '') + ' ' + (a.hora || '');
-            const dateTimeB = (b.fecha || '') + ' ' + (b.hora || '');
-            return dateTimeB.localeCompare(dateTimeA);
+            // 2. Fallback: usar timestamp de Firestore
+            const tsA = getMillis(a.timestamp);
+            const tsB = getMillis(b.timestamp);
+            if (tsA !== tsB) return tsB - tsA;
+
+            return 0;
         });
 
         callback(allData);
@@ -68,16 +92,19 @@ export const getAllAttendanceLogs = async () => {
 
     const allData = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
 
+    // Ordenar por fecha/hora DESC (más reciente primero)
     allData.sort((a, b) => {
-        if (a.timestamp && b.timestamp) {
-            return b.timestamp.toMillis() - a.timestamp.toMillis();
-        }
-        if (a.timestamp) return -1;
-        if (b.timestamp) return 1;
+        // 1. Usar fecha + hora como fuente principal
+        const timeA = getMillisFromDateTime(a.fecha, a.hora);
+        const timeB = getMillisFromDateTime(b.fecha, b.hora);
+        if (timeA !== timeB) return timeB - timeA;
 
-        const dateTimeA = (a.fecha || '') + ' ' + (a.hora || '');
-        const dateTimeB = (b.fecha || '') + ' ' + (b.hora || '');
-        return dateTimeB.localeCompare(dateTimeA);
+        // 2. Fallback: usar timestamp de Firestore
+        const tsA = getMillis(a.timestamp);
+        const tsB = getMillis(b.timestamp);
+        if (tsA !== tsB) return tsB - tsA;
+
+        return 0;
     });
 
     return allData;
