@@ -36,9 +36,10 @@ const sanitizeEmail = (email) =>
     (email || 'sin-email').replace('@', '_').replace(/\./g, '-');
 
 export const buildPath = (tipo, year, month, email, fecha, hora) => {
-    // Normalizar carpeta: Entrada/Salida/asistencia van a 'asistencia'
+    // Normalizar carpeta: Entrada/Salida/asistencia van a 'asistencia', Visita a 'visitas'
     const isAsistencia = tipo === 'asistencia' || tipo === 'Entrada' || tipo === 'Salida';
-    const folder = isAsistencia ? 'asistencia' : 'incidentes';
+    const isVisita = tipo === 'Visita';
+    const folder = isAsistencia ? 'asistencia' : (isVisita ? 'visitas' : 'incidentes');
 
     const safeEmail = sanitizeEmail(email);
     const safeDate = (fecha || '').replace(/\//g, '-');
@@ -92,11 +93,12 @@ export const uploadPhoto = async (imageDataUrl, tipo, email, fecha, hora) => {
 
         // Guardar metadatos en Firestore
         const isAsistencia = tipo === 'asistencia' || tipo === 'Entrada' || tipo === 'Salida';
-        const carpeta = isAsistencia ? 'asistencia' : 'incidentes';
+        const isVisita = tipo === 'Visita';
+        const carpeta = isAsistencia ? 'asistencia' : (isVisita ? 'visitas' : 'incidentes');
 
         try {
             const docRef = await addDoc(collection(db, 'fotos'), {
-                tipo: isAsistencia ? 'asistencia' : 'incidente',
+                tipo: isAsistencia ? 'asistencia' : (isVisita ? 'visita' : 'incidente'),
                 tipoOriginal: tipo,
                 email, fecha, hora, year, month, carpeta,
                 path: storagePath,
@@ -192,6 +194,9 @@ export const listPhotosByFilter = async ({ tipo, desde, hasta, filtroUsuario }) 
             }
             if (tipo === 'incidente' || tipo === 'ambos') {
                 foldersToSearch.push(`incidentes/${year}/${month}`);
+            }
+            if (tipo === 'visitas' || tipo === 'ambos') {
+                foldersToSearch.push(`visitas/${year}/${month}`);
             }
             currentMonth.setMonth(currentMonth.getMonth() + 1);
         }
@@ -352,17 +357,17 @@ export const downloadPhotosAsZip = async (fileList, onProgress) => {
 
 // ─── Limpieza Automática de Fotos Antiguas ────────────────────────────────────
 export const cleanOldPhotos = async (retentionOpts) => {
-    // retenOpts = { asistencia: meses, incidentes: meses }
-    const { asistencia = 3, incidentes = 18 } = retentionOpts;
+    // retenOpts = { asistencia: dias, incidentes: dias, visitas: dias }
+    const { asistencia = 90, incidentes = 540, visitas = 30 } = retentionOpts;
 
-    console.log(`🧹 Iniciando limpieza de Storage. Retención: Asistencia ${asistencia}m, Incidentes ${incidentes}m`);
+    console.log(`🧹 Iniciando limpieza de Storage. Retención: Asistencia ${asistencia}d, Incidentes ${incidentes}d, Visitas ${visitas}d`);
     let deletedCount = 0;
 
-    const deleteOldInFolder = async (folder, meses) => {
+    const deleteOldInFolder = async (folder, dias) => {
         try {
             // Calculamos fecha límite
             const limitDate = new Date();
-            limitDate.setMonth(limitDate.getMonth() - meses);
+            limitDate.setDate(limitDate.getDate() - dias);
             // Firebase Storage no permite queries de fecha.
             // PERO guardamos los datos en Firestore en la colección 'fotos'.
             // Consultaremos Firestore para encontrar las fotos viejas, las borraremos de Storage y de Firestore.
@@ -406,6 +411,7 @@ export const cleanOldPhotos = async (retentionOpts) => {
 
     await deleteOldInFolder('asistencia', asistencia);
     await deleteOldInFolder('incidentes', incidentes);
+    await deleteOldInFolder('visitas', visitas);
 
     console.log(`🧹 Limpieza completada. Fotos eliminadas: ${deletedCount}`);
     return deletedCount;

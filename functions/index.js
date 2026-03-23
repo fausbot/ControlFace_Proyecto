@@ -368,10 +368,86 @@ exports.createEmployeeSecure = functions.https.onCall(async (data) => {
         }
 
         // Re-lanzar los errores controlados de Firebase Functions
-        if (error instanceof functions.https.HttpsError) {
-            throw error;
+        throw new functions.https.HttpsError("internal", "Logica de creación fallida: " + error.message);
+    }
+});
+
+/**
+ * Tarea Programada: Limpieza Automática de Archivos Fantasma
+ * Se ejecuta el día 1 de cada mes a la medianoche (Aprox cada 30 días).
+ * Elimina documentos de Firestore en 'fotos' e 'incidents' que no tienen una foto real
+ * asociada en Firebase Storage (orphaned data).
+ */
+exports.scheduledPhantomCleanup = functions.pubsub.schedule('0 0 1 * *').timeZone('America/Bogota').onRun(async (context) => {
+    const db = admin.firestore();
+    const bucket = admin.storage().bucket();
+    let deletedFotos = 0;
+    let deletedIncidents = 0;
+
+    console.log("Iniciando Limpieza Programada de Registros Fantasma (Cada 30 días)");
+
+    try {
+        // 1. Limpiar colección 'fotos'
+        const fotosSnap = await db.collection('fotos').get();
+        const batch = db.batch();
+        let batchCount = 0;
+
+        for (const docSnap of fotosSnap.docs) {
+            const data = docSnap.data();
+            if (data.path) {
+                const file = bucket.file(data.path);
+                const [exists] = await file.exists();
+                if (!exists) {
+                    batch.delete(docSnap.ref);
+                    deletedFotos++;
+                    batchCount++;
+                }
+            }
+            if (batchCount > 400) {
+                await batch.commit();
+                batchCount = 0;
+            }
+        }
+        if (batchCount > 0) {
+            await batch.commit();
+            console.log("Batch de fotos procesado");
         }
 
-        throw new functions.https.HttpsError("internal", "Logica de creación fallida: " + error.message);
+        // 2. Limpiar colección 'incidents' (novedades)
+        const incSnap = await db.collection('incidents').get();
+        const batchInc = db.batch();
+        let batchIncCount = 0;
+
+        for (const docSnap of incSnap.docs) {
+            const data = docSnap.data();
+            if (data.fotoURL) {
+                try {
+                    // Extraer path de URL
+                    const urlPath = decodeURIComponent(data.fotoURL.split('/o/')[1]?.split('?')[0] || '');
+                    if (urlPath) {
+                        const file = bucket.file(urlPath);
+                        const [exists] = await file.exists();
+                        if (!exists) {
+                            batchInc.delete(docSnap.ref);
+                            deletedIncidents++;
+                            batchIncCount++;
+                        }
+                    }
+                } catch(e) { /* ignorar errores de parseo */ }
+            }
+            if (batchIncCount > 400) {
+                await batchInc.commit();
+                batchIncCount = 0;
+            }
+        }
+        if (batchIncCount > 0) {
+            await batchInc.commit();
+        }
+
+        console.log(`✅ Limpieza Fantasma finalizada. Fotos huérfanas borradas: ${deletedFotos}. Novedades huérfanas borradas: ${deletedIncidents}.`);
+        return null;
+    } catch (err) {
+        console.error("Error en Limpieza Programada:", err);
+        return null;
     }
 });

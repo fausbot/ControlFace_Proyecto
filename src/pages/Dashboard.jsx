@@ -52,7 +52,8 @@ export default function Dashboard() {
         storage_saveAsistencia: true,
         storage_saveIncidentes: true,
         security_liveness: true,
-        security_faceRecognition: true
+        security_faceRecognition: true,
+        ruta_active: false
     });
     const [isLicenseValid, setIsLicenseValid] = useState(true);
     const [buttonLabels, setButtonLabels] = useState({
@@ -122,7 +123,8 @@ export default function Dashboard() {
                         storage_saveAsistencia: d.storage_saveAsistencia !== false,
                         storage_saveIncidentes: d.storage_saveIncidentes !== false,
                         security_liveness: d.security_liveness !== false,
-                        security_faceRecognition: d.security_faceRecognition !== false
+                        security_faceRecognition: d.security_faceRecognition !== false,
+                        ruta_active: d.ruta_active === true
                     });
                     setButtonLabels({
                         entry: d.ui_labelEntry || "Registrar Entrada",
@@ -921,14 +923,30 @@ export default function Dashboard() {
                         </div>
 
                         {isLicenseValid ? (
-                            <React.Fragment>
+                            <div className="w-full flex flex-col gap-4">
                                 <ActionButtons
                                     loadingState={loadingState}
                                     allowedActions={allowedActions}
                                     buttonLabels={buttonLabels}
                                     handleStart={handleStart}
                                 />
-                            </React.Fragment>
+                                
+                                {/* BOTÓN DE MODO RUTA (Solo visible si está activo en Firebase y el usuario ya marcó entrada) */}
+                                {!loadingState && !allowedActions.entry && storageSettings.ruta_active && (
+                                    <div className="pt-2">
+                                        <button
+                                            onClick={() => navigate('/ruta')}
+                                            className="w-full py-4 px-6 bg-gradient-to-r from-teal-500 to-emerald-600 text-white font-bold rounded-2xl shadow-xl shadow-teal-500/30 hover:shadow-2xl hover:scale-[1.02] active:scale-95 transition-all outline-none border-b-4 border-teal-700"
+                                        >
+                                            <div className="flex items-center justify-center gap-3">
+                                                <MapPin size={26} className="animate-bounce" />
+                                                <span className="text-xl tracking-wide">Modo Transporte / Cliente</span>
+                                            </div>
+                                        </button>
+                                        <p className="text-center text-white/80 text-xs mt-2 font-medium">Usa este modo si saldrás de las instalaciones base.</p>
+                                    </div>
+                                )}
+                            </div>
                         ) : (
                             <div className="col-span-2 bg-red-50 border-2 border-red-500 rounded-2xl p-6 text-center shadow-2xl animate-pulse">
                                 <TriangleAlert className="w-12 h-12 text-red-500 mx-auto mb-3" />

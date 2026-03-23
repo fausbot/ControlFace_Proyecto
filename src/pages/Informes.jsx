@@ -121,10 +121,13 @@ export default function Informes() {
             if (snap.exists()) {
                 const d = snap.data();
                 setStorageConfig({
-                    retentionAsistencia: d.storage_retentionAsistencia ?? 3,
-                    retentionIncidentes: d.storage_retentionIncidentes ?? 18,
+                    retentionAsistencia: d.storage_retentionAsistencia ?? 90,
+                    retentionIncidentes: d.storage_retentionIncidentes ?? 540,
+                    retentionRuta: d.storage_retentionRuta ?? 30,
                     saveAsistencia: d.storage_saveAsistencia !== false,
-                    saveIncidentes: d.storage_saveIncidentes !== false
+                    saveIncidentes: d.storage_saveIncidentes !== false,
+                    saveRuta: d.storage_saveRuta !== false,
+                    ruta_active: d.ruta_active === true
                 });
                 setTimeConfig(d);
             }
@@ -138,13 +141,14 @@ export default function Informes() {
 
     const handleManualCleanup = async () => {
         if (!storageConfig) return;
-        if (!window.confirm(`¿Ejecutar limpieza manual de fotos más antiguas de ${storageConfig.retentionAsistencia} meses(asistencia) y ${storageConfig.retentionIncidentes} meses(incidentes) ? `)) return;
+        if (!window.confirm(`¿Ejecutar limpieza manual de fotos más antiguas de:\n- ${storageConfig.retentionAsistencia} días (Asistencia)\n- ${storageConfig.retentionIncidentes} días (Incidentes)${storageConfig.ruta_active ? `\n- ${storageConfig.retentionRuta} días (Visitas)` : ''}?`)) return;
 
         setCleaningStorage(true);
         try {
             const deleted = await cleanOldPhotos({
                 asistencia: storageConfig.retentionAsistencia,
-                incidentes: storageConfig.retentionIncidentes
+                incidentes: storageConfig.retentionIncidentes,
+                visitas: storageConfig.retentionRuta
             });
             alert(`✅ Limpieza completada.Se liberó espacio de ${deleted} fotos.`);
         } catch (err) {
@@ -309,7 +313,83 @@ export default function Informes() {
             let headers = [];
             let rows = [];
 
-            if (attendanceReportType === 'estandar') {
+            if (attendanceReportType === 'tiempo_efectivo_cliente') {
+                // FETCH VISITAS LOGS ON DEMAND
+                const snap = await getDocs(collection(db, 'visitas'));
+                let visitasLogs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+                // Aplicar filtros de fecha y usuario
+                if (startDate || endDate) {
+                    visitasLogs = filterLogsByDateRange(visitasLogs, startDate, endDate);
+                }
+                if (csvUserFilter.trim()) {
+                    const searchStr = csvUserFilter.trim().toLowerCase();
+                    visitasLogs = visitasLogs.filter(log => (log.usuario || '').toLowerCase().includes(searchStr));
+                }
+                if (visitasLogs.length === 0) { alert('No hay registros de visitas en este rango.'); setExporting(false); return; }
+
+                // SORT and PAIR
+                visitasLogs.sort((a, b) => {
+                    const dateA = parseStringDate(a.fecha, a.hora) || (a.timestamp ? a.timestamp.toDate() : new Date(0));
+                    const dateB = parseStringDate(b.fecha, b.hora) || (b.timestamp ? b.timestamp.toDate() : new Date(0));
+                    return dateA - dateB;
+                });
+
+                const byUserV = {};
+                visitasLogs.forEach(log => {
+                    const key = (log.usuario || '').toLowerCase().trim();
+                    if (!byUserV[key]) byUserV[key] = [];
+                    byUserV[key].push(log);
+                });
+
+                const visitasShifts = [];
+                Object.keys(byUserV).sort().forEach(email => {
+                    const records = byUserV[email];
+                    let pendingEntry = null;
+                    const userShifts = [];
+                    records.forEach(rec => {
+                        if (rec.tipo === 'Llegada Cliente') {
+                            if (pendingEntry) userShifts.push({ entry: pendingEntry, exit: null, email });
+                            pendingEntry = rec;
+                        } else if (rec.tipo === 'Salida Cliente') {
+                            if (pendingEntry) { userShifts.push({ entry: pendingEntry, exit: rec, email }); pendingEntry = null; }
+                            else userShifts.push({ entry: null, exit: rec, email });
+                        }
+                    });
+                    if (pendingEntry) userShifts.push({ entry: pendingEntry, exit: null, email });
+                    visitasShifts.push(...userShifts.reverse());
+                });
+
+                headers = ['Usuario', 'Nombres', 'Apellidos', 'Día', 'F. Llegada Cliente', 'H. Llegada Cliente', 'Localidad Llegada', 'F. Salida Cliente', 'H. Salida Cliente', 'Localidad Salida', 'Observaciones', 'Tiempo Efectivo (Horas)'];
+                rows = visitasShifts.map(({ entry, exit, email }) => {
+                    const emp = employeesMap[email] || { firstName: '', lastName: '' };
+                    let dia = '-';
+                    if (entry?.fecha) {
+                        const d = parseSpanishDate(entry.fecha);
+                        dia = d ? dayFormatter.format(d) : '-';
+                    }
+                    let horasStr = '0.00';
+                    if (entry && exit) {
+                        const start = parseStringDate(entry.fecha, entry.hora);
+                        const end = parseStringDate(exit.fecha, exit.hora);
+                        if (start && end) {
+                            const diffMins = (end - start) / 60000;
+                            horasStr = (diffMins / 60).toFixed(2);
+                        }
+                    }
+                    const obsParts = [];
+                    if (entry?.observacion) obsParts.push(`Llegada: ${entry.observacion}`);
+                    if (exit?.observacion) obsParts.push(`Salida: ${exit.observacion}`);
+
+                    return [
+                        email, emp.firstName, emp.lastName, dia,
+                        entry?.fecha || '-', entry?.hora || '-', (entry?.localidad || entry?.ubicacion) || '-',
+                        exit?.fecha || '-', exit?.hora || '-', (exit?.localidad || exit?.ubicacion) || '-',
+                        obsParts.join(' | ') || '-', horasStr
+                    ];
+                });
+
+            } else if (attendanceReportType === 'estandar') {
                 headers = ['Usuario', 'Nombres', 'Apellidos', 'Dia Entrada', 'Fecha Entrada', 'Hora Entrada', 'Localidad Entrada', 'Fecha Salida', 'Hora Salida', 'Localidad Salida', 'Almuerzo', 'Horas'];
                 rows = shifts.map(({ entry, exit, email }) => {
                     const emp = employeesMap[email] || { firstName: '', lastName: '' };
@@ -515,6 +595,9 @@ export default function Informes() {
                             <option value="ambos">Todo (Asistencia + Novedades)</option>
                             <option value="asistencia">Solo Asistencia</option>
                             <option value="incidentes">Solo Novedades</option>
+                            {storageConfig?.ruta_active && (
+                                <option value="visitas">Solo Visitas en Clientes (Ruta)</option>
+                            )}
                         </select>
                         <input type="text" placeholder="Correo o dominio (opcional)" value={photoFiltroUser} onChange={e => setPhotoFiltroUser(e.target.value)} className="w-full px-4 py-2 border rounded-lg" />
                     </div>
@@ -537,6 +620,9 @@ export default function Informes() {
                             <option value="estandar">Detallado Estándar</option>
                             <option value="detallado_horas">Discriminado por tipos de horas (Colombia)</option>
                             <option value="resumen">Resumen General por Empleado</option>
+                            {storageConfig?.ruta_active && (
+                                <option value="tiempo_efectivo_cliente">Tiempo Efectivo en Cliente (Modo Ruta)</option>
+                            )}
                         </select>
                         <select value={exportFormatAttendance} onChange={e => setExportFormatAttendance(e.target.value)} className="px-4 py-2 border rounded-lg">
                             <option value="csv">CSV</option>

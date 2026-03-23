@@ -12,6 +12,7 @@ const Register = React.lazy(() => import('./pages/Register'));
 const ChangeAdminPassword = React.lazy(() => import('./pages/ChangeAdminPassword'));
 const Configuracion = React.lazy(() => import('./pages/Configuracion'));
 const Informes = React.lazy(() => import('./pages/Informes'));
+const RutaDashboard = React.lazy(() => import('./pages/RutaDashboard'));
 
 function PrivateRoute({ children }) {
   const { currentUser } = useAuth();
@@ -39,6 +40,11 @@ function App() {
           <Route path="/dashboard" element={
             <PrivateRoute>
               <Dashboard />
+            </PrivateRoute>
+          } />
+          <Route path="/ruta" element={
+            <PrivateRoute>
+              <RutaDashboard />
             </PrivateRoute>
           } />
           <Route path="/datos" element={<Datos />} />

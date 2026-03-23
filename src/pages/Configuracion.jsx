@@ -51,8 +51,11 @@ const DEFAULT_CONFIG = {
     ...Object.fromEntries(FIELD_GROUPS.flatMap(g => g.fields.map(f => [f.key, false]))),
     storage_saveAsistencia: true,
     storage_saveIncidentes: true,
+    storage_saveRuta: true,
     storage_retentionAsistencia: 90,
     storage_retentionIncidentes: 540,
+    storage_retentionRuta: 30,
+    ruta_active: false,
     // defaults calculo tiempo
     calc_rounding: false,
     calc_roundingMins: 15,
@@ -264,6 +267,31 @@ export default function Configuracion() {
                     </div>
                 </div>
 
+                {/* ─── GESTIÓN DE MODOS Y FUNCIONALIDADES ─── */}
+                <div className="bg-white rounded-xl shadow-2xl p-6 mb-6 border-l-4 border-rose-500">
+                    <h2 className="text-xl font-bold text-rose-800 mb-2">Modos Adicionales</h2>
+                    <p className="text-sm text-gray-600 mb-4">
+                        Activa o desactiva funcionalidades avanzadas para los empleados en la aplicación.
+                    </p>
+                    <div className="space-y-3 bg-rose-50 p-4 rounded-xl border border-rose-100">
+                        <button
+                            onClick={() => toggle('ruta_active')}
+                            className={`w-full flex items-center justify-between px-4 py-3 rounded-lg border-2 text-left transition font-medium text-sm
+                                ${config.ruta_active
+                                    ? 'border-rose-500 bg-white text-rose-800'
+                                    : 'border-gray-300 bg-gray-100 text-gray-400 opacity-60'}`}
+                        >
+                            <span className="flex items-center gap-2">
+                                {config.ruta_active ? <CheckSquare size={20} className="text-rose-600" /> : <Square size={20} />}
+                                Habilitar "Modo Ruta / Visitas a Clientes"
+                            </span>
+                        </button>
+                        <p className="text-xs text-rose-700 opacity-80 leading-tight">
+                            Si está activo, los empleados que ya estén en turno verán un botón para registrar operaciones fuera de la base en clientes.
+                        </p>
+                    </div>
+                </div>
+
                 {/* ─── GESTIÓN DE ALMACENAMIENTO DE FOTOS ─── */}
                 <div className="bg-white rounded-xl shadow-2xl p-6 mb-6 border-l-4 border-blue-500">
                     <h2 className="text-xl font-bold text-blue-800 mb-2">Almacenamiento de Evidencias (Fotos)</h2>
@@ -271,7 +299,7 @@ export default function Configuracion() {
                         Configura si el sistema guardará de forma permanente las fotos al momento de entrar o si solo verificará el rostro sin guardar archivos pesados. Además, define el tiempo (en días) antes de que se borren y eliminen permanentemente.
                     </p>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                         {/* ASISTENCIA */}
                         <div className="space-y-3 bg-blue-50 p-4 rounded-xl border border-blue-100">
                             <h3 className="font-bold text-blue-700">Modo Asistencia</h3>
@@ -330,6 +358,37 @@ export default function Configuracion() {
                                     value={config.storage_retentionIncidentes ?? 18}
                                     onChange={(e) => handleNumberChange('storage_retentionIncidentes', e.target.value)}
                                     className="px-3 py-2 border border-orange-200 rounded-lg focus:ring-2 focus:ring-orange-500 disabled:bg-gray-200 disabled:opacity-50"
+                                />
+                            </div>
+                        </div>
+
+                        {/* VISITAS */}
+                        <div className="space-y-3 bg-rose-50 p-4 rounded-xl border border-rose-100">
+                            <h3 className="font-bold text-rose-700">Modo Visitas</h3>
+                            <button
+                                onClick={() => toggle('storage_saveRuta')}
+                                className={`w-full flex items-center justify-between px-4 py-3 rounded-lg border-2 text-left transition font-medium text-sm
+                                    ${config.storage_saveRuta !== false
+                                        ? 'border-rose-500 bg-white text-rose-800'
+                                        : 'border-gray-300 bg-gray-100 text-gray-400 opacity-60'}`}
+                            >
+                                <span className="flex items-center gap-2">
+                                    {config.storage_saveRuta !== false
+                                        ? <CheckSquare size={20} className="text-rose-600" />
+                                        : <Square size={20} />}
+                                    Guardar fotos visitas
+                                </span>
+                            </button>
+
+                            <div className="flex flex-col gap-1">
+                                <label className="text-xs font-bold text-rose-800 opacity-80">Días de retención</label>
+                                <input
+                                    type="number"
+                                    min="1" max="730"
+                                    disabled={config.storage_saveRuta === false}
+                                    value={config.storage_retentionRuta ?? 30}
+                                    onChange={(e) => handleNumberChange('storage_retentionRuta', e.target.value)}
+                                    className="px-3 py-2 border border-rose-200 rounded-lg focus:ring-2 focus:ring-rose-500 disabled:bg-gray-200 disabled:opacity-50"
                                 />
                             </div>
                         </div>
