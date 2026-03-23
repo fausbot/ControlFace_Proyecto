@@ -31,6 +31,11 @@ service cloud.firestore {
       allow read, write: if true;
     }
     
+    // Visitas: Lectura pública, escritura solo autenticados
+    match /visitas/{id} {
+      allow read, write: if true;
+    }
+    
     // Empleados: Lectura pública (para Admin sin login), ESCRITURA PROHIBIDA (Solo Backend)
     match /employees/{id} {
       allow read: if true;

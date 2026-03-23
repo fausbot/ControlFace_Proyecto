@@ -122,7 +122,7 @@ export default function RutaDashboard() {
                 mode: mode
             });
 
-            const now = new Date(serverTime);
+            const now = new Date();
             setCapturedData({
                 image: watermarkedImage,
                 metadata: {

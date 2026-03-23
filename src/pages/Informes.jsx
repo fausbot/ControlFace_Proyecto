@@ -313,22 +313,24 @@ export default function Informes() {
             let headers = [];
             let rows = [];
 
+            const calcMsDiffHrs = (startStrDate, startStrTime, endStrDate, endStrTime) => {
+                const start = parseStringDate(startStrDate, startStrTime);
+                const end = parseStringDate(endStrDate, endStrTime);
+                if (start && end) {
+                    const diffMs = end.getTime() - start.getTime();
+                    return diffMs > 0 ? diffMs / 3600000 : 0;
+                }
+                return 0;
+            };
+
             if (attendanceReportType === 'tiempo_efectivo_cliente') {
-                // FETCH VISITAS LOGS ON DEMAND
                 const snap = await getDocs(collection(db, 'visitas'));
                 let visitasLogs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
 
-                // Aplicar filtros de fecha y usuario
-                if (startDate || endDate) {
-                    visitasLogs = filterLogsByDateRange(visitasLogs, startDate, endDate);
-                }
-                if (csvUserFilter.trim()) {
-                    const searchStr = csvUserFilter.trim().toLowerCase();
-                    visitasLogs = visitasLogs.filter(log => (log.usuario || '').toLowerCase().includes(searchStr));
-                }
+                if (startDate || endDate) visitasLogs = filterLogsByDateRange(visitasLogs, startDate, endDate);
+                if (csvUserFilter.trim()) visitasLogs = visitasLogs.filter(log => (log.usuario || '').toLowerCase().includes(csvUserFilter.trim().toLowerCase()));
                 if (visitasLogs.length === 0) { alert('No hay registros de visitas en este rango.'); setExporting(false); return; }
 
-                // SORT and PAIR
                 visitasLogs.sort((a, b) => {
                     const dateA = parseStringDate(a.fecha, a.hora) || (a.timestamp ? a.timestamp.toDate() : new Date(0));
                     const dateB = parseStringDate(b.fecha, b.hora) || (b.timestamp ? b.timestamp.toDate() : new Date(0));
@@ -357,36 +359,297 @@ export default function Informes() {
                         }
                     });
                     if (pendingEntry) userShifts.push({ entry: pendingEntry, exit: null, email });
-                    visitasShifts.push(...userShifts.reverse());
+                    visitasShifts.push(...userShifts);
                 });
 
-                headers = ['Usuario', 'Nombres', 'Apellidos', 'Día', 'F. Llegada Cliente', 'H. Llegada Cliente', 'Localidad Llegada', 'F. Salida Cliente', 'H. Salida Cliente', 'Localidad Salida', 'Observaciones', 'Tiempo Efectivo (Horas)'];
-                rows = visitasShifts.map(({ entry, exit, email }) => {
-                    const emp = employeesMap[email] || { firstName: '', lastName: '' };
-                    let dia = '-';
-                    if (entry?.fecha) {
-                        const d = parseSpanishDate(entry.fecha);
-                        dia = d ? dayFormatter.format(d) : '-';
+                // Agrupar por bloques de Turno
+                const userShiftBlocks = {};
+                shifts.forEach(shift => {
+                    const { entry, exit, email } = shift;
+                    if (!email || !entry) return;
+                    if (!userShiftBlocks[email]) userShiftBlocks[email] = [];
+                    userShiftBlocks[email].push({ entry, exit, email, visits: [] });
+                });
+
+                visitasShifts.forEach(visitShift => {
+                    const { entry, exit, email } = visitShift;
+                    if (!email || !entry) return;
+                    if (!userShiftBlocks[email]) userShiftBlocks[email] = [];
+                    
+                    const visitStartMs = parseStringDate(entry.fecha, entry.hora)?.getTime() || 0;
+                    
+                    let foundBlock = userShiftBlocks[email].find(b => {
+                        const bStartMs = parseStringDate(b.entry?.fecha, b.entry?.hora)?.getTime() || 0;
+                        const bEndMs = b.exit ? (parseStringDate(b.exit.fecha, b.exit.hora)?.getTime() || Infinity) : Infinity;
+                        return visitStartMs >= (bStartMs - 120000) && visitStartMs <= bEndMs;
+                    });
+                    
+                    if (foundBlock) {
+                        foundBlock.visits.push(visitShift);
+                    } else {
+                        userShiftBlocks[email].push({
+                            entry: { fecha: entry.fecha, hora: entry.hora, localidad: 'Turno Huérfano' },
+                            exit: { fecha: exit?.fecha || entry.fecha, hora: exit?.hora || entry.hora, localidad: 'Turno Huérfano' },
+                            email,
+                            visits: [visitShift]
+                        });
                     }
-                    let horasStr = '0.00';
+                });
+
+                headers = [
+                    'Usuario', 'Nombres', 'Apellidos', 'Día',
+                    'Fecha Entrada (Turno)', 'Hora Entrada', 'Localidad Entrada',
+                    'Fecha Salida (Turno)', 'Hora Salida', 'Localidad Salida',
+                    'Hora Ingreso (Cliente)', 'Localidad (Ingreso)', 
+                    'Hora Salida (Cliente)', 'Localidad (Salida)',
+                    'Tiempo Trabajado Cliente (Horas)', 'Total Horas Trabajadas (Turno)', 'Total Horas Efectivas (Suma Clientes)', 'Tiempo en Transporte (Horas)'
+                ];
+
+                Object.keys(userShiftBlocks).forEach(email => {
+                    const emp = employeesMap[email] || { firstName: '', lastName: '' };
+                    const blocks = userShiftBlocks[email];
+                    
+                    blocks.forEach(block => {
+                        if (block.visits.length === 0) return; // Solo turnos con visitas en detalles
+                        
+                        let diaStr = '-';
+                        if (block.entry?.fecha) {
+                            const d = parseSpanishDate(block.entry.fecha);
+                            diaStr = (d && !isNaN(d.getTime())) ? dayFormatter.format(d) : block.entry.fecha;
+                        }
+
+                        let totalHorasTrabajadas = 0;
+                        if (block.entry && block.exit) {
+                            totalHorasTrabajadas = calcMsDiffHrs(block.entry.fecha, block.entry.hora, block.exit.fecha, block.exit.hora);
+                        }
+
+                        let sumOfVisitsHrs = 0;
+                        const visitRowsData = block.visits.map(v => {
+                            let visitTimeHrs = 0;
+                            if (v.entry && v.exit) {
+                                visitTimeHrs = calcMsDiffHrs(v.entry.fecha, v.entry.hora, v.exit.fecha, v.exit.hora);
+                                sumOfVisitsHrs += visitTimeHrs;
+                            }
+                            return { ...v, visitTimeHrs: visitTimeHrs.toFixed(2) };
+                        });
+
+                        let horasTransporte = totalHorasTrabajadas - sumOfVisitsHrs;
+                        if (horasTransporte < 0) horasTransporte = 0;
+
+                        visitRowsData.forEach(v => {
+                            rows.push([
+                                email, emp.firstName, emp.lastName, diaStr,
+                                block.entry?.fecha || '-', block.entry?.hora || '-', (block.entry?.localidad || block.entry?.ubicacion) || '-',
+                                block.exit?.fecha || '-', block.exit?.hora || '-', (block.exit?.localidad || block.exit?.ubicacion) || '-',
+                                v.entry?.hora || '-', (v.entry?.localidad || v.entry?.ubicacion) || '-',
+                                v.exit?.hora || '-', (v.exit?.localidad || v.exit?.ubicacion) || '-',
+                                v.visitTimeHrs, totalHorasTrabajadas.toFixed(2), sumOfVisitsHrs.toFixed(2), horasTransporte.toFixed(2)
+                            ]);
+                        });
+                    });
+                });
+
+            } else if (attendanceReportType === 'tiempo_efectivo_cliente_resumen') {
+                const snap = await getDocs(collection(db, 'visitas'));
+                let visitasLogs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+                if (startDate || endDate) visitasLogs = filterLogsByDateRange(visitasLogs, startDate, endDate);
+                if (csvUserFilter.trim()) visitasLogs = visitasLogs.filter(log => (log.usuario || '').toLowerCase().includes(csvUserFilter.trim().toLowerCase()));
+                if (visitasLogs.length === 0) { alert('No hay registros de visitas en este rango para armar el resumen.'); setExporting(false); return; }
+
+                visitasLogs.sort((a, b) => {
+                    const dateA = parseStringDate(a.fecha, a.hora) || (a.timestamp ? a.timestamp.toDate() : new Date(0));
+                    const dateB = parseStringDate(b.fecha, b.hora) || (b.timestamp ? b.timestamp.toDate() : new Date(0));
+                    return dateA - dateB;
+                });
+
+                const byUserV = {};
+                visitasLogs.forEach(log => {
+                    const key = (log.usuario || '').toLowerCase().trim();
+                    if (!byUserV[key]) byUserV[key] = [];
+                    byUserV[key].push(log);
+                });
+
+                const summaryObj = {};
+                Object.keys(byUserV).forEach(email => {
+                    let pendingEntry = null;
+                    const userShifts = [];
+                    byUserV[email].forEach(rec => {
+                        if (rec.tipo === 'Llegada Cliente') {
+                            if (pendingEntry) userShifts.push({ entry: pendingEntry, exit: null });
+                            pendingEntry = rec;
+                        } else if (rec.tipo === 'Salida Cliente') {
+                            if (pendingEntry) { userShifts.push({ entry: pendingEntry, exit: rec }); pendingEntry = null; }
+                            else userShifts.push({ entry: null, exit: rec });
+                        }
+                    });
+                    if (pendingEntry) userShifts.push({ entry: pendingEntry, exit: null });
+
+                    let totalVisitasHrs = 0;
+                    userShifts.forEach(({ entry, exit }) => {
+                        if (entry && exit) {
+                            totalVisitasHrs += calcMsDiffHrs(entry.fecha, entry.hora, exit.fecha, exit.hora);
+                        }
+                    });
+
+                    summaryObj[email] = {
+                        clientesVisitados: userShifts.length,
+                        tiempoClientesHrs: totalVisitasHrs,
+                        horasTotalesHrs: 0,
+                        tiempoRealHrs: 0
+                    };
+                });
+
+                shifts.forEach(({ entry, exit, email }) => {
                     if (entry && exit) {
-                        const start = parseStringDate(entry.fecha, entry.hora);
-                        const end = parseStringDate(exit.fecha, exit.hora);
-                        if (start && end) {
-                            const diffMins = (end - start) / 60000;
-                            horasStr = (diffMins / 60).toFixed(2);
+                        const brutoHrs = calcMsDiffHrs(entry.fecha, entry.hora, exit.fecha, exit.hora);
+                        let netoHrs = brutoHrs;
+                        if (timeConfig.calc_lunch && (brutoHrs * 60) >= 480) {
+                            netoHrs -= ((parseInt(timeConfig.calc_lunchMins, 10) || 60) / 60);
+                        }
+                        if (summaryObj[email]) {
+                            summaryObj[email].horasTotalesHrs += brutoHrs;
+                            summaryObj[email].tiempoRealHrs += netoHrs;
                         }
                     }
-                    const obsParts = [];
-                    if (entry?.observacion) obsParts.push(`Llegada: ${entry.observacion}`);
-                    if (exit?.observacion) obsParts.push(`Salida: ${exit.observacion}`);
+                });
+
+                headers = ['Usuario', 'Nombres', 'Apellidos', 'Clientes Visitados', 'Total Horas Efectivas (Suma Clientes)', 'Horas Totales Trabajadas (Bruto)', 'Tiempo en Transporte (Horas)'];
+                rows = Object.keys(summaryObj).map(email => {
+                    const emp = employeesMap[email] || { firstName: '', lastName: '' };
+                    const s = summaryObj[email];
+                    
+                    let horasTransporte = s.horasTotalesHrs - s.tiempoClientesHrs;
+                    if (horasTransporte < 0) horasTransporte = 0;
 
                     return [
-                        email, emp.firstName, emp.lastName, dia,
-                        entry?.fecha || '-', entry?.hora || '-', (entry?.localidad || entry?.ubicacion) || '-',
-                        exit?.fecha || '-', exit?.hora || '-', (exit?.localidad || exit?.ubicacion) || '-',
-                        obsParts.join(' | ') || '-', horasStr
+                        email, emp.firstName, emp.lastName,
+                        s.clientesVisitados,
+                        s.tiempoClientesHrs.toFixed(2),
+                        s.horasTotalesHrs.toFixed(2),
+                        horasTransporte.toFixed(2)
                     ];
+                });
+
+            } else if (attendanceReportType === 'tiempo_efectivo_cliente_dias') {
+                const snap = await getDocs(collection(db, 'visitas'));
+                let visitasLogs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+                if (startDate || endDate) visitasLogs = filterLogsByDateRange(visitasLogs, startDate, endDate);
+                if (csvUserFilter.trim()) visitasLogs = visitasLogs.filter(log => (log.usuario || '').toLowerCase().includes(csvUserFilter.trim().toLowerCase()));
+                if (visitasLogs.length === 0) { alert('No hay registros de visitas en este rango para armar el reporte.'); setExporting(false); return; }
+
+                visitasLogs.sort((a, b) => {
+                    const dateA = parseStringDate(a.fecha, a.hora) || (a.timestamp ? a.timestamp.toDate() : new Date(0));
+                    const dateB = parseStringDate(b.fecha, b.hora) || (b.timestamp ? b.timestamp.toDate() : new Date(0));
+                    return dateA - dateB;
+                });
+
+                const byUserV = {};
+                visitasLogs.forEach(log => {
+                    const key = (log.usuario || '').toLowerCase().trim();
+                    if (!byUserV[key]) byUserV[key] = [];
+                    byUserV[key].push(log);
+                });
+
+                const visitasShifts = [];
+                Object.keys(byUserV).sort().forEach(email => {
+                    const records = byUserV[email];
+                    let pendingEntry = null;
+                    const userShifts = [];
+                    records.forEach(rec => {
+                        if (rec.tipo === 'Llegada Cliente') {
+                            if (pendingEntry) userShifts.push({ entry: pendingEntry, exit: null, email });
+                            pendingEntry = rec;
+                        } else if (rec.tipo === 'Salida Cliente') {
+                            if (pendingEntry) { userShifts.push({ entry: pendingEntry, exit: rec, email }); pendingEntry = null; }
+                            else userShifts.push({ entry: null, exit: rec, email });
+                        }
+                    });
+                    if (pendingEntry) userShifts.push({ entry: pendingEntry, exit: null, email });
+                    visitasShifts.push(...userShifts);
+                });
+
+                // Agrupar por bloques de Turno
+                const userShiftBlocks = {};
+                shifts.forEach(shift => {
+                    const { entry, exit, email } = shift;
+                    if (!email || !entry) return;
+                    if (!userShiftBlocks[email]) userShiftBlocks[email] = [];
+                    userShiftBlocks[email].push({ entry, exit, email, visits: [] });
+                });
+
+                visitasShifts.forEach(visitShift => {
+                    const { entry, exit, email } = visitShift;
+                    if (!email || !entry) return;
+                    if (!userShiftBlocks[email]) userShiftBlocks[email] = [];
+                    
+                    const visitStartMs = parseStringDate(entry.fecha, entry.hora)?.getTime() || 0;
+                    
+                    let foundBlock = userShiftBlocks[email].find(b => {
+                        const bStartMs = parseStringDate(b.entry?.fecha, b.entry?.hora)?.getTime() || 0;
+                        const bEndMs = b.exit ? (parseStringDate(b.exit.fecha, b.exit.hora)?.getTime() || Infinity) : Infinity;
+                        return visitStartMs >= (bStartMs - 120000) && visitStartMs <= bEndMs;
+                    });
+                    
+                    if (foundBlock) {
+                        foundBlock.visits.push(visitShift);
+                    } else {
+                        userShiftBlocks[email].push({
+                            entry: { fecha: entry.fecha, hora: entry.hora, localidad: 'Turno Huérfano' },
+                            exit: { fecha: exit?.fecha || entry.fecha, hora: exit?.hora || entry.hora, localidad: 'Turno Huérfano' },
+                            email,
+                            visits: [visitShift]
+                        });
+                    }
+                });
+
+                headers = ['Usuario', 'Nombres', 'Apellidos', 'Día', 'Fecha Entrada (Turno)', 'Clientes Visitados', 'Total Horas Efectivas (Suma Clientes)', 'Horas Totales Trabajadas (Bruto)', 'Tiempo en Transporte (Horas)'];
+
+                Object.keys(userShiftBlocks).forEach(email => {
+                    const emp = employeesMap[email] || { firstName: '', lastName: '' };
+                    const blocks = userShiftBlocks[email];
+                    
+                    blocks.forEach(block => {
+                        // Resumen general de ese turno particular
+                        
+                        let diaStr = '-';
+                        if (block.entry?.fecha) {
+                            const d = parseSpanishDate(block.entry.fecha);
+                            diaStr = (d && !isNaN(d.getTime())) ? dayFormatter.format(d) : block.entry.fecha;
+                        }
+
+                        let totalVisitasHrs = 0;
+                        block.visits.forEach(({ entry, exit }) => {
+                            if (entry && exit) {
+                                totalVisitasHrs += calcMsDiffHrs(entry.fecha, entry.hora, exit.fecha, exit.hora);
+                            }
+                        });
+
+                        let horasTotalesBruto = 0;
+                        let horasNeto = 0;
+                        if (block.entry && block.exit) {
+                            horasTotalesBruto = calcMsDiffHrs(block.entry.fecha, block.entry.hora, block.exit.fecha, block.exit.hora);
+                            horasNeto = horasTotalesBruto;
+                            if (timeConfig.calc_lunch && (horasTotalesBruto * 60) >= 480) {
+                                horasNeto -= ((parseInt(timeConfig.calc_lunchMins, 10) || 60) / 60);
+                            }
+                        }
+
+                        let horasTransporte = horasTotalesBruto - totalVisitasHrs;
+                        if (horasTransporte < 0) horasTransporte = 0;
+
+                        // Si el turno no tiene nada ni de hrs totales ni visitas, se omite
+                        if (horasTotalesBruto === 0 && totalVisitasHrs === 0) return;
+
+                        rows.push([
+                            email, emp.firstName, emp.lastName, diaStr, block.entry?.fecha || '-',
+                            block.visits.length,
+                            totalVisitasHrs.toFixed(2),
+                            horasTotalesBruto.toFixed(2),
+                            horasTransporte.toFixed(2)
+                        ]);
+                    });
                 });
 
             } else if (attendanceReportType === 'estandar') {
@@ -396,7 +659,7 @@ export default function Informes() {
                     let dia = '-';
                     if (entry?.fecha) {
                         const d = parseSpanishDate(entry.fecha);
-                        dia = d ? dayFormatter.format(d) : '-';
+                        dia = (d && !isNaN(d.getTime())) ? dayFormatter.format(d) : '-';
                     }
                     let horasStr = '0';
                     let lunch = 'No';
@@ -423,7 +686,7 @@ export default function Informes() {
                     let dia = '-';
                     if (entry?.fecha) {
                         const d = parseSpanishDate(entry.fecha);
-                        dia = d ? dayFormatter.format(d) : '-';
+                        dia = (d && !isNaN(d.getTime())) ? dayFormatter.format(d) : '-';
                     }
                     let h = { diurnas: '-', nocturnas: '-', domDiurnas: '-', domNocturnas: '-', totalHHMM: '-' };
                     let lunchApplied = 'No';
@@ -621,7 +884,11 @@ export default function Informes() {
                             <option value="detallado_horas">Discriminado por tipos de horas (Colombia)</option>
                             <option value="resumen">Resumen General por Empleado</option>
                             {storageConfig?.ruta_active && (
-                                <option value="tiempo_efectivo_cliente">Tiempo Efectivo en Cliente (Modo Ruta)</option>
+                                <>
+                                    <option value="tiempo_efectivo_cliente">Tiempo Efectivo en Cliente (Modo Ruta) - Detallado</option>
+                                    <option value="tiempo_efectivo_cliente_resumen">Tiempo Efectivo en Cliente (Modo Ruta) - Resumido</option>
+                                    <option value="tiempo_efectivo_cliente_dias">Tiempo Efectivo en Cliente (Modo Ruta) - Por Días</option>
+                                </>
                             )}
                         </select>
                         <select value={exportFormatAttendance} onChange={e => setExportFormatAttendance(e.target.value)} className="px-4 py-2 border rounded-lg">
