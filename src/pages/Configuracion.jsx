@@ -1,12 +1,20 @@
-// src/pages/Configuracion.jsx
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Settings, Lock, Save, CheckSquare, Square, Loader2, LogIn, LogOut, TriangleAlert } from 'lucide-react';
+import { Settings, Lock, Save, CheckSquare, Square, Loader2, LogIn, LogOut, TriangleAlert, KeyRound, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 import { fetchLicenseStatus, applyNewLicenseToken } from '../services/licenseService';
 import { syncDatabaseWithStorage } from '../services/storageService';
+
+// Helper: SHA-256 hash de la contraseña usando Web Crypto API
+async function hashPassword(password) {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(password);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    return Array.from(new Uint8Array(hashBuffer))
+        .map(b => b.toString(16).padStart(2, '0')).join('');
+}
 
 // ─── Definición de todos los campos configurables ────────────────────────────
 const FIELD_GROUPS = [
@@ -82,6 +90,12 @@ export default function Configuracion() {
     const [licenseInput, setLicenseInput] = useState('');
     const [savingLicense, setSavingLicense] = useState(false);
     const [licenseError, setLicenseError] = useState('');
+    // Estado para protección de contraseña del Modo Visitas
+    const [rutaPassword, setRutaPassword] = useState('');
+    const [rutaPasswordError, setRutaPasswordError] = useState('');
+    const [rutaToken, setRutaToken] = useState(null); // hash almacenado en Firestore
+    const [rutaPasswordVisible, setRutaPasswordVisible] = useState(false);
+    const [savingRuta, setSavingRuta] = useState(false);
     const navigate = useNavigate();
     const { adminAccess } = useAuth();
 
@@ -97,10 +111,10 @@ export default function Configuracion() {
         try {
             const snap = await getDoc(doc(db, 'settings', 'employeeFields'));
             if (snap.exists()) {
-                // Mezclamos los datos base con los que vengan de la BD para que tome en cuenta los nuevos defaults (storage_*)
-                setConfig(prev => ({ ...prev, ...snap.data() }));
+                const data = snap.data();
+                setConfig(prev => ({ ...prev, ...data }));
+                setRutaToken(data.ruta_token || null); // cargar el token de contraseña
             } else {
-                // Primer uso: inicializamos la BD con los defaults
                 await setDoc(doc(db, 'settings', 'employeeFields'), DEFAULT_CONFIG);
             }
 
@@ -140,7 +154,9 @@ export default function Configuracion() {
     const saveConfig = async () => {
         setSaving(true);
         try {
-            await setDoc(doc(db, 'settings', 'employeeFields'), config);
+            // Excluir ruta_token del objeto de config normal (se guarda por separado)
+            const { ruta_token, ...configToSave } = config;
+            await setDoc(doc(db, 'settings', 'employeeFields'), { ...configToSave, ruta_token: rutaToken });
             setSavedOk(true);
             setTimeout(() => setSavedOk(false), 3000);
         } catch (err) {
@@ -148,6 +164,50 @@ export default function Configuracion() {
             alert('Error al guardar. Inténtalo de nuevo.');
         } finally {
             setSaving(false);
+        }
+    };
+
+    // Activar modo con contraseña maestra (solo primera vez o si el token fue borrado)
+    const handleRutaActivation = async () => {
+        setRutaPasswordError('');
+        if (!rutaPassword.trim()) {
+            setRutaPasswordError('Debes ingresar la contraseña de acceso.');
+            return;
+        }
+        setSavingRuta(true);
+        try {
+            const hash = await hashPassword(rutaPassword.trim());
+            const masterHash = import.meta.env.VITE_RUTA_ACCESS_HASH;
+
+            if (hash === masterHash) {
+                // Contraseña correcta: guardar token en Firestore y activar
+                await updateDoc(doc(db, 'settings', 'employeeFields'), {
+                    ruta_token: hash,
+                    ruta_active: true
+                });
+                setRutaToken(hash);
+                setConfig(prev => ({ ...prev, ruta_active: true }));
+                setRutaPassword('');
+            } else {
+                setRutaPasswordError('❌ Contraseña incorrecta. Contacta al administrador.');
+            }
+        } catch (err) {
+            console.error('Error activando Modo Ruta:', err);
+            setRutaPasswordError('Error al verificar. Inténtalo de nuevo.');
+        } finally {
+            setSavingRuta(false);
+        }
+    };
+
+    // Con token presente: activar sin contraseña
+    const handleRutaToggle = async (activate) => {
+        try {
+            await updateDoc(doc(db, 'settings', 'employeeFields'), { ruta_active: activate });
+            setConfig(prev => ({ ...prev, ruta_active: activate }));
+            setRutaPassword('');
+            setRutaPasswordError('');
+        } catch (err) {
+            console.error('Error cambiando estado Modo Ruta:', err);
         }
     };
 
@@ -274,19 +334,77 @@ export default function Configuracion() {
                         Activa o desactiva funcionalidades avanzadas para los empleados en la aplicación.
                     </p>
                     <div className="space-y-3 bg-rose-50 p-4 rounded-xl border border-rose-100">
-                        <button
-                            onClick={() => toggle('ruta_active')}
-                            className={`w-full flex items-center justify-between px-4 py-3 rounded-lg border-2 text-left transition font-medium text-sm
-                                ${config.ruta_active
-                                    ? 'border-rose-500 bg-white text-rose-800'
-                                    : 'border-gray-300 bg-gray-100 text-gray-400 opacity-60'}`}
-                        >
-                            <span className="flex items-center gap-2">
-                                {config.ruta_active ? <CheckSquare size={20} className="text-rose-600" /> : <Square size={20} />}
-                                Habilitar "Modo Ruta / Visitas a Clientes"
-                            </span>
-                        </button>
-                        <p className="text-xs text-rose-700 opacity-80 leading-tight">
+                        {!rutaToken ? (
+                            // SIN TOKEN: Modo bloqueado, pedir contraseña maestra
+                            <div className="flex flex-col gap-3">
+                                <div className="flex items-center gap-2 px-4 py-3 rounded-lg border-2 border-gray-300 bg-gray-100 opacity-60">
+                                    <Square size={20} />
+                                    <span className="font-medium text-gray-400 text-sm">Habilitar "Modo Visitas a Clientes"</span>
+                                </div>
+                                <div className="flex flex-col gap-1">
+                                    <label className="text-xs font-bold text-rose-800 flex items-center gap-1">
+                                        <KeyRound size={13} /> Contraseña de acceso requerida
+                                    </label>
+                                    <div className="flex gap-2">
+                                        <div className="relative flex-1">
+                                            <input
+                                                type={rutaPasswordVisible ? 'text' : 'password'}
+                                                value={rutaPassword}
+                                                onChange={e => { setRutaPassword(e.target.value); setRutaPasswordError(''); }}
+                                                onKeyDown={e => e.key === 'Enter' && handleRutaActivation()}
+                                                placeholder="Ingresa la contraseña..."
+                                                className="w-full px-3 py-2 border border-rose-200 rounded-lg focus:ring-2 focus:ring-rose-400 text-sm pr-10"
+                                            />
+                                            <button type="button"
+                                                onClick={() => setRutaPasswordVisible(v => !v)}
+                                                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                                            >
+                                                {rutaPasswordVisible ? <EyeOff size={16} /> : <Eye size={16} />}
+                                            </button>
+                                        </div>
+                                        <button
+                                            onClick={handleRutaActivation}
+                                            disabled={savingRuta || !rutaPassword.trim()}
+                                            className="px-4 py-2 bg-rose-600 text-white text-sm font-bold rounded-lg hover:bg-rose-700 disabled:opacity-50 transition flex items-center gap-1"
+                                        >
+                                            {savingRuta ? <Loader2 size={14} className="animate-spin" /> : <KeyRound size={14} />}
+                                            Desbloquear
+                                        </button>
+                                    </div>
+                                    {rutaPasswordError && <p className="text-red-600 text-xs font-medium">{rutaPasswordError}</p>}
+                                    <p className="text-xs text-gray-500 mt-1">Este modo requiere autorización. Contacta al administrador para obtener acceso.</p>
+                                </div>
+                            </div>
+                        ) : config.ruta_active ? (
+                            // CON TOKEN + ACTIVO: mostrar desactivar
+                            <div className="flex flex-col gap-2">
+                                <div className="flex items-center gap-2 px-4 py-3 rounded-lg border-2 border-rose-500 bg-white">
+                                    <CheckSquare size={20} className="text-rose-600" />
+                                    <span className="font-medium text-rose-800 text-sm">Habilitar "Modo Visitas a Clientes"</span>
+                                </div>
+                                <button
+                                    onClick={() => handleRutaToggle(false)}
+                                    className="w-full py-2 text-sm font-bold text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 border border-gray-300 transition"
+                                >
+                                    Desactivar modo
+                                </button>
+                            </div>
+                        ) : (
+                            // CON TOKEN + INACTIVO: activar directamente sin contraseña
+                            <div className="flex flex-col gap-2">
+                                <div className="flex items-center gap-2 px-4 py-3 rounded-lg border-2 border-gray-300 bg-gray-100 opacity-60">
+                                    <Square size={20} />
+                                    <span className="font-medium text-gray-400 text-sm">Habilitar "Modo Visitas a Clientes"</span>
+                                </div>
+                                <button
+                                    onClick={() => handleRutaToggle(true)}
+                                    className="w-full py-2 text-sm font-bold text-white bg-rose-600 rounded-lg hover:bg-rose-700 transition"
+                                >
+                                    Activar modo
+                                </button>
+                            </div>
+                        )}
+                        <p className="text-xs text-rose-700 opacity-80 leading-tight mt-1">
                             Si está activo, los empleados que ya estén en turno verán un botón para registrar operaciones fuera de la base en clientes.
                         </p>
                     </div>

@@ -1,10 +1,89 @@
 # Historial de Versiones: Control de Asistencia y Acceso 📋
 
-Esta guía documenta la evolución del sistema, detallando las características principales de cada versión desde la 1.0.0 hasta la 1.6.7 actual.
+Esta guía documenta la evolución del sistema, detallando las características principales de cada versión desde la 1.0.0 hasta la 1.7.20 actual.
 
-## Versión 1.6.99 (Actual) ✅
-**Fecha:** 17/03/2026
+## Versión 1.7.20 (Actual) ✅
+**Fecha:** 23/03/2026
 **Estado:** Estable - Producción
+
+### Correcciones y Mejoras de Cámara
+- **Cámara Negra**: Se eliminó la técnica del stream temporal que causaba una condición de carrera y dejaba la vista de cámara en negro en dispositivos lentos.
+- **Asignación Robusta del Stream**: Se añadió un ciclo de reintentos para asignar el stream de video al elemento en pantalla, incluso si el elemento no se ha montado al instante.
+- **Feedback de Captura**: Al presionar el botón de tomar foto, ahora aparece un destello blanco con el texto '¡Foto capturada!' para confirmar visualmente que la imagen fue registrada.
+- **Botón de Cámara**: El botón ahora tiene etiqueta '📸 Tomar Foto Ahora' con un efecto de presá visible (escala activa).
+
+## Versión 1.7.19
+**Fecha:** 23/03/2026
+**Estado:** Estable - Producción
+
+### Mejoras de Reportes
+- **Reporte de Visitas**: Se dividió la columna de "Observaciones" en dos: "Observaciones Entrada" y "Observaciones Salida" para mayor claridad en el seguimiento de visitas a clientes.
+
+## Versión 1.7.18
+**Fecha:** 23/03/2026
+**Estado:** Estable - Producción
+
+### Corrección de Errores
+- **Reporte de Visitas**: Se corrigió el nombre del campo interno (`tipo` vs `mode`) en el motor de emparejamiento. Esto resuelve el problema de los reportes descargados en blanco.
+- **Reporte de Visitas**: Se mejoró el mapeo de nombres y apellidos para empleados importados desde el sistema central.
+
+## Versión 1.7.17
+**Fecha:** 23/03/2026
+**Estado:** Estable - Producción
+
+### Corrección de Errores
+- **Reporte de Visitas**: Se corrigió el error `TypeError: m is not iterable` al exportar a Excel (XLSX).
+- **Reporte de Visitas**: Se corrigió la lógica de filtrado por fechas que causaba reportes en blanco si se seleccionaba el mismo día de inicio y fin.
+- **Exportación CSV**: Se añadió el marcador BOM (Byte Order Mark) para asegurar que Excel reconozca correctamente los caracteres especiales y tildes en el archivo CSV.
+
+## Versión 1.7.16
+**Fecha:** 23/03/2026
+**Estado:** Estable - Producción
+
+### Corrección de Errores
+- **Reporte de Visitas**: Se corrigió el error `ReferenceError: getMillisFromDateTime is not defined` que impedía la exportación de reportes de visitas en clientes.
+
+## Versión 1.7.15
+**Fecha:** 23/03/2026
+**Estado:** Estable - Producción
+
+### Nuevas Funcionalidades y Refinamientos
+- **Informes de Visitas**: Nueva funcionalidad en reportes para exportar visitas a clientes (Llegada/Salida emparejadas) con filtros por usuario y fecha. Exportación a CSV y Excel (XLSX).
+- **Borrado en Lote**: Opción para limpiar registros de visitas por rango de fechas desde el panel de administración.
+- **Marca de Agua Dinámica**: Refinamiento específico de "SALIDA DEL CLIENTE". Se redujo la tipografía y se ajustó la posición para evitar solapamientos con logos y mejorar la estética.
+- **Visibilidad Inteligente**: La sección de reportes de visitas solo aparece cuando el "Modo Ruta / Visitas" está habilitado en los ajustes globales.
+
+## Versión 1.7.14
+**Fecha:** 23/03/2026
+**Estado:** Estable - Producción
+
+### Mejoras de Interfaz y Sincronización
+- **Refinamiento de Marcas de Agua**: Etiquetas en español ("ENTRADA", "LLEGADA A CLIENTE", "SALIDA DEL CLIENTE"), tipografía reducida y colores unificados (Azul para eventos de ruta).
+- **Eliminación de Duplicados**: Implementación de IDs determinísticos en Firestore. Los registros offline ahora reemplazan correctamente a los marcadores de posición al sincronizarse.
+- **Imagen en Mensajes de Ruta**: Ahora se adjunta la imagen directamente al compartir por WhatsApp (soporte nativo de Web Share API), eliminando el enlace de texto.
+
+---
+
+## Versión 1.7.13 ✅
+**Fecha:** 23/03/2026
+**Estado:** Estable - Histórico
+
+## Versión 1.7.12 ✅
+**Fecha:** 23/03/2026
+**Estado:** Estable - Histórico
+
+### Correcciones y Mejoras
+- **Unificación de Redondeo en Informes**: Ajuste en el algoritmo de cálculo de horas para procesar fracciones de minuto. Esto garantiza que el informe "Detallado Estándar" coincida exactamente con los reportes de "Tiempo Efectivo", eliminando discrepancias por redondeo excesivo hacia arriba.
+- **Precisión en Cálculos**: El sistema ahora contabiliza segundos remanentes de forma proporcional, asegurando coherencia entre el desglose de horas (Diurnas/Nocturnas) y el tiempo total laborado.
+
+---
+
+## Versión 1.7.11 ✅
+**Fecha:** 23/03/2026
+**Estado:** Estable - Histórico
+
+---
+
 
 ### Servicio Offline y Multi-Empleado
 - **Servicio Offline Transparente**: Mejora en la sincronización automática y gestión de registros sin conexión mediante IndexedDB y localStorage.

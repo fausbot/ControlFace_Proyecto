@@ -25,33 +25,67 @@ export const addWatermarkToImage = async (imageSrc, data) => {
                 // Draw original image
                 ctx.drawImage(img, 0, 0);
 
-                // --- Draw Mode Label (ENTRADA/SALIDA/INCIDENTE) at Top ---
+                // --- Draw Mode Label (ENTRADA/SALIDA/INCIDENTE/VISITA) at Top ---
                 let modeText = 'ENTRADA';
-                if (data.mode === 'exit') modeText = 'SALIDA';
+                if (data.mode === 'entry') modeText = 'ENTRADA';
+                else if (data.mode === 'exit') modeText = 'SALIDA';
                 else if (data.mode === 'incident') modeText = 'NOVEDAD';
-                const modeFontSize = Math.max(40, img.width * 0.08); // Large font
+                else if (data.mode === 'Llegada Cliente') modeText = 'LLEGADA A CLIENTE';
+                else if (data.mode === 'Salida Cliente') modeText = 'SALIDA DEL CLIENTE';
+                else if (data.mode) modeText = data.mode.toUpperCase();
+
+                const isClientMode = data.mode === 'Llegada Cliente' || data.mode === 'Salida Cliente';
+
+                // Tamaño de fuente — más pequeño para rótulos largos de cliente
+                let modeFontSize = Math.max(35, img.width * 0.065);
+                if (isClientMode) {
+                    modeFontSize = Math.max(28, img.width * 0.048);
+                }
+
                 ctx.font = `bold ${modeFontSize}px Arial`;
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'top';
 
-                // Measure text for background
+                // Medir texto
                 const modeTextWidth = ctx.measureText(modeText).width;
-                const modePadding = 20;
+                const modePadding = 12;
                 const modeBoxWidth = modeTextWidth + (modePadding * 2);
                 const modeBoxHeight = modeFontSize + (modePadding * 2);
-                const modeBoxX = (canvas.width - modeBoxWidth) / 2;
                 const modeBoxY = 20;
 
-                // Background for mode label
+                // El logo ocupa aprox el 15% del ancho + margen izquierdo de 20px
+                const labelLogoWidth = img.width * 0.15;
+                const logoRightEdge = 20 + labelLogoWidth + 12; // 12px de separación
+
+                // Posición X: para modos de cliente, la caja empieza después del logo
+                // Para otros modos, centrada en el canvas
+                let modeBoxX;
+                if (isClientMode) {
+                    modeBoxX = logoRightEdge; // empieza justo después del logo
+                } else {
+                    modeBoxX = (canvas.width - modeBoxWidth) / 2; // centrado
+                }
+
+                // Asegurar que la caja no se salga del canvas a la derecha
+                if (modeBoxX + modeBoxWidth > canvas.width - 10) {
+                    modeBoxX = canvas.width - modeBoxWidth - 10;
+                }
+
+                // Centro del texto = centro de la caja
+                const textCenterX = modeBoxX + modeBoxWidth / 2;
+
+                // Color de fondo
                 let modeColor = 'rgba(34, 197, 94, 0.85)'; // Green: entry
-                if (data.mode === 'exit') modeColor = 'rgba(239, 68, 68, 0.85)'; // Red: exit
-                else if (data.mode === 'incident') modeColor = 'rgba(234, 88, 12, 0.92)'; // Orange: incident
+                if (data.mode === 'exit') modeColor = 'rgba(239, 68, 68, 0.85)'; // Red
+                else if (data.mode === 'incident') modeColor = 'rgba(234, 88, 12, 0.92)'; // Orange
+                else if (isClientMode) modeColor = 'rgba(59, 130, 246, 0.92)'; // Blue
+
                 ctx.fillStyle = modeColor;
                 ctx.fillRect(modeBoxX, modeBoxY, modeBoxWidth, modeBoxHeight);
 
-                // Draw mode text
+                // Texto centrado dentro de su propia caja
                 ctx.fillStyle = '#ffffff';
-                ctx.fillText(modeText, canvas.width / 2, modeBoxY + modePadding);
+                ctx.fillText(modeText, textCenterX, modeBoxY + modePadding);
 
                 // Reset text alignment for other text
                 ctx.textAlign = 'left';

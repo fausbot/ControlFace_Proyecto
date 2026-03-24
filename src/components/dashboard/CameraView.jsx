@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Camera, MapPin, TriangleAlert } from 'lucide-react';
 
 export default function CameraView({
@@ -11,8 +11,20 @@ export default function CameraView({
     storageSettings,
     handleStopCamera,
     capture,
-    step
+    step,
+    captureFlash = false  // true por 600ms cuando se toma la foto
 }) {
+    const [showFlash, setShowFlash] = useState(false);
+
+    // Activar el efecto de flash cuando la prop cambia a true
+    useEffect(() => {
+        if (captureFlash) {
+            setShowFlash(true);
+            const timer = setTimeout(() => setShowFlash(false), 600);
+            return () => clearTimeout(timer);
+        }
+    }, [captureFlash]);
+
     return (
         <div className="w-full flex flex-col items-center animate-fade-in">
             <h2 className="text-xl font-bold mb-4 capitalize text-gray-800">
@@ -30,6 +42,20 @@ export default function CameraView({
                     className={`w-full h-full object-cover ${mode !== 'incident' ? 'transform scale-x-[-1]' : ''}`}
                 />
                 <canvas ref={canvasRef} className="hidden" />
+
+                {/* Flash de captura — capa blanca que aparece al tomar foto */}
+                {showFlash && (
+                    <div
+                        className="absolute inset-0 bg-white z-20 flex items-center justify-center transition-opacity duration-300"
+                        style={{ opacity: showFlash ? 0.85 : 0 }}
+                    >
+                        <div className="text-center">
+                            <div className="text-5xl mb-2">📸</div>
+                            <p className="text-gray-700 font-bold text-sm">¡Foto capturada!</p>
+                        </div>
+                    </div>
+                )}
+
                 <div className="absolute inset-0 border-2 border-white/30 rounded-2xl pointer-events-none"></div>
 
                 {/* Overlay info */}
@@ -88,7 +114,7 @@ export default function CameraView({
                     <button
                         onClick={capture}
                         disabled={step === 'processing'}
-                        className={`px-8 py-3 rounded-full text-white font-bold shadow-2xl transition transform active:translate-y-1 ${step === 'processing'
+                        className={`px-8 py-3 rounded-full text-white font-bold shadow-2xl transition transform active:scale-95 active:brightness-90 ${step === 'processing'
                             ? 'bg-gray-400 cursor-not-allowed'
                             : mode === 'incident'
                                 ? 'bg-blue-600 hover:bg-blue-700'
@@ -96,7 +122,7 @@ export default function CameraView({
                             } ${mode !== 'incident' ? 'flex items-center gap-2 w-full max-w-[280px] justify-center' : ''}`}
                     >
                         {mode !== 'incident' && <Camera size={20} />}
-                        {step === 'processing' ? 'Procesando...' : mode === 'incident' ? 'Capturar' : 'Tomar Foto Ahora'}
+                        {step === 'processing' ? 'Procesando...' : mode === 'incident' ? '📸 Tomar Foto' : '📸 Tomar Foto Ahora'}
                     </button>
                 )}
             </div>

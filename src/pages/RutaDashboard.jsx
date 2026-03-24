@@ -1,11 +1,12 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { db } from '../firebaseConfig';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, doc, setDoc } from 'firebase/firestore';
 import { Camera, MapPin, ArrowLeft, Send, CheckCircle, Navigation } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { uploadPhoto } from '../services/storageService';
 import { addWatermarkToImage, fetchServerTime, fetchLocationName } from '../utils/watermark';
+import { saveOfflineRecord } from '../services/offlineStorage';
 
 export default function RutaDashboard() {
     const { currentUser } = useAuth();
@@ -151,7 +152,7 @@ export default function RutaDashboard() {
         setStep('processing');
         setStatusMessage('Guardando y Subiendo foto...');
 
-        try {
+        const saveRecordOnline = async () => {
             // Subir foto a Firebase Storage primero
             const url = await uploadPhoto(
                 capturedData.image,
@@ -169,11 +170,43 @@ export default function RutaDashboard() {
                 timestamp: serverTimestamp()
             };
 
-            await addDoc(collection(db, "visitas"), docData);
+            // Generar ID determinístico para evitar duplicados
+            const safeEmail = capturedData.metadata.usuario.replace(/[@.]/g, '-');
+            const safeFecha = (capturedData.metadata.fecha || '').replace(/\//g, '-');
+            const safeHora = (capturedData.metadata.hora || '').replace(/:/g, '-').replace(/\s/g, '');
+            const deterministicDocId = `${safeEmail}_${safeFecha}_${safeHora}`;
+
+            await setDoc(doc(db, "visitas", deterministicDocId), docData);
+            return url;
+        };
+
+        try {
+            // USAR TIMEOUT DE 3s PARA FIRESTORE: Si no responde, forzar offline
+            const saveTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error("Firebase Timeout")), 3000));
+            
+            let url = null;
+            try {
+                url = await Promise.race([saveRecordOnline(), saveTimeout]);
+            } catch (err) {
+                console.warn('Forcing Offline Storage due to network/timeout:', err);
+                // Guardar en IndexedDB de forma silenciosa
+                await saveOfflineRecord({
+                    image: capturedData.image,
+                    metadata: {
+                        ...capturedData.metadata,
+                        observacion: observacion.trim()
+                    },
+                    mode: 'visita',
+                    savePhoto: true, // Siempre queremos fotos de visitas
+                    latitude: capturedData.metadata.latitud,
+                    longitude: capturedData.metadata.longitud
+                });
+                setStatusMessage('Guardado localmente (Offline)');
+            }
 
             setStep('success');
 
-            // Actualizar estado
+            // Actualizar estado persistente
             if (mode === 'Llegada Cliente') {
                 setAllowedActions({ entry: false, exit: true });
                 localStorage.setItem(`lastRutaType_${currentUser.email}`, 'Llegada Cliente');
@@ -182,15 +215,32 @@ export default function RutaDashboard() {
                 localStorage.setItem(`lastRutaType_${currentUser.email}`, 'Salida Cliente');
             }
 
+            // Preparar archivo para compartir (si el navegador lo soporta)
+            let filesToShare = null;
+            if (navigator.canShare && capturedData.image) {
+                try {
+                    const response = await fetch(capturedData.image);
+                    const blob = await response.blob();
+                    const file = new File([blob], `ruta_${mode.replace(/\s+/g, '_')}.jpg`, { type: 'image/jpeg' });
+                    if (navigator.canShare({ files: [file] })) {
+                        filesToShare = [file];
+                    }
+                } catch (e) {
+                    console.error("Error preparando archivo para compartir:", e);
+                }
+            }
+
             // Preparar y enviar mensaje por WhatsApp/Share API
-            const shareText = `📍 *${mode} registrada*\nObservación: '${observacion.trim() || 'Ninguna'}'\n📷 Ver foto de evidencia: ${url}`;
+            const shareText = `📍 *${mode} registrada*\nObservación: ${observacion.trim() || 'Ninguna'}`;
             
             if (navigator.share) {
                 try {
-                    await navigator.share({
+                    const shareData = {
                         title: `Reporte de ${mode}`,
                         text: shareText
-                    });
+                    };
+                    if (filesToShare) shareData.files = filesToShare;
+                    await navigator.share(shareData);
                 } catch (shareErr) {
                     console.log('Share cancelado o no soportado.', shareErr);
                 }
@@ -199,25 +249,25 @@ export default function RutaDashboard() {
             setTimeout(() => {
                 setStep('idle');
                 setCapturedData(null);
-            }, 1000);
+            }, 2000);
 
         } catch (error) {
             console.error(error);
-            alert(`Error guardando: ${error.message}`);
+            alert(`Error crítico guardando: ${error.message}`);
             setStep('preview');
         }
     };
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-indigo-900 via-indigo-800 to-indigo-900 flex flex-col">
+        <div className="min-h-screen bg-gradient-to-b from-[#3C7DA6] to-[#6FAF6B] flex flex-col">
             <div className="bg-white/10 backdrop-blur-md p-4 flex items-center gap-3 border-b border-white/20">
                 <button onClick={() => navigate('/dashboard')} className="text-white hover:bg-white/20 p-2 rounded-full transition">
                     <ArrowLeft size={24} />
                 </button>
                 <div className="flex-1">
                     <h1 className="text-xl font-bold text-white flex items-center gap-2">
-                        <Navigation size={20} className="text-indigo-300" />
-                        Modo Ruta / Visitas
+                        <Navigation size={20} className="text-white/70" />
+                        Modo Visitas a Clientes
                     </h1>
                 </div>
             </div>
@@ -225,9 +275,9 @@ export default function RutaDashboard() {
             <div className="flex-1 p-4 flex flex-col items-center justify-center max-w-md mx-auto w-full">
                 {step === 'idle' && (
                     <div className="w-full flex flex-col gap-6">
-                        <div className="bg-white/10 backdrop-blur rounded-2xl p-6 text-center border border-white/20">
-                            <h2 className="text-white font-medium text-lg mb-2">Registro de Cliente</h2>
-                            <p className="text-indigo-200 text-sm">
+                        <div className="bg-white rounded-2xl p-6 text-center shadow-lg border border-white/60">
+                            <h2 className="text-gray-800 font-bold text-lg mb-2">Registro de Clientes</h2>
+                            <p className="text-gray-500 text-sm">
                                 {allowedActions.entry ? 'Usa esta opción al llegar a las instalaciones del cliente.' : 'Registra tu salida al concluir la visita.'}
                             </p>
                         </div>
@@ -292,39 +342,46 @@ export default function RutaDashboard() {
                 )}
 
                 {step === 'preview' && capturedData && (
-                    <div className="w-full max-w-sm bg-white rounded-3xl overflow-hidden shadow-2xl animate-fade-in">
-                        <div className="bg-indigo-600 p-4 text-center">
-                            <h3 className="text-white font-bold text-lg">{mode}</h3>
+                    <div className="w-full max-w-sm flex flex-col items-center animate-fade-in gap-4">
+                        {/* Título */}
+                        <div className="text-center">
+                            <h2 className="text-2xl font-bold text-white drop-shadow">Vista Previa</h2>
+                            <p className="text-white/70 text-sm mt-1">{mode} — Revisa la imagen antes de guardar</p>
                         </div>
-                        <div className="relative bg-black w-full aspect-square">
-                            <img src={capturedData.image} alt="Evidencia" className="w-full h-full object-contain" />
+
+                        {/* Imagen con borde azul */}
+                        <div className="w-full rounded-2xl overflow-hidden shadow-2xl border-4 border-blue-400 bg-black">
+                            <img src={capturedData.image} alt="Evidencia" className="w-full object-contain" />
                         </div>
-                        <div className="p-5 flex flex-col gap-4">
-                            <div>
-                                <label className="block text-sm font-bold text-indigo-900 mb-1">Observaciones (Opcional)</label>
-                                <textarea
-                                    value={observacion}
-                                    onChange={(e) => setObservacion(e.target.value)}
-                                    placeholder="Ej: Todo en orden, Esperando confirmación..."
-                                    className="w-full p-3 border border-indigo-100 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none resize-none text-sm bg-indigo-50/50"
-                                    rows="2"
-                                />
-                            </div>
-                            <div className="flex gap-3 mt-2">
-                                <button
-                                    onClick={() => { setStep('idle'); setCapturedData(null); }}
-                                    className="flex-1 py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition"
-                                >
-                                    Descartar
-                                </button>
-                                <button
-                                    onClick={handleSaveAndShare}
-                                    className="flex-1 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 shadow-lg shadow-indigo-600/30 transition flex items-center justify-center gap-2"
-                                >
-                                    <Send size={18} /> Guardar + Evidencia
-                                </button>
-                            </div>
+
+                        {/* Observaciones */}
+                        <div className="w-full bg-white rounded-2xl p-4 shadow-lg">
+                            <label className="block text-sm font-bold text-blue-800 mb-2">Observaciones (Opcional)</label>
+                            <textarea
+                                value={observacion}
+                                onChange={(e) => setObservacion(e.target.value)}
+                                placeholder="Ej: Todo en orden, Esperando confirmación..."
+                                className="w-full p-3 border border-blue-100 rounded-xl focus:ring-2 focus:ring-blue-400 outline-none resize-none text-sm bg-blue-50/40"
+                                rows="2"
+                            />
                         </div>
+
+                        {/* Botón principal — Guardar + Evidencia */}
+                        <button
+                            onClick={handleSaveAndShare}
+                            className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-2xl shadow-xl shadow-blue-600/40 transition active:scale-95 flex items-center justify-center gap-3 text-lg"
+                        >
+                            <Send size={22} />
+                            Guardar y Compartir
+                        </button>
+
+                        {/* Botón secundario — Cancelar */}
+                        <button
+                            onClick={() => { setStep('idle'); setCapturedData(null); setObservacion(''); }}
+                            className="w-full py-4 bg-white text-gray-700 font-bold rounded-2xl shadow border border-gray-200 hover:bg-gray-50 transition active:scale-95 text-lg"
+                        >
+                            Cancelar
+                        </button>
                     </div>
                 )}
 

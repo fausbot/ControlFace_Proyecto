@@ -1,7 +1,7 @@
 // src/pages/Informes.jsx
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Download, Calendar, Trash2, AlertTriangle, TriangleAlert, Image, Loader2, UserMinus, FileText, Printer, Image as ImageIcon } from 'lucide-react';
+import { Download, Calendar, Trash2, AlertTriangle, TriangleAlert, Image, Loader2, UserMinus, FileText, Printer, Image as ImageIcon, Navigation } from 'lucide-react';
 import DeleteEmployeeModal from '../components/DeleteEmployeeModal';
 import { listPhotosByFilter, downloadPhotosAsZip, cleanOldPhotos } from '../services/storageService';
 import { httpsCallable } from 'firebase/functions';
@@ -15,9 +15,12 @@ import { collection, getDocs, query, orderBy, getDoc, doc } from 'firebase/fires
 import {
     bulkDeleteByDateRange,
     bulkDeleteIncidentsByDateRange,
+    bulkDeleteVisitasByDateRange,
     filterLogsByDateRange,
     parseSpanishDate,
-    getAllAttendanceLogs
+    getAllAttendanceLogs,
+    getAllVisitLogs,
+    getMillisFromDateTime
 } from '../services/attendanceService';
 
 import { getEmployeesMap } from '../services/employeeService';
@@ -90,6 +93,14 @@ export default function Informes() {
     const [photoMsg, setPhotoMsg] = useState('');
     const [cleaningStorage, setCleaningStorage] = useState(false);
     const [storageConfig, setStorageConfig] = useState(null);
+
+    // Visitas export
+    const [visitStartDate, setVisitStartDate] = useState('');
+    const [visitEndDate, setVisitEndDate] = useState('');
+    const [visitCsvUserFilter, setVisitCsvUserFilter] = useState('');
+    const [exportingVisits, setExportingVisits] = useState(false);
+    const [deletingVisits, setDeletingVisits] = useState(false);
+    const [exportFormatVisits, setExportFormatVisits] = useState('csv');
 
     const navigate = useNavigate();
     const { adminAccess } = useAuth();
@@ -190,11 +201,139 @@ export default function Informes() {
         try {
             const deletedCount = await bulkDeleteIncidentsByDateRange(incidentStartDate, incidentEndDate);
             alert(`✅ Se borraron ${deletedCount} registros de novedades exitosamente.`);
-        } catch (error) {
-            console.error(error);
-            alert('Hubo un error al borrar los registros.');
         } finally {
             setDeletingIncidents(false);
+        }
+    };
+
+    const handleBulkDeleteVisitas = async () => {
+        if (!visitStartDate || !visitEndDate) {
+            alert('Debes seleccionar rango de fechas para borrar visitas.');
+            return;
+        }
+        if (!window.confirm(`⚠️ Se borrarán TODAS las VISITAS entre ${visitStartDate} y ${visitEndDate}. ¿Continuar?`)) return;
+
+        setDeletingVisits(true);
+        try {
+            const count = await bulkDeleteVisitasByDateRange(visitStartDate, visitEndDate);
+            alert(`✅ Se borraron ${count} registros de visitas.`);
+            loadInitialData();
+        } catch (error) {
+            console.error(error);
+            alert('Error al borrar visitas.');
+        } finally {
+            setDeletingVisits(false);
+        }
+    };
+
+    const handleExportVisitas = async () => {
+        setExportingVisits(true);
+        try {
+            const rawVisits = await getAllVisitLogs();
+            const employeesMap = await getEmployeesMap();
+
+            let filtered = rawVisits;
+            if (visitStartDate || visitEndDate) {
+                const start = visitStartDate ? new Date(visitStartDate) : null;
+                const end = visitEndDate ? new Date(visitEndDate) : null;
+                if (end) end.setHours(23, 59, 59, 999);
+
+                filtered = rawVisits.filter(v => {
+                    const d = parseSpanishDate(v.fecha);
+                    if (!d) return false;
+                    if (start && d < start) return false; // CORRECCIÓN: permitir el día de inicio
+                    if (end && d > end) return false;
+                    return true;
+                });
+            }
+
+            if (visitCsvUserFilter) {
+                const term = visitCsvUserFilter.toLowerCase();
+                filtered = filtered.filter(v => 
+                    v.usuario.toLowerCase().includes(term) || 
+                    (employeesMap[v.usuario]?.nombre || '').toLowerCase().includes(term)
+                );
+            }
+
+            if (filtered.length === 0) {
+                alert('No se encontraron registros de visitas con los filtros seleccionados.');
+                setExportingVisits(false);
+                return;
+            }
+
+            // Emparejar registros
+            const sortedAsc = [...filtered].sort((a,b) => {
+                const tA = getMillisFromDateTime(a.fecha, a.hora);
+                const tB = getMillisFromDateTime(b.fecha, b.hora);
+                return tA - tB;
+            });
+            
+            const paired = [];
+            const userState = {};
+
+            sortedAsc.forEach(v => {
+                const email = v.usuario;
+                const emp = employeesMap[email] || {};
+                const visitMode = v.tipo || v.mode; // Fallback por si acaso
+                
+                if (visitMode === 'Llegada Cliente') {
+                    userState[email] = v;
+                } else if (visitMode === 'Salida Cliente') {
+                    const llegada = userState[email];
+                    paired.push({
+                        usuario: email,
+                        nombre: emp.nombre || emp.firstName || '',
+                        apellido: emp.apellido || emp.lastName || '',
+                        fecha: v.fecha,
+                        llegada: llegada ? llegada.hora : '---',
+                        salida: v.hora,
+                        ubicacion: v.localidad || (v.latitud ? `${v.latitud}, ${v.longitud}` : '---'),
+                        obsEntrada: llegada?.observacion || '',
+                        obsSalida: v.observacion || ''
+                    });
+                    delete userState[email];
+                }
+            });
+
+            Object.values(userState).forEach(v => {
+                const emp = employeesMap[v.usuario] || {};
+                paired.push({
+                    usuario: v.usuario,
+                    nombre: emp.nombre || emp.firstName || '',
+                    apellido: emp.apellido || emp.lastName || '',
+                    fecha: v.fecha,
+                    llegada: v.hora,
+                    salida: 'Pendiente',
+                    ubicacion: v.localidad || '---',
+                    obsEntrada: v.observacion || '',
+                    obsSalida: ''
+                });
+            });
+
+            if (exportFormatVisits === 'csv') {
+                const headers = ['Usuario', 'Nombre', 'Apellido', 'Fecha', 'Hora Entrada', 'Hora Salida', 'Ubicación', 'Observaciones Entrada', 'Observaciones Salida'];
+                const rows = paired.map(p => [
+                    p.usuario, p.nombre, p.apellido, p.fecha, p.llegada, p.salida, p.ubicacion, p.obsEntrada, p.obsSalida
+                ]);
+                const csvContent = '\ufeff' + [headers.join(','), ...rows.map(r => r.join(','))].join('\n'); // Agregado BOM
+                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = `reporte_visitas_${new Date().toISOString().split('T')[0]}.csv`;
+                link.click();
+            } else {
+                const headers = ['Usuario', 'Nombre', 'Apellido', 'Fecha', 'Hora Entrada', 'Hora Salida', 'Ubicación', 'Observaciones Entrada', 'Observaciones Salida'];
+                const rows = paired.map(p => [
+                    p.usuario, p.nombre, p.apellido, p.fecha, p.llegada, p.salida, p.ubicacion, p.obsEntrada, p.obsSalida
+                ]);
+                exportToExcelHTML(`reporte_visitas_${new Date().toISOString().split('T')[0]}.xlsx`, headers, rows);
+            }
+        } catch (err) {
+            console.error(err);
+            alert('Error exportando visitas.');
+        } finally {
+            setExportingVisits(false);
         }
     };
 
@@ -808,7 +947,7 @@ export default function Informes() {
                     <h1 className="text-3xl font-bold text-gray-800 flex items-center gap-2">
                         <FileText size={30} className="text-blue-600" />
                         Centro de Informes y Reportes
-                        <span className="text-[10px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-mono ml-2 border border-gray-200">v{import.meta.env.VITE_APP_VERSION}</span>
+                        <span className="text-[10px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-mono ml-2 border border-gray-200">v1.7.19</span>
                     </h1>
                     <button onClick={() => navigate('/dashboard')} className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 transition">Volver</button>
                 </div>
@@ -927,6 +1066,30 @@ export default function Informes() {
                         <button onClick={handleBulkDeleteIncidents} disabled={deletingIncidents || !incidentStartDate || !incidentEndDate} className="px-4 py-2 bg-red-100 text-red-700 rounded-lg font-bold hover:bg-red-200 transition">Borrar Rango</button>
                     </div>
                 </div>
+                
+                {/* 3.1. EXPORTAR VISITAS (MODO RUTA) */}
+                {storageConfig?.ruta_active && (
+                    <div className="bg-white rounded-xl shadow-2xl p-6 mb-6 border-l-4 border-blue-400">
+                        <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2"><Navigation size={24} className="text-blue-500" /> Reporte de Visitas a Clientes</h2>
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end mb-4">
+                            <div className="md:col-span-1"><label className="text-sm">Desde</label><input type="date" value={visitStartDate} onChange={e => setVisitStartDate(e.target.value)} className="w-full px-4 py-2 border rounded-lg" /></div>
+                            <div className="md:col-span-1"><label className="text-sm">Hasta</label><input type="date" value={visitEndDate} onChange={e => setVisitEndDate(e.target.value)} className="w-full px-4 py-2 border rounded-lg" /></div>
+                            <div className="md:col-span-1"><label className="text-sm">Usuario</label><input type="text" value={visitCsvUserFilter} onChange={e => setVisitCsvUserFilter(e.target.value)} className="w-full px-4 py-2 border rounded-lg" /></div>
+                            <div className="flex gap-2">
+                                <select value={exportFormatVisits} onChange={e => setExportFormatVisits(e.target.value)} className="border rounded-lg px-2"><option value="csv">CSV</option><option value="xlsx">XLSX</option></select>
+                                <button onClick={handleExportVisitas} disabled={exportingVisits} className="flex-1 bg-blue-600 text-white py-2 rounded-lg font-bold hover:bg-blue-700 flex justify-center gap-2">
+                                    {exportingVisits ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />} Exportar
+                                </button>
+                            </div>
+                        </div>
+                        <div className="mt-4 pt-4 border-t border-red-50 flex items-center justify-between">
+                            <p className="text-xs text-gray-500">Borrar visitas permanentemente en el rango de fechas.</p>
+                            <button onClick={handleBulkDeleteVisitas} disabled={deletingVisits || !visitStartDate || !visitEndDate} className="px-4 py-2 bg-red-100 text-red-700 rounded-lg font-bold hover:bg-red-200 transition">
+                                {deletingVisits ? 'Borrando...' : 'Borrar Rango'}
+                            </button>
+                        </div>
+                    </div>
+                )}
 
                 {/* 4. GESTIÓN DE EMPLEADOS */}
                 <div className="bg-white rounded-xl shadow-2xl p-6 mb-12 border-l-4 border-emerald-500">

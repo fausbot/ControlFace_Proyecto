@@ -26,8 +26,10 @@ const getMillis = (ts) => {
     return Date.now();
 };
 
+// ─────────────────────────────────────────────
 // Helper para convertir fecha/hora a milisegundos
-const getMillisFromDateTime = (fecha, hora) => {
+// ─────────────────────────────────────────────
+export const getMillisFromDateTime = (fecha, hora) => {
     if (!fecha || !hora) return 0;
     try {
         const [d, m, y] = fecha.split('/');
@@ -190,6 +192,59 @@ export const filterLogsByDateRange = (logs, startDate, endDate) => {
 // ─────────────────────────────────────────────
 export const bulkDeleteIncidentsByDateRange = async (startDate, endDate) => {
     const snapshot = await getDocs(collection(db, 'incidents'));
+
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    end.setHours(23, 59, 59, 999);
+
+    const toDelete = snapshot.docs.filter(d => {
+        const data = d.data();
+        let logDate = null;
+
+        if (data.timestamp) {
+            logDate = data.timestamp.toDate();
+        } else if (data.fecha) {
+            logDate = parseSpanishDate(data.fecha);
+        }
+
+        if (!logDate) return false;
+        return logDate >= start && logDate <= end;
+    });
+
+    if (toDelete.length === 0) return 0;
+
+    const batch = writeBatch(db);
+    toDelete.forEach(docSnap => batch.delete(docSnap.ref));
+    await batch.commit();
+
+    return toDelete.length;
+};
+
+// ─────────────────────────────────────────────
+// Trae TODOS los registros de VISITAS,
+// ordenados por fecha/hora DESC.
+// ─────────────────────────────────────────────
+export const getAllVisitLogs = async () => {
+    const snapshot = await getDocs(collection(db, 'visitas'));
+    const allData = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+
+    allData.sort((a, b) => {
+        const timeA = getMillisFromDateTime(a.fecha, a.hora);
+        const timeB = getMillisFromDateTime(b.fecha, b.hora);
+        if (timeA !== timeB) return timeB - timeA;
+        return 0;
+    });
+
+    return allData;
+};
+
+// ─────────────────────────────────────────────
+// Elimina en lote todos los registros de VISITAS dentro
+// del rango [startDate, endDate] (strings YYYY-MM-DD)
+// Devuelve la cantidad de registros borrados.
+// ─────────────────────────────────────────────
+export const bulkDeleteVisitasByDateRange = async (startDate, endDate) => {
+    const snapshot = await getDocs(collection(db, 'visitas'));
 
     const start = new Date(startDate);
     const end = new Date(endDate);

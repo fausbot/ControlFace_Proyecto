@@ -13,6 +13,7 @@ const ChangeAdminPassword = React.lazy(() => import('./pages/ChangeAdminPassword
 const Configuracion = React.lazy(() => import('./pages/Configuracion'));
 const Informes = React.lazy(() => import('./pages/Informes'));
 const RutaDashboard = React.lazy(() => import('./pages/RutaDashboard'));
+import SyncManager from './components/dashboard/SyncManager';
 
 function PrivateRoute({ children }) {
   const { currentUser } = useAuth();
@@ -53,6 +54,7 @@ function App() {
           <Route path="/configuracion" element={<Configuracion />} />
           <Route path="/" element={<Navigate to={currentUser ? "/dashboard" : "/login"} />} />
         </Routes>
+        <SyncManager />
       </SubscriptionGuard>
     </Suspense>
   );

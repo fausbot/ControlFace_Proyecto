@@ -1,4 +1,4 @@
-import { isSundayOrHoliday } from './colombiaHolidays';
+import { isSundayOrHoliday } from './colombiaHolidays.js';
 
 /**
  * Convierte las cadenas de fecha (DD/MM/YYYY) y hora (HH:MM:SS) a un objeto Date real.
@@ -89,6 +89,15 @@ export const calculateLaborHours = (entry, exit, config = {}) => {
     const endMs = end.getTime();
 
     while (currentMs < endMs) {
+        let nextMs = currentMs + 60000;
+        let stepMs = 60000;
+        
+        // Si el siguiente paso excede el final, ajustamos el paso al residuo
+        if (nextMs > endMs) {
+            stepMs = endMs - currentMs;
+            nextMs = endMs;
+        }
+
         const d = new Date(currentMs);
         const isDomFest = isSundayOrHoliday(d);
         const hour = d.getHours();
@@ -96,16 +105,19 @@ export const calculateLaborHours = (entry, exit, config = {}) => {
         // Diurno en Colombia: 6 AM (inclusive) a 7 PM (exclusivo -> hasta las 18:59:59)
         const isDiurnal = hour >= 6 && hour < 19;
 
+        // Calculamos la fracción de minuto que representa este paso
+        const fractionOfMinute = stepMs / 60000;
+
         if (isDomFest) {
-            if (isDiurnal) buckets.domDiurnas += 1;
-            else buckets.domNocturnas += 1;
+            if (isDiurnal) buckets.domDiurnas += fractionOfMinute;
+            else buckets.domNocturnas += fractionOfMinute;
         } else {
-            if (isDiurnal) buckets.diurnas += 1;
-            else buckets.nocturnas += 1;
+            if (isDiurnal) buckets.diurnas += fractionOfMinute;
+            else buckets.nocturnas += fractionOfMinute;
         }
 
-        // Avanzar 1 minuto
-        currentMs += 60000;
+        // Avanzar al siguiente punto
+        currentMs = nextMs;
     }
 
     // Total en minutos para validar el almuerzo

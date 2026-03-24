@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { getPendingRecords, deleteOfflineRecord, getPendingCount } from '../../services/offlineStorage';
 import { db } from '../../firebaseConfig';
-import { collection, addDoc, query, where, getDocs, updateDoc, doc, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, query, where, getDocs, updateDoc, doc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { getStorage, ref, uploadString, getDownloadURL } from 'firebase/storage';
 import { CloudUpload, Wifi, WifiOff } from 'lucide-react';
 import { fetchLocationName, addWatermarkToImage } from '../../utils/watermark';
@@ -80,12 +80,19 @@ export default function SyncManager() {
                     if (record.image && latitud && longitud) {
                         try {
                             console.log(`🎨 Aplicando watermark completo...`);
+                            
+                            // Determinar el modo para el watermark
+                            let watermarkMode = 'entry';
+                            if (record.mode === 'incident') watermarkMode = 'incident';
+                            else if (record.mode === 'visita') watermarkMode = record.metadata?.tipo;
+                            else if (record.metadata?.tipo === 'Salida') watermarkMode = 'exit';
+
                             finalImage = await addWatermarkToImage(record.image, {
                                 employeeId: record.metadata?.usuario,
                                 timestamp: record.metadata?.fecha + ' ' + record.metadata?.hora,
                                 coords: `${latitud.toFixed(5)}, ${longitud.toFixed(5)}`,
                                 locationName: localidad,
-                                mode: record.mode === 'incident' ? 'incident' : record.metadata?.tipo === 'Salida' ? 'exit' : 'entry'
+                                mode: watermarkMode
                             });
                             console.log(`✅ Watermark completo aplicado`);
                         } catch (err) {
@@ -105,8 +112,11 @@ export default function SyncManager() {
                             const month = (fechaParts[1] || '').padStart(2, '0');
                             
                             // Usar la misma ruta que storageService para mantener consistencia
+                            // Si es visita, la categoría es 'Visita'
+                            const category = record.mode === 'visita' ? 'Visita' : finalMetadata.tipo;
+
                             const photoPath = buildPath(
-                                finalMetadata.tipo,
+                                category,
                                 year,
                                 month,
                                 finalMetadata.usuario,
@@ -118,29 +128,45 @@ export default function SyncManager() {
                             await uploadString(storageRef, finalImage, 'data_url');
                             photoURL = await getDownloadURL(storageRef);
                             console.log(`✅ Foto sincronizada: ${photoPath}`);
+
+                            // Registrar metadatos en la colección 'fotos' (para el visualizador de reportes)
+                            try {
+                                const isAsistencia = category === 'asistencia' || category === 'Entrada' || category === 'Salida';
+                                const isVisita = category === 'Visita';
+                                
+                                await addDoc(collection(db, 'fotos'), {
+                                    tipo: isAsistencia ? 'asistencia' : (isVisita ? 'visita' : 'incidente'),
+                                    tipoOriginal: category,
+                                    email: finalMetadata.usuario,
+                                    fecha: finalMetadata.fecha,
+                                    hora: finalMetadata.hora,
+                                    year: year,
+                                    month: month,
+                                    carpeta: isAsistencia ? 'asistencia' : (isVisita ? 'visitas' : 'incidentes'),
+                                    path: photoPath,
+                                    url: photoURL,
+                                    timestamp: serverTimestamp()
+                                });
+                                console.log(`📸 Metadatos de foto registrados en 'fotos'`);
+                            } catch (err) {
+                                console.error("Error registrando metadatos en 'fotos':", err);
+                            }
                         } catch (err) {
                             console.error("Error subiendo foto a Storage:", err);
                         }
                     }
 
-                    // 5. Buscar si ya existe un documento con el mismo usuario, fecha y hora
-                    const collectionName = record.mode === 'incident' ? 'incidents' : 'attendance';
-                    const existingQuery = query(
-                        collection(db, collectionName),
-                        where("usuario", "==", finalMetadata.usuario),
-                        where("fecha", "==", finalMetadata.fecha),
-                        where("hora", "==", finalMetadata.hora)
-                    );
-                    
-                    const existingSnap = await getDocs(existingQuery);
-                    let existingDocId = null;
-                    
-                    if (!existingSnap.empty) {
-                        existingDocId = existingSnap.docs[0].id;
-                        console.log(`📝 Documento existente encontrado: ${existingDocId}`);
-                    }
+                    // 5. Generar ID determinístico para evitar duplicados (Usuario_Fecha_Hora)
+                    let collectionName = 'attendance';
+                    if (record.mode === 'incident') collectionName = 'incidents';
+                    else if (record.mode === 'visita') collectionName = 'visitas';
 
-                    console.log(`💾 ${existingDocId ? 'Actualizando' : 'Creando nuevo en'} ${collectionName}:`, finalMetadata);
+                    const safeEmail = finalMetadata.usuario.replace(/[@.]/g, '-');
+                    const safeFecha = (finalMetadata.fecha || '').replace(/\//g, '-');
+                    const safeHora = (finalMetadata.hora || '').replace(/:/g, '-').replace(/\s/g, '');
+                    const deterministicDocId = `${safeEmail}_${safeFecha}_${safeHora}`;
+
+                    console.log(`💾 Guardando en ${collectionName} con ID: ${deterministicDocId}`, finalMetadata);
                     
                     const docData = {
                         ...finalMetadata,
@@ -155,24 +181,25 @@ export default function SyncManager() {
                         docData.fotoURL = photoURL;
                     }
 
-                    if (existingDocId) {
-                        // Actualizar documento existente
-                        await updateDoc(doc(db, collectionName, existingDocId), docData);
-                        console.log(`✅ Documento ${existingDocId} actualizado.`);
-                    } else {
-                        // Crear nuevo documento
-                        await addDoc(collection(db, collectionName), docData);
-                    }
+                    // Usar setDoc para sobrescribir si ya existe (evita duplicados)
+                    await setDoc(doc(db, collectionName, deterministicDocId), docData);
+                    console.log(`✅ Documento ${deterministicDocId} guardado/actualizado.`);
 
                     // 6. Limpiar local
                     await deleteOfflineRecord(record.id);
                     console.log(`✅ Registro ${record.id} sincronizado con éxito.`);
 
-                    // 7. Actualizar localStorage con el tipo sincronizado
-                    if (finalMetadata.tipo) {
-                        localStorage.setItem('lastAttendanceType', finalMetadata.tipo);
-                        localStorage.setItem('lastAttendanceTime', Date.now().toString());
-                        console.log(`📱 localStorage actualizado: ${finalMetadata.tipo}`);
+                    // 7. Actualizar localStorage con el tipo sincronizado (específico por usuario)
+                    if (finalMetadata.tipo && finalMetadata.usuario) {
+                        const userSuffix = `_${finalMetadata.usuario}`;
+                        const storageKey = record.mode === 'visita' ? `lastRutaType${userSuffix}` : `lastAttendanceType${userSuffix}`;
+                        const timeKey = record.mode === 'visita' ? null : `lastAttendanceTime${userSuffix}`;
+
+                        localStorage.setItem(storageKey, finalMetadata.tipo);
+                        if (timeKey) {
+                            localStorage.setItem(timeKey, Date.now().toString());
+                        }
+                        console.log(`📱 localStorage actualizado para ${finalMetadata.usuario}: ${finalMetadata.tipo}`);
                     }
                 } catch (error) {
                     console.error(`❌ Error sincronizando registro ${record.id}:`, error);

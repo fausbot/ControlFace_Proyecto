@@ -3,7 +3,7 @@ import Webcam from 'react-webcam';
 import { useAuth } from '../contexts/AuthContext';
 import { addWatermarkToImage, fetchServerTime, fetchLocationName } from '../utils/watermark';
 import { db } from '../firebaseConfig';
-import { collection, addDoc, query, where, getDocs, serverTimestamp, doc, getDoc, Timestamp } from 'firebase/firestore';
+import { collection, addDoc, query, where, getDocs, serverTimestamp, doc, getDoc, Timestamp, setDoc } from 'firebase/firestore';
 import { Camera, MapPin, CheckCircle, LogOut, LogIn, UserCheck, ShieldAlert, TriangleAlert } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import * as faceapi from '@vladmandic/face-api';
@@ -13,7 +13,6 @@ import ActionButtons from '../components/dashboard/ActionButtons';
 import CameraView from '../components/dashboard/CameraView';
 import PreviewView from '../components/dashboard/PreviewView';
 import SuccessView from '../components/dashboard/SuccessView';
-import SyncManager from '../components/dashboard/SyncManager';
 import { saveOfflineRecord, getPendingRecords } from '../services/offlineStorage';
 
 export default function Dashboard() {
@@ -44,6 +43,7 @@ export default function Dashboard() {
     const [autoCapturePending, setAutoCapturePending] = useState(false);
     const blinkCountRef = useRef(0);
     const eyeClosedRef = useRef(false);
+    const [captureFlash, setCaptureFlash] = useState(false);
     const [deferredPrompt, setDeferredPrompt] = useState(null);
     const [showInstallBtn, setShowInstallBtn] = useState(false);
     const [isIOS, setIsIOS] = useState(false);
@@ -422,7 +422,9 @@ export default function Dashboard() {
                 } catch (err) {
                     console.error("Liveness Error:", err);
                 } finally {
-                    isDetecting = false;
+                    // Fix #5: no permitir siguiente frame si el loop ya fue cancelado durante la detección
+                    if (!isLivenessRunningRef.current) isDetecting = false;
+                    else isDetecting = false;
                 }
             }
 
@@ -437,49 +439,20 @@ export default function Dashboard() {
 
     const startCamera = async (facingMode = 'user') => {
         try {
-            // Técnica para forzar diálogo de permisos en móviles
-            // Crear video temporal oculto para forzar el prompt
-            const tempVideo = document.createElement('video');
-            tempVideo.setAttribute('playsinline', '');
-            tempVideo.setAttribute('autoplay', '');
-            tempVideo.style.display = 'none';
-            document.body.appendChild(tempVideo);
-            
-            try {
-                const tempStream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode },
-                    audio: false
-                });
-                
-                // Asignar al video temporal y esperar un frame
-                tempVideo.srcObject = tempStream;
-                await new Promise(resolve => setTimeout(resolve, 100));
-                
-                // Detener stream temporal
-                tempStream.getTracks().forEach(track => track.stop());
-                tempVideo.srcObject = null;
-            } catch (tempErr) {
-                document.body.removeChild(tempVideo);
-                throw tempErr; // Re-lanzar para manejo de errores
-            }
-            
-            document.body.removeChild(tempVideo);
-            
-            // Ahora sí, obtener el stream real
+            // Obtener el stream real directamente (sin stream temporal que cause race condition)
             const stream = await navigator.mediaDevices.getUserMedia({
-                video: { facingMode },
+                video: { facingMode, width: { ideal: 720 }, height: { ideal: 960 } },
                 audio: false
             });
-            
-            // Si había un stream anterior que no se cerró bien, forzar cierre
+
+            // Detener cualquier stream anterior
             if (streamRef.current) {
                 streamRef.current.getTracks().forEach(track => {
                     track.stop();
-                    // Importante para algunos navegadores móviles que dejan la cámara activa:
-                    try { track.enabled = false; } catch(e){}
+                    try { track.enabled = false; } catch(e) {}
                 });
             }
-            
+
             streamRef.current = stream;
             setCameraReady(true);
         } catch (err) {
@@ -501,28 +474,34 @@ export default function Dashboard() {
 
     // Efecto para asignar el flujo de video cuando el elemento esté montado
     useEffect(() => {
-        if (step === 'camera' && cameraReady && videoRef.current && streamRef.current) {
-            console.log('[Dashboard] Asignando stream al video, mode:', modeRef.current);
-            videoRef.current.srcObject = streamRef.current;
-            videoRef.current.play().catch(e => console.error('Error reproduciendo video:', e));
+        if (step === 'camera' && cameraReady && streamRef.current) {
+            // Usar un retry loop por si el video element aún no está en el DOM
+            let retries = 0;
+            const maxRetries = 30; // 3 segundos máximo
+            const assignStream = () => {
+                if (!videoRef.current) {
+                    if (retries++ < maxRetries) setTimeout(assignStream, 100);
+                    else console.error('[Camera] Video element nunca se montó en el DOM.');
+                    return;
+                }
+                console.log('[Dashboard] Asignando stream al video, mode:', modeRef.current);
+                videoRef.current.srcObject = streamRef.current;
+                videoRef.current.play().catch(e => console.error('Error reproduciendo video:', e));
 
-            if (modeRef.current !== 'incident' && modelsLoaded) {
-                // Esperar a que el video tenga frames reales (readyState >= 2)
-                const waitForVideo = setInterval(() => {
-                    if (videoRef.current && videoRef.current.readyState >= 2) {
-                        clearInterval(waitForVideo);
-                        if (storageSettings.security_liveness !== false) {
-                            console.log('[Liveness] Video listo, iniciando detección de parpadeo...');
-                            startLivenessCheck();
-                        } else {
-                            console.log('[Liveness] Video listo, Liveness desactivado -> Captura manual habilitada.');
-                            setStatusMessage('Posicione su rostro y presione Tomar Foto Ahora');
+                if (modeRef.current !== 'incident' && modelsLoaded) {
+                    const waitForVideo = setInterval(() => {
+                        if (videoRef.current && videoRef.current.readyState >= 2) {
+                            clearInterval(waitForVideo);
+                            if (storageSettings.security_liveness !== false) {
+                                startLivenessCheck();
+                            } else {
+                                setStatusMessage('Posicione su rostro y presione Tomar Foto Ahora');
+                            }
                         }
-                    }
-                }, 100);
-            } else if (modeRef.current === 'incident') {
-                // Incidencias no requieren validación de vida
-            }
+                    }, 100);
+                }
+            };
+            assignStream();
         }
     }, [step, cameraReady, modelsLoaded, storageSettings.security_liveness]);
 
@@ -561,12 +540,18 @@ export default function Dashboard() {
     };
 
     const handleStart = async (selectedMode) => {
+        // Fix #2: limpiar sesión anterior COMPLETAMENTE antes de abrir la nueva cámara
+        // Esto evita tener dos loops de liveness corriendo en paralelo
+        stopCamera();
+
         setMode(selectedMode);
         modeRef.current = selectedMode; // Ref para evitar stale closures
         setStep('camera');
         setStatusMessage('');
         setIncidentDescription('');
-        // Reset liveness for new session
+        setFaceVerified(false);
+        setFaceError('');
+        // Reset liveness para nueva sesión
         isLivenessRunningRef.current = false;
         setBlinkCount(0);
         setAutoCapturePending(false);
@@ -596,6 +581,9 @@ export default function Dashboard() {
             const video = videoRef.current;
             const canvas = canvasRef.current;
 
+            // Verificar que el video tiene frames válidos
+            if (video.videoWidth === 0 || video.videoHeight === 0) throw new Error("Video no tiene frames aún. Reintenta.");
+
             // Set canvas dimensions to match video
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
@@ -604,15 +592,26 @@ export default function Dashboard() {
             const context = canvas.getContext('2d');
             context.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-            const imageSrc = canvas.toDataURL('image/jpeg', 0.8); // Higher quality for sharing
-            if (!imageSrc) throw new Error("Error generando imagen");
+            const imageSrc = canvas.toDataURL('image/jpeg', 0.8);
+            if (!imageSrc || imageSrc === 'data:,') throw new Error("Error generando imagen");
+
+            // Fix #3: Flash visual DESPUÉS de confirmar que la imagen tiene píxeles válidos
+            setCaptureFlash(f => !f);
+
+            // Fix #4: Detener el liveness ANTES de lanzar detección facial
+            // Evita que dos detectores compitan por los recursos del modelo al mismo tiempo
+            isLivenessRunningRef.current = false;
+            if (livenessIntervalRef.current) {
+                cancelAnimationFrame(livenessIntervalRef.current);
+                livenessIntervalRef.current = null;
+            }
 
             // INICIO DE PROCESAMIENTO PARALELO
             setStatusMessage('Verificando identidad y ubicación...');
 
             // Definimos las promesas para ganar tiempo
             const facePromise = savedDescriptor 
-                ? faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceDescriptor()
+                ? faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.3 })).withFaceLandmarks().withFaceDescriptor()
                 : Promise.resolve(true);
 
             const locationPromise = (async () => {
@@ -731,13 +730,17 @@ export default function Dashboard() {
         }
     }, [mode, currentUser, isCapturing, savedDescriptor, faceThreshold]);
 
-    // Auto-captura al completar los 2 parpadeos
+    // Auto-captura al completar la verificación de viveza
     useEffect(() => {
-        if (autoCapturePending && !isCapturing) {
+        // Fix #1: Solo capturar si step es 'camera' — evita captura fantasma al cambiar de modo
+        if (autoCapturePending && !isCapturing && step === 'camera') {
             setAutoCapturePending(false);
             capture();
+        } else if (autoCapturePending && step !== 'camera') {
+            // Si autoCapturePending quedó activo pero ya no estamos en cámara, limpiar
+            setAutoCapturePending(false);
         }
-    }, [autoCapturePending, isCapturing, capture]);
+    }, [autoCapturePending, isCapturing, step, capture]);
 
     const shareImage = async () => {
         if (!capturedData || !capturedData.image) return;
@@ -940,7 +943,7 @@ export default function Dashboard() {
                                         >
                                             <div className="flex items-center justify-center gap-3">
                                                 <MapPin size={26} className="animate-bounce" />
-                                                <span className="text-xl tracking-wide">Modo Transporte / Cliente</span>
+                                                <span className="text-xl tracking-wide">Modo Visitas a Clientes</span>
                                             </div>
                                         </button>
                                         <p className="text-center text-white/80 text-xs mt-2 font-medium">Usa este modo si saldrás de las instalaciones base.</p>
@@ -975,6 +978,7 @@ export default function Dashboard() {
                         handleStopCamera={handleStopCamera}
                         capture={capture}
                         step={step}
+                        captureFlash={captureFlash}
                     />
                 )}
 
@@ -1000,7 +1004,6 @@ export default function Dashboard() {
                 )}
 
                 {step === 'success' && <SuccessView />}
-                <SyncManager />
             </div>
             {/* Version Indicator */}
             <div className="p-2 text-center flex flex-col items-center gap-1 opacity-50">
