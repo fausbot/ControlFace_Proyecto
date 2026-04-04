@@ -32,7 +32,8 @@ export default function SyncManager() {
                 return;
             }
 
-            console.log(`📡 Iniciando sincronización de ${pending.length} registros...`);
+            console.log(`📡 Esperando 3 segundos para estabilizar la red antes de sincronizar ${pending.length} registros...`);
+            await new Promise(resolve => setTimeout(resolve, 3000));
 
             for (const record of pending) {
                 try {
@@ -47,8 +48,19 @@ export default function SyncManager() {
                     if (latitud && longitud) {
                         try {
                             console.log(`📍 Obteniendo dirección para ${latitud}, ${longitud}...`);
-                            const address = await fetchLocationName(latitud, longitud);
-                            console.log(`📍 Dirección resuelta: "${address}"`);
+                            let address = null;
+                            
+                            // Reintentos para Nominatim (en caso de red inestable o rate limit)
+                            for (let retry = 0; retry < 3; retry++) {
+                                address = await fetchLocationName(latitud, longitud);
+                                if (address && address !== "Sin conexión a mapas" && address !== "Obteniendo dirección...") {
+                                    break; // Éxito
+                                }
+                                console.log(`⚠️ Intento ${retry + 1} de obtener dirección falló. Reintentando en 2s...`);
+                                await new Promise(r => setTimeout(r, 2000));
+                            }
+                            
+                            console.log(`📍 Dirección final resuelta: "${address}"`);
                             // Solo actualizar si la dirección es válida
                             if (address && address !== "Sin conexión a mapas" && address !== "Obteniendo dirección...") {
                                 localidad = address;
@@ -168,21 +180,49 @@ export default function SyncManager() {
 
                     console.log(`💾 Guardando en ${collectionName} con ID: ${deterministicDocId}`, finalMetadata);
                     
+                    // Convertir fecha/hora capturada a un objeto Date (Firestore lo convertirá a Timestamp automáticamente)
+                    let localTimestamp = serverTimestamp();
+                    try {
+                        const [day, month, year] = (finalMetadata.fecha || '').split('/');
+                        const [hours, minutes, seconds] = (finalMetadata.hora || '').split(':');
+                        if (day && month && year && hours && minutes) {
+                            // Firestore acepta objetos Date de JS directamente
+                            localTimestamp = new Date(year, month - 1, day, hours, minutes, seconds || 0);
+                        }
+                    } catch (e) {
+                        console.error("Error creando fecha local:", e);
+                    }
+
                     const docData = {
                         ...finalMetadata,
                         sincronizadoAt: new Date().toISOString(),
                         metodo: 'offline-sync',
                         latitud: latitud || finalMetadata.latitud,
                         longitud: longitud || finalMetadata.longitud,
-                        timestamp: serverTimestamp()
+                        timestamp: localTimestamp
                     };
                     
                     if (photoURL) {
                         docData.fotoURL = photoURL;
                     }
 
-                    // Usar setDoc para sobrescribir si ya existe (evita duplicados)
-                    await setDoc(doc(db, collectionName, deterministicDocId), docData);
+                    // Doble registro para visitas: Colección 'visitas' (original) y 'attendance' (visor)
+                    if (record.mode === 'visita') {
+                        // 1. Guardar en 'visitas' (formato original para informes de ruta)
+                        await setDoc(doc(db, 'visitas', deterministicDocId), docData);
+                        console.log(`✅ Registro original en 'visitas' guardado.`);
+
+                        // 2. Guardar en 'attendance' (formato para el visor de datos)
+                        const attendanceData = { ...docData };
+                        if (attendanceData.tipo === 'Llegada Cliente') attendanceData.tipo = 'En Cliente';
+                        if (attendanceData.tipo === 'Salida Cliente') attendanceData.tipo = 'En Tránsito';
+                        
+                        await setDoc(doc(db, 'attendance', deterministicDocId), attendanceData);
+                        console.log(`✅ Registro duplicado en 'attendance' guardado como: ${attendanceData.tipo}`);
+                    } else {
+                        // Guardado normal para asistencia e incidentes
+                        await setDoc(doc(db, collectionName, deterministicDocId), docData);
+                    }
                     console.log(`✅ Documento ${deterministicDocId} guardado/actualizado.`);
 
                     // 6. Limpiar local
@@ -204,6 +244,10 @@ export default function SyncManager() {
                 } catch (error) {
                     console.error(`❌ Error sincronizando registro ${record.id}:`, error);
                 }
+                
+                // Pausa de 1.5 segundos entre cada registro para respetar el rate limit de Nominatim (1 req/s)
+                console.log("⏱️ Pausando 1.5s antes del siguiente registro...");
+                await new Promise(resolve => setTimeout(resolve, 1500));
             }
         } catch (err) {
             console.error("❌ Error general en sincronización:", err);

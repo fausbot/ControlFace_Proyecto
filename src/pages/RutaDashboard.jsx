@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { db } from '../firebaseConfig';
-import { collection, addDoc, serverTimestamp, doc, setDoc } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, doc, setDoc, query, where, getDocs } from 'firebase/firestore';
 import { Camera, MapPin, ArrowLeft, Send, CheckCircle, Navigation } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { uploadPhoto } from '../services/storageService';
@@ -23,19 +23,93 @@ export default function RutaDashboard() {
     const [statusMessage, setStatusMessage] = useState('');
 
     useEffect(() => {
-        // Cargar estado desde localStorage para la ruta
-        const lastType = localStorage.getItem(`lastRutaType_${currentUser.email}`);
-        if (lastType === 'Llegada Cliente') {
-            setAllowedActions({ entry: false, exit: true });
-        } else {
-            setAllowedActions({ entry: true, exit: false });
-        }
-    }, [currentUser.email]);
+        const checkVisitStatus = async () => {
+            if (!currentUser) return;
+            
+            // 1. Cargar estado inicial desde localStorage para evitar parpadeos
+            const lastTypeLS = localStorage.getItem(`lastRutaType_${currentUser.email}`);
+            if (lastTypeLS === 'Llegada Cliente') {
+                setAllowedActions({ entry: false, exit: true });
+            } else {
+                setAllowedActions({ entry: true, exit: false });
+            }
+
+            // 2. Revisar si hay salida de turno registrada en este dispositivo (vía Dashboard)
+            const attType = localStorage.getItem(`lastAttendanceType_${currentUser.email}`);
+            if (attType === 'Salida') {
+                setAllowedActions({ entry: true, exit: false });
+                localStorage.removeItem(`lastRutaType_${currentUser.email}`);
+                return; // Cortamos aquí porque la salida de turno manda (inicio nuevo)
+            }
+
+            // 3. Consultar la base de datos para recuperar la última visita real de la nube
+            try {
+                const q = query(
+                    collection(db, "visitas"),
+                    where("usuario", "==", currentUser.email)
+                );
+                const snap = await getDocs(q);
+                if (!snap.empty) {
+                    const records = snap.docs.map(d => d.data());
+                    
+                    const getMillisLocal = (ts) => {
+                        if (!ts) return 0;
+                        if (typeof ts.toMillis === 'function') return ts.toMillis();
+                        if (ts instanceof Date) return ts.getTime();
+                        if (typeof ts === 'number') return ts;
+                        if (typeof ts === 'string') return new Date(ts).getTime();
+                        return Date.now();
+                    };
+                    const getMillisFromDateTime = (fecha, hora) => {
+                        if (!fecha || !hora) return 0;
+                        try {
+                            const [d, m, y] = fecha.split('/');
+                            const [h, min, s] = hora.split(':');
+                            return new Date(y, m - 1, d, h, min, s).getTime();
+                        } catch { return 0; }
+                    };
+
+                    // Ordenar registros: el más reciente primero
+                    records.sort((a, b) => {
+                        const tA = getMillisLocal(a.timestamp) || getMillisFromDateTime(a.fecha, a.hora) || 0;
+                        const tB = getMillisLocal(b.timestamp) || getMillisFromDateTime(b.fecha, b.hora) || 0;
+                        return tB - tA; 
+                    });
+                    
+                    const lastDoc = records[0];
+                    const lastTipo = lastDoc.tipo || lastDoc.mode; // Fallback for older documents
+                    const lastTime = getMillisLocal(lastDoc.timestamp) || getMillisFromDateTime(lastDoc.fecha, lastDoc.hora) || 0;
+                    
+                    const diffHours = lastTime > 0 ? (Date.now() - lastTime) / (1000 * 60 * 60) : 0;
+                    
+                    // Condición 1: Pasaron más de 20 horas desde la última visita en ruta
+                    if (diffHours > 20) {
+                        setAllowedActions({ entry: true, exit: false });
+                        localStorage.removeItem(`lastRutaType_${currentUser.email}`);
+                    } 
+                    // Condición 2: El último registro fue 'Llegada Cliente' y no han pasado 20 horas
+                    else if (lastTipo === 'Llegada Cliente') {
+                        setAllowedActions({ entry: false, exit: true });
+                        localStorage.setItem(`lastRutaType_${currentUser.email}`, 'Llegada Cliente');
+                    } 
+                    // Condición 3: El último registro fue 'Salida Cliente'
+                    else if (lastTipo === 'Salida Cliente') {
+                        setAllowedActions({ entry: true, exit: false });
+                        localStorage.setItem(`lastRutaType_${currentUser.email}`, 'Salida Cliente');
+                    }
+                }
+            } catch (err) {
+                console.warn("⚠️ Sin conexión a Firestore. Usando caché local de visitas:", err);
+            }
+        };
+        
+        checkVisitStatus();
+    }, [currentUser]);
 
     const startCamera = async () => {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({
-                video: { facingMode: 'environment' },
+                video: { facingMode: 'environment', width: { ideal: 1080 }, height: { ideal: 1440 } },
                 audio: false
             });
             if (streamRef.current) {
@@ -81,10 +155,28 @@ export default function RutaDashboard() {
         try {
             const video = videoRef.current;
             const canvas = canvasRef.current;
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
+            const targetRatio = 3 / 4;
+            const videoRatio = video.videoWidth / video.videoHeight;
+            
+            let drawWidth = video.videoWidth;
+            let drawHeight = video.videoHeight;
+            let offsetX = 0;
+            let offsetY = 0;
+
+            if (videoRatio > targetRatio) {
+                // Video is wider than 3:4. Crop sides to keep center.
+                drawWidth = video.videoHeight * targetRatio;
+                offsetX = (video.videoWidth - drawWidth) / 2;
+            } else if (videoRatio < targetRatio) {
+                // Video is taller than 3:4. Crop top/bottom.
+                drawHeight = video.videoWidth / targetRatio;
+                offsetY = (video.videoHeight - drawHeight) / 2;
+            }
+
+            canvas.width = drawWidth;
+            canvas.height = drawHeight;
             const context = canvas.getContext('2d');
-            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+            context.drawImage(video, offsetX, offsetY, drawWidth, drawHeight, 0, 0, drawWidth, drawHeight);
             const imageSrc = canvas.toDataURL('image/jpeg', 0.8);
 
             setStatusMessage('Obteniendo ubicación...');
@@ -151,6 +243,7 @@ export default function RutaDashboard() {
         if (!capturedData) return;
         setStep('processing');
         setStatusMessage('Guardando y Subiendo foto...');
+        let timeoutTriggered = false;
 
         const saveRecordOnline = async () => {
             // Subir foto a Firebase Storage primero
@@ -162,12 +255,31 @@ export default function RutaDashboard() {
                 capturedData.metadata.hora
             );
 
+            // Evitar sobrescritura si la promesa tardó demasiado y el flujo offline ya tomó el control
+            if (timeoutTriggered) {
+                console.log("Upload finalizó post-timeout. Abortando escritura en BD para no chocar con SyncManager.");
+                return url;
+            }
+
             setStatusMessage('Guardando registro...');
+            
+            // Crear fecha local basada en la captura real (Firestore lo convertirá a Timestamp automáticamente)
+            let localTimestamp = serverTimestamp();
+            try {
+                const [day, month, year] = (capturedData.metadata.fecha || '').split('/');
+                const [hours, minutes, seconds] = (capturedData.metadata.hora || '').split(':');
+                if (day && month && year && hours && minutes) {
+                    localTimestamp = new Date(year, month - 1, day, hours, minutes, seconds || 0);
+                }
+            } catch (e) {
+                console.error("Error creando fecha local:", e);
+            }
+
             const docData = {
                 ...capturedData.metadata,
                 observacion: observacion.trim(),
                 fotoURL: url,
-                timestamp: serverTimestamp()
+                timestamp: localTimestamp
             };
 
             // Generar ID determinístico para evitar duplicados
@@ -176,13 +288,25 @@ export default function RutaDashboard() {
             const safeHora = (capturedData.metadata.hora || '').replace(/:/g, '-').replace(/\s/g, '');
             const deterministicDocId = `${safeEmail}_${safeFecha}_${safeHora}`;
 
+            // 1. Guardar en 'visitas' (formato original para informes de ruta)
             await setDoc(doc(db, "visitas", deterministicDocId), docData);
+            
+            // 2. Guardar en 'attendance' (formato para el visor de datos)
+            const attendanceData = { ...docData };
+            if (attendanceData.tipo === 'Llegada Cliente') attendanceData.tipo = 'En Cliente';
+            if (attendanceData.tipo === 'Salida Cliente') attendanceData.tipo = 'En Tránsito';
+
+            await setDoc(doc(db, "attendance", deterministicDocId), attendanceData);
+            
             return url;
         };
 
         try {
             // USAR TIMEOUT DE 3s PARA FIRESTORE: Si no responde, forzar offline
-            const saveTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error("Firebase Timeout")), 3000));
+            const saveTimeout = new Promise((_, reject) => setTimeout(() => {
+                timeoutTriggered = true;
+                reject(new Error("Firebase Timeout"));
+            }, 3000));
             
             let url = null;
             try {
@@ -315,14 +439,16 @@ export default function RutaDashboard() {
                 {step === 'camera' && (
                     <div className="w-full flex flex-col items-center animate-fade-in">
                         <h2 className="text-white text-xl font-bold mb-4">{mode}</h2>
-                        <div className="relative rounded-2xl overflow-hidden shadow-2xl border-4 border-indigo-500 bg-black w-full aspect-[3/4] max-w-[280px]">
-                            <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
-                            <canvas ref={canvasRef} className="hidden" />
-                            <div className="absolute inset-0 border-2 border-white/30 rounded-2xl pointer-events-none"></div>
-                            <div className="absolute bottom-4 left-0 right-0 text-center">
-                                <span className="bg-black/60 text-white text-xs px-3 py-1 rounded-full backdrop-blur-md inline-flex items-center gap-2">
-                                    <MapPin size={12}/> Buscando ubicación...
-                                </span>
+                        <div className="flex flex-col items-center animate-fade-in w-full">
+                            <div className="relative rounded-lg overflow-hidden border-2 border-green-400 bg-black aspect-[3/4] w-full max-w-[280px]">
+                                <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
+                                <canvas ref={canvasRef} className="hidden" />
+                                <div className="absolute inset-0 border-2 border-white/30 rounded-2xl pointer-events-none"></div>
+                                <div className="absolute bottom-4 left-0 right-0 text-center">
+                                    <span className="bg-black/60 text-white text-xs px-3 py-1 rounded-full backdrop-blur-md inline-flex items-center gap-2">
+                                        <MapPin size={12}/> Buscando ubicación...
+                                    </span>
+                                </div>
                             </div>
                         </div>
                         <div className="mt-6 flex gap-4">

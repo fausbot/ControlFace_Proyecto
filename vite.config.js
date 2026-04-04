@@ -2,14 +2,23 @@
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
+import fs from 'fs'
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
 
+  const writeVersionPlugin = () => ({
+    name: 'write-version',
+    buildStart() {
+      fs.writeFileSync('public/version.json', JSON.stringify({ version: env.VITE_APP_VERSION || '1.0.0' }));
+    }
+  });
+
   return {
     plugins: [
       react(),
+      writeVersionPlugin(),
       VitePWA({
         registerType: 'autoUpdate',
         includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg', env.VITE_CLIENT_LOGO_URL],

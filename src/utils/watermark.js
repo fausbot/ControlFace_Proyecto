@@ -18,12 +18,24 @@ export const addWatermarkToImage = async (imageSrc, data) => {
                 const canvas = document.createElement('canvas');
                 const ctx = canvas.getContext('2d');
 
-                // Set canvas dimensions to match image
-                canvas.width = img.width;
-                canvas.height = img.height;
+                // Calculate extra padding at the bottom so the data banner never overlays the face.
+                // We calculate the banner height first, then extend the canvas to fit both photo + banner.
+                const fontSize = Math.max(20, img.width * 0.038);
+                const lineHeight = fontSize * 1.4;
+                const padding = 20;
+                // We'll estimate lines count: 3 header + ~2 address lines = 5 lines max
+                const estimatedBannerHeight = (lineHeight * 5) + (padding * 2);
 
-                // Draw original image
+                // The canvas height = photo height + banner height (never overlap the face)
+                canvas.width = img.width;
+                canvas.height = img.height + estimatedBannerHeight;
+
+                // Draw original image at the top
                 ctx.drawImage(img, 0, 0);
+
+                // Fill banner area background
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+                ctx.fillRect(0, img.height, canvas.width, estimatedBannerHeight);
 
                 // --- Draw Mode Label (ENTRADA/SALIDA/INCIDENTE/VISITA) at Top ---
                 let modeText = 'ENTRADA';
@@ -91,21 +103,18 @@ export const addWatermarkToImage = async (imageSrc, data) => {
                 ctx.textAlign = 'left';
 
                 // --- Draw Logo ---
-                // Draw logo small in top-left
-                const logoWidth = img.width * 0.15; // 15% of width
+                // Draw logo bigger in top-left (25% of width for better visibility)
+                const logoWidth = img.width * 0.25;
                 const logoHeight = logoWidth * (logo.height / logo.width);
                 // Fallback if logo failed to load or has 0 dims
                 if (logo.width > 0) {
-                    ctx.drawImage(logo, 20, 20, logoWidth, logoHeight);
+                    ctx.drawImage(logo, 18, 18, logoWidth, logoHeight);
                 }
 
-                // --- Watermark Text ---
-                const fontSize = Math.max(20, img.width * 0.035);
+                // --- Watermark Text (drawn in the extra banner area below the photo) ---
                 ctx.font = `bold ${fontSize}px monospace`;
-                ctx.textBaseline = 'top'; // Use top for easier layout
+                ctx.textBaseline = 'top';
 
-                const padding = 20;
-                const lineHeight = fontSize * 1.4; // More breathing room
                 const maxWidth = canvas.width - (padding * 2);
 
                 // Helper to wrap text based on canvas width
@@ -130,32 +139,22 @@ export const addWatermarkToImage = async (imageSrc, data) => {
 
                 const addressLines = wrapText(`LOCALIDAD: ${data.locationName || ''}`, maxWidth);
 
-                // Final lines to draw
                 const headerLines = [
                     `ID: ${data.employeeId}`,
                     `FECHA: ${data.timestamp}`,
                     `UBICACION: ${data.coords}`
                 ];
 
-                const totalLines = headerLines.length + addressLines.length;
-                const textBlockHeight = (lineHeight * totalLines) + (padding * 2);
-
-                // Background
-                ctx.fillStyle = 'rgba(0, 0, 0, 0.7)'; // Slightly darker for better contrast
-                ctx.fillRect(0, canvas.height - textBlockHeight, canvas.width, textBlockHeight);
-
-                // Draw Text
+                // Draw text starting right at img.height + padding (banner area)
                 ctx.fillStyle = '#ffffff';
-                let currentY = canvas.height - textBlockHeight + padding;
+                let currentY = img.height + padding;
                 const currentX = padding;
 
-                // Draw Headers
                 headerLines.forEach(line => {
                     ctx.fillText(line, currentX, currentY);
                     currentY += lineHeight;
                 });
 
-                // Draw Wrapped Address
                 addressLines.forEach(line => {
                     ctx.fillText(line, currentX, currentY);
                     currentY += lineHeight;

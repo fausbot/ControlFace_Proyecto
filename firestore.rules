@@ -9,10 +9,22 @@ service cloud.firestore {
       allow write: if true;
     }
 
+    // Config general (contraseña admin, etc.): lectura pública (la verifica Cloud Function en backend)
+    // La escritura la hacen las Cloud Functions vía Admin SDK (ignoran estas reglas)
+    match /settings/config {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+
     // Configuración de campos de empleados: lectura pública, escritura solo autenticados
     match /settings/employeeFields {
       allow read: if true;
       allow write: if true;
+    }
+
+    // Cola de borrado: Cloud Functions la gestiona con Admin SDK, pero dejamos write permitido
+    match /deletionQueue/{id} {
+      allow read, write: if true;
     }
     
     // Asistencia: Lectura pública (para Admin sin login), escritura solo autenticados

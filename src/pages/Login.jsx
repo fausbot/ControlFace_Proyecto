@@ -54,6 +54,29 @@ export default function Login() {
             const currentVersion = import.meta.env.VITE_APP_VERSION || '1.6.16';
             const savedVersion = localStorage.getItem('app_version');
 
+            // NUEVO: Verificación directa contra el servidor para romper el caché silencioso
+            try {
+                const response = await fetch('/version.json?t=' + Date.now());
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.version && data.version !== currentVersion) {
+                        setIsUpdating(true);
+                        const userAgent = window.navigator.userAgent.toLowerCase();
+                        
+                        if (userAgent.includes('windows') || userAgent.includes('macintosh') || userAgent.includes('mac os')) {
+                            setUpdateMessage('ESTÁS USANDO UNA VERSIÓN ANTIGUA O EN CACHÉ.\n\nPor favor, presiona las teclas "Ctrl + F5" (en Windows) o "Cmd + Shift + R" (en Mac) para limpiar la memoria de esta página y actualizar.');
+                        } else if (userAgent.includes('iphone') || userAgent.includes('ipad')) {
+                            setUpdateMessage('ESTÁS USANDO UNA VERSIÓN ANTIGUA O EN CACHÉ.\n\nCierra esta aplicación por completo (deslizándola hacia arriba desde la multitarea) y vuelve a abrirla. Si el aviso persiste, toca el botón de "Limpiar App" abajo.');
+                        } else {
+                            setUpdateMessage('ESTÁS USANDO UNA VERSIÓN ANTIGUA O EN CACHÉ.\n\nToca el texto en la parte inferior de la pantalla que dice "Limpiar App si no se actualiza" para forzar la actualización en tu Android.');
+                        }
+                        return; // Detenemos aquí para que la pantalla quede bloqueada hasta que el usuario siga los pasos
+                    }
+                }
+            } catch (err) {
+                console.log("No se pudo verificar version.json (probablemente offline)", err);
+            }
+
             if (savedVersion && savedVersion !== currentVersion) {
                 setIsUpdating(true);
                 const userAgent = window.navigator.userAgent.toLowerCase();
@@ -157,15 +180,6 @@ export default function Login() {
 
     return (
         <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-[#3C7DA6] to-[#6FAF6B] p-4 relative">
-            {/* Overlay de Actualización */}
-            {isUpdating && (
-                <div className="fixed inset-0 z-[100] bg-blue-900/90 backdrop-blur-md flex flex-col items-center justify-center text-white p-6 text-center">
-                    <div className="w-16 h-16 border-4 border-white/30 border-t-white rounded-full animate-spin mb-6"></div>
-                    <h2 className="text-2xl font-bold mb-2">¡Nueva versión encontrada!</h2>
-                    <p className="text-blue-100 mb-4">{updateMessage}</p>
-                    <p className="text-xs opacity-50 italic">Esto solo tomará un segundo...</p>
-                </div>
-            )}
 
             <div className="absolute top-4 left-0 right-0 px-4 flex justify-center gap-1.5 sm:gap-4 flex-wrap">
                 {isLicenseValid && (
@@ -181,8 +195,11 @@ export default function Login() {
                     onClick={() => { setAdminTarget('/datos'); setShowAdminModal(true); }}
                     className="flex items-center gap-1.5 px-2.5 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-lg border border-white/30 backdrop-blur-sm transition text-[10px] sm:text-xs font-bold whitespace-nowrap"
                 >
-                    <Settings size={14} />
-                    DATOS
+                    <span className="relative flex h-2 w-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
+                    </span>
+                    EN VIVO
                 </button>
                 <button
                     onClick={() => { setAdminTarget('/informes'); setShowAdminModal(true); }}
@@ -211,8 +228,24 @@ export default function Login() {
             />
 
             <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md backdrop-blur-sm bg-opacity-90 flex flex-col items-center relative overflow-hidden">
+                {/* Overlay de Actualización Confinado a la Tarjeta */}
+                {isUpdating && (
+                    <div className="absolute inset-0 z-[100] bg-blue-900/95 backdrop-blur-md flex flex-col items-center justify-center text-white p-6 text-center">
+                        <div className="w-12 h-12 border-4 border-white/30 border-t-white rounded-full animate-spin mb-4"></div>
+                        <h2 className="text-xl font-bold mb-2 text-yellow-300">¡Nueva versión encontrada!</h2>
+                        <p className="text-blue-50 font-medium mb-6 whitespace-pre-line leading-relaxed text-sm">{updateMessage}</p>
+                        
+                        {updateMessage.includes('Ctrl') ? (
+                            <button onClick={() => window.location.reload(true)} className="px-4 py-2 bg-white text-blue-900 rounded-full font-bold text-sm shadow-lg hover:bg-gray-200 transition">
+                                Intentar Carga Forzada
+                            </button>
+                        ) : (
+                            <p className="text-xs opacity-70 italic mt-4 bg-black/20 p-2 rounded-lg border border-white/10 text-center">Sigue las instrucciones inferiores fuera este recuadro para actualizar.</p>
+                        )}
+                    </div>
+                )}
                 <img
-                    src="/LogoCoontrolFace.png"
+                    src="/LogolFaceContro.jpg"
                     alt="ControlFace Logo"
                     className="absolute top-4 left-4 w-36 object-contain opacity-80"
                 />

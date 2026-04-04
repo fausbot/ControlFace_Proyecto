@@ -1,9 +1,9 @@
 // src/pages/Datos.jsx
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Trash2, ChevronLeft, ChevronRight, Loader2, FileText, CheckCircle } from 'lucide-react';
+import { Trash2, ChevronLeft, ChevronRight, Loader2, FileText, CheckCircle, Search, X } from 'lucide-react';
 import { db } from '../firebaseConfig';
-import { collection, query, where, addDoc, getDocs } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, setDoc, getDoc, deleteDoc } from 'firebase/firestore';
 import { useAuth } from '../contexts/AuthContext';
 
 // ✅ Importamos desde los servicios
@@ -12,7 +12,6 @@ import {
     deleteAttendanceLog,
     subscribeToAttendanceLogs
 } from '../services/attendanceService';
-
 
 import { getEmployeesMap } from '../services/employeeService';
 
@@ -25,6 +24,8 @@ export default function Datos() {
     const [pageNumber, setPageNumber] = useState(1);
     const [hasMore, setHasMore] = useState(true);
     const [employeesMap, setEmployeesMap] = useState({});
+    const [searchTerm, setSearchTerm] = useState('');
+    const [rutaActive, setRutaActive] = useState(false); // Flag para mostrar modo visita
 
     // Estado para Entrada Manual
     const [mUser, setMUser] = useState('');
@@ -56,6 +57,17 @@ export default function Datos() {
         };
         loadInitialData();
 
+        // Cargar flag ruta_active
+        const fetchSettings = async () => {
+            try {
+                const docSnap = await getDoc(doc(db, 'settings', 'employeeFields'));
+                if (docSnap.exists() && docSnap.data().ruta_active === true) {
+                    setRutaActive(true);
+                }
+            } catch (err) { console.warn("No se pudo cargar config ruta:", err) }
+        };
+        fetchSettings();
+
         // Suscripción en tiempo real
         setLoading(true);
         const unsubscribe = subscribeToAttendanceLogs((updatedLogs) => {
@@ -75,15 +87,28 @@ export default function Datos() {
         };
     }, [adminAccess, navigate]);
 
-    // (eliminado loadlogs y variables que no se usan)
-
-    // Recalcular página cuando cambia pageNumber
+    // Recalcular página cuando cambia pageNumber o el término de búsqueda
     useEffect(() => {
-        if (allLogs.length === 0) return;
-        const { data, hasMore: more } = paginateLogs(allLogs, pageNumber, PAGE_SIZE);
+        if (allLogs.length === 0) {
+            setLogs([]);
+            return;
+        }
+
+        let filteredLogs = allLogs;
+        if (searchTerm.trim() !== '') {
+            const lowerSearch = searchTerm.toLowerCase();
+            filteredLogs = allLogs.filter(log => {
+                const emp = employeesMap[log.usuario] || { firstName: '', lastName: '' };
+                const fullName = `${emp.firstName} ${emp.lastName}`.toLowerCase();
+                const email = (log.usuario || '').toLowerCase();
+                return fullName.includes(lowerSearch) || email.includes(lowerSearch);
+            });
+        }
+
+        const { data, hasMore: more } = paginateLogs(filteredLogs, pageNumber, PAGE_SIZE);
         setLogs(data);
         setHasMore(more);
-    }, [pageNumber, allLogs]);
+    }, [pageNumber, allLogs, searchTerm, employeesMap]);
 
     const handleManualEntry = async (e) => {
         e.preventDefault();
@@ -100,34 +125,67 @@ export default function Datos() {
         if (mAmPm === 'PM' && h24 !== 12) h24 += 12;
         const timeStr = `${String(h24).padStart(2, '0')}:${mMinute}:00`;
 
+        const safeEmail = mUser.toLowerCase().trim().replace(/[@.]/g, '-');
+        const safeFecha = dateStr.replace(/\//g, '-');
+        const safeHora = timeStr.replace(/:/g, '-').replace(/\s/g, '');
+        const deterministicDocId = `${safeEmail}_${safeFecha}_${safeHora}`;
+
         try {
             setMSaving(true);
-            const q = query(
-                collection(db, "attendance"),
-                where("usuario", "==", mUser.toLowerCase().trim()),
-                where("fecha", "==", dateStr),
-                where("tipo", "==", mType)
-            );
-            const snap = await getDocs(q);
+            
+            // Para Entrada/Salida normales, la regla es 1 por día general.
+            // Para Visitas (En Cliente / En Tránsito), pueden haber MUCHAS por día.
+            if (mType === 'Entrada' || mType === 'Salida') {
+                const q = query(
+                    collection(db, "attendance"),
+                    where("usuario", "==", mUser.toLowerCase().trim()),
+                    where("fecha", "==", dateStr),
+                    where("tipo", "==", mType)
+                );
+                const snap = await getDocs(q);
 
-            if (!snap.empty) {
-                if (!window.confirm('Ya existe un registro con estos datos. ¿Desea sobreescribirlo?')) {
-                    setMSaving(false);
-                    return;
+                if (!snap.empty) {
+                    if (!window.confirm(`Ya existe una ${mType} en esta fecha. ¿Desea sobreescribirla?`)) {
+                        setMSaving(false);
+                        return;
+                    }
+                    for (const docSnap of snap.docs) {
+                        await deleteAttendanceLog(docSnap.id);
+                    }
                 }
-                for (const docSnap of snap.docs) {
-                    await deleteAttendanceLog(docSnap.id);
+            } else {
+                // Para visitas, solo verificamos si ya existe EXACTAMENTE a la misma hora para no duplicar por error
+                const docRef = doc(db, "attendance", deterministicDocId);
+                const docSnap = await getDoc(docRef);
+                if (docSnap.exists()) {
+                    if (!window.confirm('Ya existe un registro de visita EXACTAMENTE a esta misma hora. ¿Desea sobreescribirlo?')) {
+                        setMSaving(false);
+                        return;
+                    }
                 }
             }
 
-            await addDoc(collection(db, "attendance"), {
+            // Usando setDoc con ID determinístico para consistencia con app principal
+            const docData = {
                 usuario: mUser.toLowerCase().trim(),
                 tipo: mType,
                 fecha: dateStr,
                 hora: timeStr,
                 localidad: "ENTRADA MANUAL DE DATOS",
                 timestamp: new Date(`${mDate}T${mHour}:${mMinute}:00`)
-            });
+            };
+            await setDoc(doc(db, "attendance", deterministicDocId), docData);
+
+            // Si es modo visita, crear el registro espejo en 'visitas'
+            if (mType === 'En Cliente' || mType === 'En Tránsito') {
+                const visitaDocData = {
+                    ...docData,
+                    tipo: mType === 'En Cliente' ? 'Llegada Cliente' : 'Salida Cliente',
+                    mode: 'visita',
+                    observacion: "Añadido manualmente",
+                };
+                await setDoc(doc(db, "visitas", deterministicDocId), visitaDocData);
+            }
 
             alert('✅ Registro adicionado correctamente.');
             setMUser(''); setMDate('');
@@ -135,7 +193,6 @@ export default function Datos() {
             setMHour(String(h % 12 || 12).padStart(2, '0'));
             setMMinute(String(new Date().getMinutes()).padStart(2, '0'));
             setMAmPm(h < 12 ? 'AM' : 'PM');
-            // No hace falta llamar a loadLogs() porque onSnapshot detectará el nuevo doc
         } catch (error) {
             console.error(error);
             alert('Error al guardar el registro manual.');
@@ -159,17 +216,48 @@ export default function Datos() {
     return (
         <div className="min-h-screen bg-gradient-to-b from-[#3C7DA6] to-[#6FAF6B] p-6 pb-72">
             <div className="max-w-6xl mx-auto">
-                <div className="flex justify-between items-center mb-8">
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
                     <h1 className="text-3xl font-bold text-gray-800 flex items-center gap-2">
                         <FileText size={30} className="text-blue-600" />
                         Visor de Asistencia
                         <div className="flex items-center gap-1.5 px-2 py-0.5 bg-red-50 text-red-600 rounded-full border border-red-100 animate-pulse ml-2">
-                            <span className="w-1.5 h-1.5 bg-red-600 rounded-full"></span>
-                            <span className="text-[10px] font-bold uppercase tracking-wider">Live</span>
+                            <span className="relative flex h-1.5 w-1.5">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75"></span>
+                                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-red-600"></span>
+                            </span>
+                            <span className="text-[10px] font-bold uppercase tracking-wider">EN VIVO</span>
                         </div>
                         <span className="text-[10px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-mono ml-1 border border-gray-200">v{import.meta.env.VITE_APP_VERSION}</span>
                     </h1>
-                    <button onClick={() => navigate('/dashboard')} className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 transition">Volver</button>
+                    
+                    <div className="flex items-center gap-3 w-full md:w-auto">
+                        <div className="relative flex-1 md:w-[320px]">
+                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                <Search size={18} className="text-gray-500" />
+                            </div>
+                            <input
+                                type="text"
+                                placeholder="Buscar por empleado o correo..."
+                                value={searchTerm}
+                                onChange={(e) => {
+                                    setSearchTerm(e.target.value);
+                                    setPageNumber(1);
+                                }}
+                                className="w-full pl-10 pr-10 py-2.5 bg-white border-0 text-gray-800 placeholder-gray-500 rounded-xl shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-400 transition"
+                            />
+                            {searchTerm && (
+                                <button 
+                                    onClick={() => { setSearchTerm(''); setPageNumber(1); }} 
+                                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-700 transition"
+                                >
+                                    <X size={18} />
+                                </button>
+                            )}
+                        </div>
+                        <button onClick={() => navigate('/dashboard')} className="px-6 py-2.5 bg-white text-gray-800 font-bold flex items-center gap-2 rounded-xl border border-gray-100 shadow-lg hover:bg-gray-50 transition whitespace-nowrap">
+                            Volver
+                        </button>
+                    </div>
                 </div>
 
 
@@ -198,8 +286,12 @@ export default function Datos() {
                                             <td className="p-4 font-bold">{emp.firstName} {emp.lastName}</td>
                                             <td className="p-4 text-gray-500">{log.usuario}</td>
                                             <td className="p-4">
-                                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${log.tipo === 'Entrada' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                                                    {log.tipo}
+                                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                                                    log.tipo === 'Entrada' ? 'bg-green-100 text-green-700' : 
+                                                    (log.tipo === 'En Cliente' || log.tipo === 'En Tránsito') ? 'bg-blue-100 text-blue-700 border border-blue-200' :
+                                                    'bg-red-100 text-red-700'
+                                                }`}>
+                                                    {log.tipo === 'En Cliente' ? 'ENTRADA A CLIENTE' : log.tipo === 'En Tránsito' ? 'SALIDA DE CLIENTE' : log.tipo}
                                                 </span>
                                             </td>
                                             <td className="p-4">{log.fecha}</td>
@@ -256,6 +348,12 @@ export default function Datos() {
                             >
                                 <option value="Entrada">Entrada</option>
                                 <option value="Salida">Salida</option>
+                                {rutaActive && (
+                                    <>
+                                        <option value="En Cliente">Llegada Cliente (Visita)</option>
+                                        <option value="En Tránsito">Salida Cliente (Visita)</option>
+                                    </>
+                                )}
                             </select>
                         </div>
                         {/* Fecha */}

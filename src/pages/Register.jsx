@@ -133,7 +133,7 @@ export default function Register() {
     const startCamera = async () => {
         setError('');
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
+            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 720 }, height: { ideal: 960 } }, audio: false });
             streamRef.current = stream;
             setIsCameraOpen(true);
         } catch (err) {
@@ -390,7 +390,7 @@ export default function Register() {
                                 {!modelsLoaded && <p className="text-[10px] text-orange-500 mt-1">Cargando modelos inteligentes...</p>}
                             </div>
                         ) : (
-                            <div className="flex flex-col items-center animate-fade-in">
+                            <div className="flex flex-col items-center animate-fade-in w-full">
                                 <div className="relative rounded-lg overflow-hidden border-2 border-blue-400 bg-black aspect-[3/4] w-full max-w-[200px]">
                                     <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover transform scale-x-[-1]" />
                                     <canvas ref={canvasRef} className="hidden" />

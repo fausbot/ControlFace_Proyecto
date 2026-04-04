@@ -535,13 +535,31 @@ export default function Informes() {
                     }
                 });
 
+                let maxVisits = 0;
+                Object.values(userShiftBlocks).forEach(blocks => {
+                    blocks.forEach(b => {
+                        if (b.visits.length > maxVisits) maxVisits = b.visits.length;
+                    });
+                });
+                if (maxVisits === 0) maxVisits = 1;
+
+                const visitHeaders = [];
+                for (let i = 1; i <= maxVisits; i++) {
+                    visitHeaders.push(
+                        `Hora Ingreso (Cliente ${i})`, 
+                        `Localidad (Ingreso ${i})`, 
+                        `Hora Salida (Cliente ${i})`, 
+                        `Localidad (Salida ${i})`,
+                        `Tiempo Trabajado Cliente ${i} (Horas)`
+                    );
+                }
+
                 headers = [
                     'Usuario', 'Nombres', 'Apellidos', 'Día',
                     'Fecha Entrada (Turno)', 'Hora Entrada', 'Localidad Entrada',
                     'Fecha Salida (Turno)', 'Hora Salida', 'Localidad Salida',
-                    'Hora Ingreso (Cliente)', 'Localidad (Ingreso)', 
-                    'Hora Salida (Cliente)', 'Localidad (Salida)',
-                    'Tiempo Trabajado Cliente (Horas)', 'Total Horas Trabajadas (Turno)', 'Total Horas Efectivas (Suma Clientes)', 'Tiempo en Transporte (Horas)'
+                    ...visitHeaders,
+                    'Total Horas Efectivas (Suma Clientes)', 'Tiempo en Transporte (Horas)', 'Total Horas Trabajadas (Turno)'
                 ];
 
                 Object.keys(userShiftBlocks).forEach(email => {
@@ -575,16 +593,29 @@ export default function Informes() {
                         let horasTransporte = totalHorasTrabajadas - sumOfVisitsHrs;
                         if (horasTransporte < 0) horasTransporte = 0;
 
-                        visitRowsData.forEach(v => {
-                            rows.push([
-                                email, emp.firstName, emp.lastName, diaStr,
-                                block.entry?.fecha || '-', block.entry?.hora || '-', (block.entry?.localidad || block.entry?.ubicacion) || '-',
-                                block.exit?.fecha || '-', block.exit?.hora || '-', (block.exit?.localidad || block.exit?.ubicacion) || '-',
-                                v.entry?.hora || '-', (v.entry?.localidad || v.entry?.ubicacion) || '-',
-                                v.exit?.hora || '-', (v.exit?.localidad || v.exit?.ubicacion) || '-',
-                                v.visitTimeHrs, totalHorasTrabajadas.toFixed(2), sumOfVisitsHrs.toFixed(2), horasTransporte.toFixed(2)
-                            ]);
-                        });
+                        const rowData = [
+                            email, emp.firstName, emp.lastName, diaStr,
+                            block.entry?.fecha || '-', block.entry?.hora || '-', (block.entry?.localidad || block.entry?.ubicacion) || '-',
+                            block.exit?.fecha || '-', block.exit?.hora || '-', (block.exit?.localidad || block.exit?.ubicacion) || '-'
+                        ];
+
+                        for (let i = 0; i < maxVisits; i++) {
+                            const v = visitRowsData[i];
+                            if (v) {
+                                rowData.push(
+                                    v.entry?.hora || '-', 
+                                    (v.entry?.localidad || v.entry?.ubicacion) || '-',
+                                    v.exit?.hora || '-', 
+                                    (v.exit?.localidad || v.exit?.ubicacion) || '-',
+                                    v.visitTimeHrs
+                                );
+                            } else {
+                                rowData.push('-', '-', '-', '-', '-');
+                            }
+                        }
+
+                        rowData.push(sumOfVisitsHrs.toFixed(2), horasTransporte.toFixed(2), totalHorasTrabajadas.toFixed(2));
+                        rows.push(rowData);
                     });
                 });
 
@@ -947,7 +978,7 @@ export default function Informes() {
                     <h1 className="text-3xl font-bold text-gray-800 flex items-center gap-2">
                         <FileText size={30} className="text-blue-600" />
                         Centro de Informes y Reportes
-                        <span className="text-[10px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-mono ml-2 border border-gray-200">v1.7.19</span>
+                        <span className="text-[10px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-mono ml-2 border border-gray-200">v{import.meta.env.VITE_APP_VERSION}</span>
                     </h1>
                     <button onClick={() => navigate('/dashboard')} className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 transition">Volver</button>
                 </div>

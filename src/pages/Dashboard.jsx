@@ -239,7 +239,7 @@ export default function Dashboard() {
                         localStorage.setItem(`lastAttendanceType_${currentUser.email}`, 'Salida');
                         localStorage.setItem(`lastAttendanceTime_${currentUser.email}`, Date.now().toString());
                     }
-                } else if (normalizedType === 'entrada') {
+                } else if (normalizedType === 'entrada' || normalizedType === 'en cliente' || normalizedType === 'en tránsito' || normalizedType === 'llegada cliente' || normalizedType === 'salida cliente') {
                     // Convertir lastTime a timestamp
                     let lastTimeNum = 0;
                     if (lastTime) {
@@ -253,6 +253,7 @@ export default function Dashboard() {
                         if (updateLS) {
                             localStorage.setItem(`lastAttendanceType_${currentUser.email}`, 'Entrada');
                             localStorage.setItem(`lastAttendanceTime_${currentUser.email}`, Date.now().toString());
+                            localStorage.removeItem(`lastRutaType_${currentUser.email}`);
                         }
                     } else {
                         setAllowedActions({ entry: false, exit: true });
@@ -267,6 +268,7 @@ export default function Dashboard() {
                     if (updateLS) {
                         localStorage.setItem(`lastAttendanceType_${currentUser.email}`, 'Salida'); // Como si hubiera salido
                         localStorage.setItem(`lastAttendanceTime_${currentUser.email}`, Date.now().toString());
+                        localStorage.removeItem(`lastRutaType_${currentUser.email}`);
                     }
                 }
             };
@@ -441,7 +443,7 @@ export default function Dashboard() {
         try {
             // Obtener el stream real directamente (sin stream temporal que cause race condition)
             const stream = await navigator.mediaDevices.getUserMedia({
-                video: { facingMode, width: { ideal: 720 }, height: { ideal: 960 } },
+                video: { facingMode, width: { ideal: 1080 }, height: { ideal: 1440 } },
                 audio: false
             });
 
@@ -584,13 +586,32 @@ export default function Dashboard() {
             // Verificar que el video tiene frames válidos
             if (video.videoWidth === 0 || video.videoHeight === 0) throw new Error("Video no tiene frames aún. Reintenta.");
 
-            // Set canvas dimensions to match video
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
+            // Forzar proporción exacta 3:4 (vertical tipo pasaporte) pase lo que pase con la cámara
+            const targetRatio = 3 / 4;
+            const videoRatio = video.videoWidth / video.videoHeight;
+            
+            let drawWidth = video.videoWidth;
+            let drawHeight = video.videoHeight;
+            let offsetX = 0;
+            let offsetY = 0;
 
-            // Draw
+            if (videoRatio > targetRatio) {
+                // Video is wider than 3:4. Crop sides to keep center.
+                drawWidth = video.videoHeight * targetRatio;
+                offsetX = (video.videoWidth - drawWidth) / 2;
+            } else if (videoRatio < targetRatio) {
+                // Video is taller than 3:4. Crop top/bottom.
+                drawHeight = video.videoWidth / targetRatio;
+                offsetY = (video.videoHeight - drawHeight) / 2;
+            }
+
+            // Set canvas dimensions to the computed 3:4 safe area
+            canvas.width = drawWidth;
+            canvas.height = drawHeight;
+
+            // Draw specific cropped region
             const context = canvas.getContext('2d');
-            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+            context.drawImage(video, offsetX, offsetY, drawWidth, drawHeight, 0, 0, drawWidth, drawHeight);
 
             const imageSrc = canvas.toDataURL('image/jpeg', 0.8);
             if (!imageSrc || imageSrc === 'data:,') throw new Error("Error generando imagen");
@@ -796,16 +817,23 @@ export default function Dashboard() {
         setStatusMessage('Guardando registro...');
 
         try {
+            const md = capturedData.metadata;
+            const safeEmail = md.usuario.replace(/[@.]/g, '-');
+            const safeFecha = (md.fecha || '').replace(/\//g, '-');
+            const safeHora = (md.hora || '').replace(/:/g, '-').replace(/\s/g, '');
+            const deterministicDocId = `${safeEmail}_${safeFecha}_${safeHora}`;
+
             if (mode === 'incident') {
                 // Guardar en colección separada con descripción
-                await addDoc(collection(db, "incidents"), {
-                    ...capturedData.metadata,
+                await setDoc(doc(db, "incidents", deterministicDocId), {
+                    ...md,
                     descripcion: incidentDescription.trim() || '(Sin descripción)',
                 });
             } else {
-                await addDoc(collection(db, "attendance"), capturedData.metadata);
+                await setDoc(doc(db, "attendance", deterministicDocId), md);
             }
             return true;
+
         } catch (error) {
             console.error(error);
             alert(`Error guardando datos: ${error.message}`);
@@ -874,6 +902,10 @@ export default function Dashboard() {
             // Guardar en localStorage como backup específico por usuario
             localStorage.setItem(`lastAttendanceType_${currentUser.email}`, tipoActual);
             localStorage.setItem(`lastAttendanceTime_${currentUser.email}`, Date.now().toString());
+            
+            if (tipoActual === 'Salida') {
+                localStorage.removeItem(`lastRutaType_${currentUser.email}`);
+            }
         }
         
         // REGRESO RÁPIDO: Bajado a 2 segundos

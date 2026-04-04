@@ -1,5 +1,12 @@
 # Registro de Cambios - Control de Asistencia
 
+## [1.7.68] - 2026-04-04
+
+### Añadido
+- **Módulos de Gestión de Licencias**: Inclusión de `deploy-manager` para la gestión remota de claves de activación.
+- **Seguridad AES en Licencias**: Cifrado simétrico AES-256 para validación de cuotas de empleados en tiempo real.
+- **Soporte Rest API**: Capacidad de interactuar con Firestore mediante curl/Python, evitando la necesidad de la CLI de Firebase en entornos limitados.
+
 ## [1.6.99] - 2026-03-17
 
 ### Añadido
