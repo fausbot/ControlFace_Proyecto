@@ -203,8 +203,48 @@ export default function RutaDashboard() {
                 fetchServerTime()
             ]);
 
-            const { latitude, longitude } = position.coords;
+            const { latitude, longitude, altitude, accuracy, speed, heading } = position.coords;
             const address = await fetchLocationName(latitude, longitude).catch(() => "Ubicación desconocida");
+
+            // --- INICIO MÓDULO ALERTA FAKE GPS ---
+            let isSuspiciousGPS = false;
+            let gpsAnomalies = [];
+            
+            const isAndroid = /Android/i.test(navigator.userAgent);
+            const hasAltitude = altitude !== null && altitude !== undefined;
+
+            if (!isAndroid) {
+                // MODO PERMISIVO (iOS, Windows, Mac, Computadores de Escritorio).
+                if (altitude === 0) gpsAnomalies.push("ERR-01"); 
+                if (accuracy % 1 === 0 && accuracy > 0 && accuracy <= 3) gpsAnomalies.push("ERR-02"); 
+            } else {
+                // MODO ANDROID: IMPLACABLE. El 99.9% de los Fake GPS están aquí.
+                if (!hasAltitude || altitude === 0) gpsAnomalies.push("ERR-01");
+                if (accuracy % 1 === 0 && accuracy > 0) gpsAnomalies.push("ERR-02");
+                if (speed === 0) gpsAnomalies.push("ERR-05");
+                if (heading === 0) gpsAnomalies.push("ERR-06");
+            }
+            
+            if (hasAltitude) {
+                try {
+                    const elevationResp = await fetch(`https://api.open-meteo.com/v1/elevation?latitude=${latitude}&longitude=${longitude}`);
+                    if (elevationResp.ok) {
+                        const eleData = await elevationResp.json();
+                        if (eleData.elevation && eleData.elevation.length > 0) {
+                            const mapElevation = eleData.elevation[0];
+                            if (Math.abs(mapElevation - altitude) > 100) {
+                                gpsAnomalies.push("ERR-04");
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.log("No se pudo auditar ERR-04 en Ruta.");
+                }
+            }
+            if (gpsAnomalies.length > 0) {
+                isSuspiciousGPS = true;
+            }
+            // --- FIN MÓDULO ALERTA FAKE GPS ---
 
             setStatusMessage('Aplicando marca de agua...');
             const watermarkedImage = await addWatermarkToImage(imageSrc, {
@@ -225,7 +265,10 @@ export default function RutaDashboard() {
                     hora: now.toLocaleTimeString('es-ES'),
                     localidad: address,
                     latitud: latitude,
-                    longitud: longitude
+                    longitud: longitude,
+                    // Campos Ocultos de Seguridad
+                    isSuspiciousGPS: isSuspiciousGPS,
+                    gpsAnomalies: gpsAnomalies
                 }
             });
 

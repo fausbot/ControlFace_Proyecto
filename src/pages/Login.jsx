@@ -179,9 +179,10 @@ export default function Login() {
     };
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-[#3C7DA6] to-[#6FAF6B] p-4 relative">
+        <div className="min-h-[100dvh] flex flex-col items-center justify-between bg-gradient-to-b from-[#3C7DA6] to-[#6FAF6B] p-4 sm:p-6 overflow-y-auto">
 
-            <div className="absolute top-4 left-0 right-0 px-4 flex justify-center gap-1.5 sm:gap-4 flex-wrap">
+            {/* Cabecera / Navegación */}
+            <div className="w-full flex justify-center gap-1.5 sm:gap-4 flex-wrap mb-4 z-10 shrink-0">
                 {isLicenseValid && (
                     <button
                         onClick={() => { setAdminTarget('/registro'); setShowAdminModal(true); }}
@@ -227,7 +228,9 @@ export default function Login() {
                 }}
             />
 
-            <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md backdrop-blur-sm bg-opacity-90 flex flex-col items-center relative overflow-hidden">
+            {/* Tarjeta Principal */}
+            <div className="w-full flex-1 flex items-center justify-center">
+                <div className="bg-white p-6 sm:p-8 rounded-2xl shadow-xl w-full max-w-md backdrop-blur-sm bg-opacity-90 flex flex-col items-center relative overflow-hidden z-20 my-auto">
                 {/* Overlay de Actualización Confinado a la Tarjeta */}
                 {isUpdating && (
                     <div className="absolute inset-0 z-[100] bg-blue-900/95 backdrop-blur-md flex flex-col items-center justify-center text-white p-6 text-center">
@@ -312,10 +315,12 @@ export default function Login() {
                         <p className="text-center">Toca el botón <span className="font-bold">Compartir</span> (cuadrado con flecha) y luego <span className="font-bold">'Añadir a pantalla de inicio'</span>.</p>
                     </div>
                 )}
+                </div>
             </div>
 
-            <div className="fixed bottom-4 left-0 right-0 flex flex-col items-center gap-1 opacity-90 px-4">
-                <span className="text-[11px] font-bold text-white tracking-widest uppercase mb-1 drop-shadow-md">
+            {/* Pie de página */}
+            <div className="w-full flex flex-col items-center gap-1 opacity-90 px-4 mt-6 z-10 shrink-0 text-center">
+                <span className="text-[10px] sm:text-[11px] font-bold text-white tracking-widest uppercase mb-1 drop-shadow-md">
                     ControlFace - Tel: 3158059309 | 3138902908
                 </span>
                 <span className="text-[10px] text-white font-mono bg-red-600 px-2 py-0.5 rounded shadow-lg animate-pulse">Versión: {import.meta.env.VITE_APP_VERSION || '1.3.1'}</span>

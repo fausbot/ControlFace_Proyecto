@@ -24,6 +24,7 @@ import {
 } from '../services/attendanceService';
 
 import { getEmployeesMap } from '../services/employeeService';
+import { GPS_ERROR_DICTIONARY } from '../utils/gpsDictionary';
 
 const FIELD_DEFS = [
     { key: 'documentoIdentidad', label: 'Documento de identidad', type: 'text', group: 'Identificación' },
@@ -80,7 +81,7 @@ export default function Informes() {
     const [showDeleteModal, setShowDeleteModal] = useState(false);
     const [filterEmail, setFilterEmail] = useState('');
     const [exportingEmployees, setExportingEmployees] = useState(false);
-    const [exportFormatEmployees] = useState('csv');
+    const [exportFormatEmployees, setExportFormatEmployees] = useState('csv');
     const [exportFormatIncidents, setExportFormatIncidents] = useState('csv');
 
     // Descargador de fotos
@@ -101,6 +102,13 @@ export default function Informes() {
     const [exportingVisits, setExportingVisits] = useState(false);
     const [deletingVisits, setDeletingVisits] = useState(false);
     const [exportFormatVisits, setExportFormatVisits] = useState('csv');
+
+    // Inconsistencias (Seguridad GPS) export
+    const [incStartDate, setIncStartDate] = useState('');
+    const [incEndDate, setIncEndDate] = useState('');
+    const [incCsvUserFilter, setIncCsvUserFilter] = useState('');
+    const [exportingInc, setExportingInc] = useState(false);
+    const [exportFormatInc, setExportFormatInc] = useState('csv');
 
     const navigate = useNavigate();
     const { adminAccess } = useAuth();
@@ -334,6 +342,128 @@ export default function Informes() {
             alert('Error exportando visitas.');
         } finally {
             setExportingVisits(false);
+        }
+    };
+
+    const handleExportInconsistencias = async () => {
+        setExportingInc(true);
+        try {
+            // Recolectar asistencias y novedades
+            let combinedLogs = [...allLogs];
+            
+            // Si el bloque de visitas está activo, traer visitas
+            if (storageConfig?.ruta_active) {
+                const rawVisits = await getAllVisitLogs();
+                combinedLogs = [...combinedLogs, ...rawVisits];
+            }
+
+            // Filtrar solo los que tienen anomalías
+            let suspiciousLogs = combinedLogs.filter(log => log.isSuspiciousGPS === true || (log.metadata && log.metadata.isSuspiciousGPS === true));
+
+            // Filtros de fecha
+            if (incStartDate || incEndDate) {
+                const start = incStartDate ? new Date(incStartDate) : null;
+                const end = incEndDate ? new Date(incEndDate) : null;
+                if (end) end.setHours(23, 59, 59, 999);
+
+                suspiciousLogs = suspiciousLogs.filter(log => {
+                    const d = parseSpanishDate(log.fecha);
+                    if (!d && log.timestamp) {
+                        try { d = log.timestamp.toDate(); } catch(e){}
+                    }
+                    if (!d) return false;
+                    if (start && d < start) return false;
+                    if (end && d > end) return false;
+                    return true;
+                });
+            }
+
+            // Filtro por usuario
+            if (incCsvUserFilter) {
+                const term = incCsvUserFilter.toLowerCase();
+                suspiciousLogs = suspiciousLogs.filter(log => (log.usuario || '').toLowerCase().includes(term));
+            }
+
+            if (suspiciousLogs.length === 0) {
+                alert('No se encontraron reportes con inconsistencias de seguridad bajo estos filtros.');
+                setExportingInc(false);
+                return;
+            }
+
+            // EXTRAER fotos asincrónicas emparejando por email_fecha_hora
+            try {
+                const photosQueryAsistencia = query(collection(db, 'fotos'), where('tipo', '==', 'asistencia'));
+                const photosSnapAsistencia = await getDocs(photosQueryAsistencia);
+                
+                const photosQueryIncidente = query(collection(db, 'fotos'), where('tipo', '==', 'incidente'));
+                const photosSnapIncidente = await getDocs(photosQueryIncidente);
+                
+                const photoMap = new Map();
+                [...photosSnapAsistencia.docs, ...photosSnapIncidente.docs].forEach(d => {
+                    const data = d.data();
+                    if (data.email && data.fecha && data.hora && data.url) {
+                        const key = `${data.email.trim().toLowerCase()}_${data.fecha.trim()}_${data.hora.trim()}`;
+                        photoMap.set(key, data.url);
+                    }
+                });
+
+                suspiciousLogs.forEach(log => {
+                    if (!log.fotoURL && !log.imageUrl && !log.foto_url && !log.image_url) {
+                        const logEmail = (log.usuario || log.email || '').trim().toLowerCase();
+                        const key = `${logEmail}_${(log.fecha||'').trim()}_${(log.hora||'').trim()}`;
+                        if (photoMap.has(key)) {
+                            log.fotoURL = photoMap.get(key);
+                        }
+                    }
+                });
+            } catch (photoErr) {
+                console.error("Error recuperando las fotos para inconsistencias:", photoErr);
+            }
+
+            const employeesMap = await getEmployeesMap();
+            
+            // Mapear filas
+            // Mapear filas
+            const headers = ['Usuario', 'Nombre', 'Apellido', 'Fecha', 'Hora', 'Tipo de Evento', 'Anomalías Detectadas', 'Ubicación (Dirección)', 'Coordenadas (Lat, Lon)', 'Evidencia (Enlace)'];
+            const rows = suspiciousLogs.map(log => {
+                const email = log.usuario || '';
+                const emp = employeesMap[email] || {};
+                const anomaliesArray = log.gpsAnomalies || (log.metadata ? log.metadata.gpsAnomalies : []) || [];
+                const anomaliesStr = anomaliesArray.map(code => code.replace('ERR-0', 'ERROR ')).join(' | ');
+
+                return [
+                    email,
+                    emp.nombre || emp.firstName || '',
+                    emp.apellido || emp.lastName || '',
+                    log.fecha || '-',
+                    log.hora || '-',
+                    log.tipo || '-',
+                    anomaliesStr,
+                    log.localidad || (log.metadata ? log.metadata.localidad : '') || '-',
+                    `${log.latitud || ''}, ${log.longitud || ''}`,
+                    log.fotoURL || log.imageUrl || log.foto_url || log.image_url || (log.metadata && (log.metadata.imageUrl || log.metadata.fotoURL || log.metadata.foto_url)) || 'Sin Evidencia'
+                ];
+            });
+
+            const timestampStr = new Date().toISOString().split('T')[0];
+
+            if (exportFormatInc === 'csv') {
+                const csvContent = '\ufeff' + [headers.join(','), ...rows.map(r => `"${r.join('","')}"`)].join('\n');
+                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = `inconsistencias_${timestampStr}.csv`;
+                link.click();
+            } else {
+                exportToExcelHTML(`inconsistencias_${timestampStr}.xlsx`, headers, rows);
+            }
+
+        } catch (err) {
+            console.error(err);
+            alert('Error exportando inconsistencias.');
+        } finally {
+            setExportingInc(false);
         }
     };
 
@@ -823,7 +953,7 @@ export default function Informes() {
                 });
 
             } else if (attendanceReportType === 'estandar') {
-                headers = ['Usuario', 'Nombres', 'Apellidos', 'Dia Entrada', 'Fecha Entrada', 'Hora Entrada', 'Localidad Entrada', 'Fecha Salida', 'Hora Salida', 'Localidad Salida', 'Almuerzo', 'Horas'];
+                headers = ['Usuario', 'Nombres', 'Apellidos', 'Dia Entrada', 'Fecha Entrada', 'Hora Entrada', 'Localidad Entrada', 'Fecha Salida', 'Hora Salida', 'Localidad Salida', 'Almuerzo', 'Horas', 'Observación'];
                 rows = shifts.map(({ entry, exit, email }) => {
                     const emp = employeesMap[email] || { firstName: '', lastName: '' };
                     let dia = '-';
@@ -842,15 +972,16 @@ export default function Informes() {
                             if (calc.appliedLunchDeduction) lunch = `Sí (${(timeConfig.calc_lunchMins || 60) / 60} Hora${(timeConfig.calc_lunchMins || 60) / 60 > 1 ? 's' : ''})`;
                         }
                     }
+                    const obsEnv = [entry?.observacion, exit?.observacion].filter(Boolean).join(' | ') || '-';
                     return [
                         email, emp.firstName, emp.lastName, dia,
                         entry?.fecha || '-', entry?.hora || '-', (entry?.localidad || entry?.ubicacion) || '-',
                         exit?.fecha || '-', exit?.hora || '-', (exit?.localidad || exit?.ubicacion) || '-',
-                        lunch, horasStr
+                        lunch, horasStr, obsEnv
                     ];
                 });
             } else if (attendanceReportType === 'detallado_horas') {
-                headers = ['Usuario', 'Nombres', 'Apellidos', 'Dia', 'F. Ingreso', 'H. Ingreso', 'F. Salida', 'H. Salida', 'Almuerzo Aplicado', 'Diurnas', 'Nocturnas', 'Dom Diu', 'Dom Noc', 'Total'];
+                headers = ['Usuario', 'Nombres', 'Apellidos', 'Dia', 'F. Ingreso', 'H. Ingreso', 'F. Salida', 'H. Salida', 'Almuerzo Aplicado', 'Diurnas', 'Nocturnas', 'Dom Diu', 'Dom Noc', 'Total', 'Observación'];
                 rows = shifts.map(({ entry, exit, email }) => {
                     const emp = employeesMap[email] || { firstName: '', lastName: '' };
                     let dia = '-';
@@ -867,10 +998,11 @@ export default function Informes() {
                             if (calc.appliedLunchDeduction) lunchApplied = `Sí (${(timeConfig.calc_lunchMins || 60) / 60}h)`;
                         }
                     }
+                    const obsEnv = [entry?.observacion, exit?.observacion].filter(Boolean).join(' | ') || '-';
                     return [
                         email, emp.firstName, emp.lastName, dia,
                         entry?.fecha || '-', entry?.hora || '-', exit?.fecha || '-', exit?.hora || '-',
-                        lunchApplied, h.diurnas, h.nocturnas, h.domDiurnas, h.domNocturnas, h.totalHHMM
+                        lunchApplied, h.diurnas, h.nocturnas, h.domDiurnas, h.domNocturnas, h.totalHHMM, obsEnv
                     ];
                 });
             } else {
@@ -919,6 +1051,40 @@ export default function Informes() {
             const snap = await getDocs(collection(db, 'incidents')); // Sin orderBy para evitar error de índice
             let incidents = snap.docs.map(d => ({ id: d.id, ...d.data() }));
 
+            // NEW: Fetch photo URLs from the 'fotos' collection to match legacy online records
+            // Since the app saves the incident first and uploads the photo asynchronously, 
+            // the 'incidents' doc often lacks the 'fotoURL'. The 'fotos' collection holds the truth.
+            try {
+                const photosQuery = query(collection(db, 'fotos'), where('tipo', '==', 'incidente'));
+                const photosSnap = await getDocs(photosQuery);
+                const photoMap = new Map();
+                console.log(`[DEBUG] Se extrajeron ${photosSnap.docs.length} fotos con tipo 'incidente' de Firebase.`);
+                photosSnap.docs.forEach(d => {
+                    const data = d.data();
+                    if (data.email && data.fecha && data.hora && data.url) {
+                        const key = `${data.email.trim().toLowerCase()}_${data.fecha.trim()}_${data.hora.trim()}`;
+                        photoMap.set(key, data.url);
+                    }
+                });
+                
+                console.log(`[DEBUG] Mapa de fotos creado con ${photoMap.size} elementos únicas.`);
+                // Assign to incidents
+                let emparejados = 0;
+                incidents.forEach(inc => {
+                    if (!inc.fotoURL) {
+                        const key = `${(inc.usuario||'').trim().toLowerCase()}_${(inc.fecha||'').trim()}_${(inc.hora||'').trim()}`;
+                        if (photoMap.has(key)) {
+                            inc.fotoURL = photoMap.get(key);
+                            emparejados++;
+                        }
+                    }
+                });
+                console.log(`[DEBUG] Total Novedades: ${incidents.length}. Emparejadas con éxito: ${emparejados}`);
+            } catch (photoErr) {
+                console.error("Error recuperando las fotos vinculadas a las novedades:", photoErr);
+            }
+
+
             // Ordenamiento por Usuario(A-Z) y luego Fecha(Desc)
             incidents.sort((a, b) => {
                 const userA = (a.usuario || '').toLowerCase();
@@ -946,8 +1112,8 @@ export default function Informes() {
             }
             if (incidents.length === 0) { alert('No hay novedades.'); return; }
 
-            const headers = ['Usuario', 'Fecha', 'Hora', 'Localidad', 'Descripcion'];
-            const rows = incidents.map(inc => [inc.usuario || '', inc.fecha || '', inc.hora || '', inc.localidad || inc.ubicacion || '', inc.descripcion || '']);
+            const headers = ['Usuario', 'Fecha', 'Hora', 'Localidad', 'Descripcion', 'Foto'];
+            const rows = incidents.map(inc => [inc.usuario || '', inc.fecha || '', inc.hora || '', inc.localidad || inc.ubicacion || '', inc.descripcion || '', inc.fotoURL || 'Sin foto']);
             const ts = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
             if (exportFormatIncidents === 'xlsx') {
                 exportToExcelHTML(`novedades_${ts}.xlsx`, headers, rows);
@@ -1122,16 +1288,66 @@ export default function Informes() {
                     </div>
                 )}
 
+                {/* 3.2 REPORTE DE INCONSISTENCIAS (SEGURIDAD GPS) */}
+                <div className="bg-white rounded-xl shadow-2xl p-6 mb-6 border-l-4 border-red-600">
+                    <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2"><AlertTriangle size={24} className="text-red-600" /> Reporte de Inconsistencias (Seguridad)</h2>
+                    <p className="text-xs text-gray-500 mb-4">Muestra únicamente los registros donde el sistema detectó alertas de seguridad como probabilidad de interceptación satelital o engaños en la fotografía.</p>
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end mb-4">
+                        <div className="md:col-span-1"><label className="text-sm">Desde</label><input type="date" value={incStartDate} onChange={e => setIncStartDate(e.target.value)} className="w-full px-4 py-2 border border-red-300 rounded-lg focus:ring-red-500" /></div>
+                        <div className="md:col-span-1"><label className="text-sm">Hasta</label><input type="date" value={incEndDate} onChange={e => setIncEndDate(e.target.value)} className="w-full px-4 py-2 border border-red-300 rounded-lg focus:ring-red-500" /></div>
+                        <div className="md:col-span-1"><label className="text-sm">Usuario</label><input type="text" value={incCsvUserFilter} onChange={e => setIncCsvUserFilter(e.target.value)} className="w-full px-4 py-2 border border-red-300 rounded-lg focus:ring-red-500" placeholder="Opcional..." /></div>
+                        <div className="flex gap-2">
+                            <select value={exportFormatInc} onChange={e => setExportFormatInc(e.target.value)} className="border border-red-300 rounded-lg px-2"><option value="csv">CSV</option><option value="xlsx">Excel</option></select>
+                            <button onClick={handleExportInconsistencias} disabled={exportingInc} className="flex-1 bg-red-600 text-white py-2 rounded-lg font-bold hover:bg-red-700 flex justify-center gap-2">
+                                {exportingInc ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />} Extraer
+                            </button>
+                        </div>
+                    </div>
+                    {/* Botón Descargar Diccionario */}
+                    <div className="mt-4 pt-4 border-t border-red-100 flex flex-col md:flex-row items-center justify-between gap-4">
+                        <p className="text-sm text-gray-600 font-medium whitespace-pre-wrap">Diccionario de errores de seguridad.</p>
+                        <button onClick={() => {
+                            let content = "GLOSARIO DE ALERTAS DE INTEGRIDAD GPS\n========================================\n\n";
+                            Object.keys(GPS_ERROR_DICTIONARY).forEach(errCode => {
+                                const dict = GPS_ERROR_DICTIONARY[errCode];
+                                content += `[${errCode}] - ${dict.title}\n`;
+                                content += `${dict.description}\n\n`;
+                                content += "----------------------------------------\n\n";
+                            });
+                            const blob = new Blob([content], { type: 'text/plain;charset=utf-8;' });
+                            const url = URL.createObjectURL(blob);
+                            const link = document.createElement('a');
+                            link.href = url;
+                            link.download = `Diccionario_Inconsistencias.txt`;
+                            link.click();
+                        }} className="px-6 py-2 bg-red-50 text-red-700 border border-red-200 rounded-lg font-bold hover:bg-red-100 transition whitespace-nowrap flex items-center gap-2">
+                            <FileText size={18} /> Descargar Diccionario
+                        </button>
+                    </div>
+                </div>
+
                 {/* 4. GESTIÓN DE EMPLEADOS */}
                 <div className="bg-white rounded-xl shadow-2xl p-6 mb-12 border-l-4 border-emerald-500">
                     <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2"><UserMinus size={24} className="text-emerald-600" /> Personal y Empleados</h2>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
-                        <div className="md:col-span-1"><input type="text" placeholder="Filtrar por email..." value={filterEmail} onChange={e => setFilterEmail(e.target.value)} className="w-full px-4 py-2 border rounded-lg" /></div>
-                        <button onClick={exportEmployeesToCSV} disabled={exportingEmployees} className="bg-blue-600 text-white py-2 rounded-lg font-bold hover:bg-blue-700 flex justify-center gap-2 shadow-sm">
-                            {exportingEmployees ? <Loader2 size={18} className="animate-spin" /> : <FileText size={18} />} Exportar Personal
-                        </button>
-                        <button onClick={() => setShowDeleteModal(true)} className="bg-red-600 text-white py-2 rounded-lg font-bold hover:bg-red-700 flex justify-center gap-2 shadow-sm">
-                            <Trash2 size={18} /> Borrar Empleado
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end mb-4">
+                        <div className="md:col-span-2">
+                            <label className="text-sm">Usuario</label>
+                            <input type="text" placeholder="Filtrar por email..." value={filterEmail} onChange={e => setFilterEmail(e.target.value)} className="w-full px-4 py-2 border rounded-lg" />
+                        </div>
+                        <div className="md:col-span-2 flex gap-2">
+                            <select value={exportFormatEmployees} onChange={e => setExportFormatEmployees(e.target.value)} className="border rounded-lg px-2">
+                                <option value="csv">CSV</option>
+                                <option value="xlsx">XLSX</option>
+                            </select>
+                            <button onClick={exportEmployeesToCSV} disabled={exportingEmployees} className="flex-1 bg-blue-600 text-white py-2 rounded-lg font-bold hover:bg-blue-700 flex justify-center gap-2">
+                                {exportingEmployees ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />} Exportar
+                            </button>
+                        </div>
+                    </div>
+                    <div className="mt-4 pt-4 border-t border-red-50 flex items-center justify-between">
+                        <p className="text-xs text-gray-500">Eliminar permanentemente a un empleado del sistema.</p>
+                        <button onClick={() => setShowDeleteModal(true)} className="px-4 py-2 bg-red-100 text-red-700 rounded-lg font-bold hover:bg-red-200 transition flex items-center gap-2">
+                            <Trash2 size={16} /> Borrar Empleado
                         </button>
                     </div>
                 </div>

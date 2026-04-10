@@ -38,6 +38,7 @@ export default function Datos() {
     });
     const [mMinute, setMMinute] = useState(() => String(new Date().getMinutes()).padStart(2, '0'));
     const [mAmPm, setMAmPm] = useState(() => new Date().getHours() < 12 ? 'AM' : 'PM');
+    const [mReason, setMReason] = useState('');
     const [mSaving, setMSaving] = useState(false);
 
     const navigate = useNavigate();
@@ -172,6 +173,7 @@ export default function Datos() {
                 fecha: dateStr,
                 hora: timeStr,
                 localidad: "ENTRADA MANUAL DE DATOS",
+                observacion: mReason || "Añadido manualmente",
                 timestamp: new Date(`${mDate}T${mHour}:${mMinute}:00`)
             };
             await setDoc(doc(db, "attendance", deterministicDocId), docData);
@@ -182,13 +184,13 @@ export default function Datos() {
                     ...docData,
                     tipo: mType === 'En Cliente' ? 'Llegada Cliente' : 'Salida Cliente',
                     mode: 'visita',
-                    observacion: "Añadido manualmente",
+                    observacion: mReason || "Añadido manualmente",
                 };
                 await setDoc(doc(db, "visitas", deterministicDocId), visitaDocData);
             }
 
             alert('✅ Registro adicionado correctamente.');
-            setMUser(''); setMDate('');
+            setMUser(''); setMDate(''); setMReason('');
             const h = new Date().getHours();
             setMHour(String(h % 12 || 12).padStart(2, '0'));
             setMMinute(String(new Date().getMinutes()).padStart(2, '0'));
@@ -399,6 +401,17 @@ export default function Datos() {
                                     <option value="PM">PM</option>
                                 </select>
                             </div>
+                        </div>
+                        {/* Razón */}
+                        <div className="flex-1 min-w-[200px]">
+                            <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Observación</label>
+                            <input
+                                type="text"
+                                placeholder="ej: Olvidó registrar al llegar"
+                                value={mReason}
+                                onChange={e => setMReason(e.target.value)}
+                                className="w-full h-[42px] px-3 border rounded-lg text-sm"
+                            />
                         </div>
                         {/* Botón */}
                         <button

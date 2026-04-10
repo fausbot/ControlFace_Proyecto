@@ -32,14 +32,14 @@ export default function CameraView({
             </h2>
 
             {/* Native Video Element */}
-            <div className="relative rounded-2xl overflow-hidden shadow-2xl border-4 bg-black w-full aspect-[3/4] max-w-[280px]"
+            <div className="relative rounded-2xl overflow-hidden shadow-2xl border-4 bg-black w-full max-w-sm"
                 style={{ borderColor: mode === 'incident' ? 'white' : blinkCount >= 1 ? '#22c55e' : '#3b82f6' }}>
                 <video
                     ref={videoRef}
                     autoPlay
                     playsInline
                     muted
-                    className={`w-full h-full object-cover ${mode !== 'incident' ? 'transform scale-x-[-1]' : ''}`}
+                    className={`w-full h-auto block ${mode !== 'incident' ? 'transform scale-x-[-1]' : ''}`}
                 />
                 <canvas ref={canvasRef} className="hidden" />
 

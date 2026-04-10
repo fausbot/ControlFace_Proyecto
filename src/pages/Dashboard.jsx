@@ -443,7 +443,8 @@ export default function Dashboard() {
         try {
             // Obtener el stream real directamente (sin stream temporal que cause race condition)
             const stream = await navigator.mediaDevices.getUserMedia({
-                video: { facingMode, width: { ideal: 1080 }, height: { ideal: 1440 } },
+                // Sin restricciones de resolución — el teléfono elige el zoom mínimo natural
+                video: { facingMode },
                 audio: false
             });
 
@@ -572,6 +573,108 @@ export default function Dashboard() {
 
     const [capturedData, setCapturedData] = useState(null);
 
+    /**
+     * Analiza el canvas capturado en busca de anomalías de vida pasiva (spoofing).
+     * Optimizado para usar un lienzo de muestreo pequeño para evitar bloqueos en móviles.
+     */
+    const analyzePassiveLiveness = (canvas) => {
+        try {
+            const width = canvas.width;
+            const height = canvas.height;
+            
+            // Creamos un canvas de análisis pequeño (Downsampling) para rendimiento extremo
+            const analysisCanvas = document.createElement('canvas');
+            const size = 400;
+            analysisCanvas.width = size;
+            analysisCanvas.height = size;
+            const actx = analysisCanvas.getContext('2d', { willReadFrequently: true });
+            
+            // Dibujamos la captura original escalada al tamaño de análisis
+            actx.drawImage(canvas, 0, 0, size, size);
+            const imageData = actx.getImageData(0, 0, size, size);
+            const data = imageData.data;
+
+            let reasons = [];
+
+            // 1. Análisis de Textura y Saturación (Centro y General)
+            let highFreqGrit = 0;
+            let saturatedPixels = 0;
+            let totalSamples = 0;
+            const isDark = (r, g, b) => r < 35 && g < 35 && b < 35;
+
+            for (let i = 0; i < data.length; i += 16) {
+                const r = data[i];
+                const g = data[i + 1];
+                const b = data[i + 2];
+                const brightness = (r + g + b) / 3;
+
+                if (r > 242 && g > 242 && b > 242) saturatedPixels++;
+
+                if (i + 4 < data.length) {
+                    const diff = Math.abs(brightness - ((data[i + 4] + data[i + 5] + data[i + 6]) / 3));
+                    if (diff > 15 && diff < 65) highFreqGrit++;
+                }
+                totalSamples++;
+            }
+
+            if ((highFreqGrit / totalSamples) > 0.65) reasons.push("Patrón Moiré");
+            if ((saturatedPixels / totalSamples) > 0.30) reasons.push("Reflejos sintéticos");
+
+            // 2. Análisis de Marcos (Bezels) - AMPLIADO
+            // Revisamos no solo el borde absoluto (0), sino una franja periférica (5-15%) 
+            // buscando el "marco" de un celular o monitor que podría estar dentro de la toma.
+            let frameDetectedCount = 0;
+            const checkRect = (inset) => {
+                let darkPixels = 0;
+                let samples = 0;
+                const innerSize = size - (inset * 2);
+                
+                // Top & Bottom rows at 'inset'
+                for (let x = inset; x < size - inset; x += 5) {
+                    const idxT = (inset * size + x) * 4;
+                    const idxB = ((size - 1 - inset) * size + x) * 4;
+                    if (isDark(data[idxT], data[idxT+1], data[idxT+2])) darkPixels++;
+                    if (isDark(data[idxB], data[idxB+1], data[idxB+2])) darkPixels++;
+                    samples += 2;
+                }
+                // Left & Right columns at 'inset'
+                for (let y = inset; y < size - inset; y += 5) {
+                    const idxL = (y * size + inset) * 4;
+                    const idxR = (y * size + (size - 1 - inset)) * 4;
+                    if (isDark(data[idxL], data[idxL+1], data[idxL+2])) darkPixels++;
+                    if (isDark(data[idxR], data[idxR+1], data[idxR+2])) darkPixels++;
+                    samples += 2;
+                }
+                return samples > 0 ? (darkPixels / samples) : 0;
+            };
+
+            // Probamos en varios niveles de "inset" (profundidad en la imagen)
+            // Esto detecta marcos si el atacante no pegó la pantalla a la cámara.
+            const insets = [0, 10, 20, 30, 40]; // de 0% a 10% del ancho
+            for (const inset of insets) {
+                if (checkRect(inset) > 0.80) {
+                    frameDetectedCount++;
+                }
+            }
+
+            if (frameDetectedCount >= 1) {
+                reasons.push("Marco detectado (periférico o interno)");
+            }
+
+            if (reasons.length > 0) {
+                console.warn("🚨 [Seguridad] Anomalías detectadas:", reasons);
+                return true;
+            }
+            return false;
+        } catch (err) {
+            console.error("Error en análisis de liveness pasivo:", err);
+            return false; // Fallar a favor del usuario para no bloquear la captura
+        }
+    };
+
+
+
+
     const capture = useCallback(async () => {
         if (isCapturing) return;
         setIsCapturing(true);
@@ -586,35 +689,25 @@ export default function Dashboard() {
             // Verificar que el video tiene frames válidos
             if (video.videoWidth === 0 || video.videoHeight === 0) throw new Error("Video no tiene frames aún. Reintenta.");
 
-            // Forzar proporción exacta 3:4 (vertical tipo pasaporte) pase lo que pase con la cámara
-            const targetRatio = 3 / 4;
-            const videoRatio = video.videoWidth / video.videoHeight;
-            
-            let drawWidth = video.videoWidth;
-            let drawHeight = video.videoHeight;
-            let offsetX = 0;
-            let offsetY = 0;
+            // ── CAPTURA CRUDA — CERO transformaciones ─────────────────────────────
+            // Tomamos exactamente lo que entrega la cámara, sin rotar, sin recortar,
+            // sin espejo. Lo que sale aquí ES el formato nativo del sensor.
+            const rawW = video.videoWidth;
+            const rawH = video.videoHeight;
 
-            if (videoRatio > targetRatio) {
-                // Video is wider than 3:4. Crop sides to keep center.
-                drawWidth = video.videoHeight * targetRatio;
-                offsetX = (video.videoWidth - drawWidth) / 2;
-            } else if (videoRatio < targetRatio) {
-                // Video is taller than 3:4. Crop top/bottom.
-                drawHeight = video.videoWidth / targetRatio;
-                offsetY = (video.videoHeight - drawHeight) / 2;
-            }
+            canvas.width  = rawW;
+            canvas.height = rawH;
 
-            // Set canvas dimensions to the computed 3:4 safe area
-            canvas.width = drawWidth;
-            canvas.height = drawHeight;
+            const ctx2 = canvas.getContext('2d');
+            ctx2.drawImage(video, 0, 0, rawW, rawH);
 
-            // Draw specific cropped region
-            const context = canvas.getContext('2d');
-            context.drawImage(video, offsetX, offsetY, drawWidth, drawHeight, 0, 0, drawWidth, drawHeight);
+            console.log(`[CAM] rawW=${rawW} rawH=${rawH}`);
 
-            const imageSrc = canvas.toDataURL('image/jpeg', 0.8);
+
+
+            const imageSrc = canvas.toDataURL('image/jpeg', 0.9);
             if (!imageSrc || imageSrc === 'data:,') throw new Error("Error generando imagen");
+
 
             // Fix #3: Flash visual DESPUÉS de confirmar que la imagen tiene píxeles válidos
             setCaptureFlash(f => !f);
@@ -695,7 +788,70 @@ export default function Dashboard() {
                 }
             }
 
-            const { latitude, longitude } = position.coords;
+            const { latitude, longitude, altitude, accuracy, speed, heading } = position.coords;
+            
+            // --- INICIO MÓDULO ALERTA FAKE GPS ---
+            let isSuspiciousGPS = false;
+            let gpsAnomalies = [];
+            
+            const isAndroid = /Android/i.test(navigator.userAgent);
+            const hasAltitude = altitude !== null && altitude !== undefined;
+
+            if (!isAndroid) {
+                // MODO PERMISIVO (iOS, Windows, Mac, Computadores de Escritorio).
+                // Carecen de hardware GPS puro (usan IP o red), es normal que manden "null" o enteros.
+                if (altitude === 0) gpsAnomalies.push("ERR-01"); 
+                // ERR-02 se vuelve informativo o de muy baja probabilidad
+                if (accuracy > 0 && accuracy <= 1) gpsAnomalies.push("ERR-02"); 
+            } else {
+                // MODO ANDROID: RELAJADO para evitar falsos positivos
+                // Solo castigamos la ausencia TOTAL de altitud si es muy sospechoso (0 exacto)
+                if (altitude === 0) gpsAnomalies.push("ERR-01");
+                
+                // ERR-02: Ya no castigamos precisión entera por sí sola, 
+                // solo si es absurdamente perfecta y baja (ej. exactamente 1.0 o 0.0)
+                if (accuracy === 1 || accuracy === 2) gpsAnomalies.push("ERR-02");
+
+                // ERR-05 y ERR-06: Eliminamos el marcado automático por estar quieto, 
+                // ya que es normal en una selfie de asistencia.
+            }
+            
+            // Verificación asíncrona de ERR-04 Topográfico si hay altitud numérica real superior a cero
+            if (hasAltitude) {
+                try {
+                    const elevationResp = await fetch(`https://api.open-meteo.com/v1/elevation?latitude=${latitude}&longitude=${longitude}`);
+                    if (elevationResp.ok) {
+                        const eleData = await elevationResp.json();
+                        if (eleData.elevation && eleData.elevation.length > 0) {
+                            const mapElevation = eleData.elevation[0];
+                            // Tolerancia de 100 metros
+                            if (Math.abs(mapElevation - altitude) > 100) {
+                                gpsAnomalies.push("ERR-04");
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.log("No se pudo auditar ERR-04 topográficamente por error de red.");
+                }
+            }
+            
+            if (gpsAnomalies.length > 0) {
+                isSuspiciousGPS = true;
+            }
+
+            // --- INICIO MÓDULO INTEGRIDAD DE IMAGEN (ERR-07) ---
+            // Solo aplicamos si no es un incidente (donde se permiten fotos de objetos/papeles)
+            if (modeRef.current !== 'incident') {
+                const isPassiveSpoof = analyzePassiveLiveness(canvas);
+                if (isPassiveSpoof) {
+                    if (!gpsAnomalies.includes("ERR-07")) {
+                        gpsAnomalies.push("ERR-07");
+                        isSuspiciousGPS = true;
+                    }
+                }
+            }
+            // --- FIN MÓDULO INTEGRIDAD ---
+            // --- FIN MÓDULO ALERTA FAKE GPS ---
 
             // 2. Obtener dirección con timeout corto para no bloquear
             setStatusMessage('Obteniendo dirección...');
@@ -735,7 +891,10 @@ export default function Dashboard() {
                     localidad: address,
                     timestamp: serverTimestamp(),
                     latitud: latitude,
-                    longitud: longitude
+                    longitud: longitude,
+                    // Campos Ocultos de Seguridad
+                    isSuspiciousGPS: isSuspiciousGPS,
+                    gpsAnomalies: gpsAnomalies
                 }
             });
 
@@ -764,29 +923,23 @@ export default function Dashboard() {
     }, [autoCapturePending, isCapturing, step, capture]);
 
     const shareImage = async () => {
-        if (!capturedData || !capturedData.image) return;
+        if (!capturedData || !capturedData.image) return false;
 
         try {
-            // Convert DataURL to Blob
-            const response = await fetch(capturedData.image);
-            const blob = await response.blob();
+            // Conversión Síncrona a File (evita perder la activación del usuario 'Transient Activation' en Android/Infinix)
+            const arr = capturedData.image.split(',');
+            const mime = arr[0].match(/:(.*?);/)[1];
+            const bstr = atob(arr[1]);
+            let n = bstr.length;
+            const u8arr = new Uint8Array(n);
+            while (n--) { u8arr[n] = bstr.charCodeAt(n); }
 
-            // Nombre del archivo según el modo
             const fileName = mode === 'incident' ? 'incidente_evidencia.jpg' : 'asistencia_evidencia.jpg';
-            const file = new File([blob], fileName, { type: "image/jpeg" });
+            const file = new File([u8arr], fileName, { type: "image/jpeg" });
 
-            // Texto base
-            let shareText;
-
-            if (mode === 'incident') {
-                const desc = incidentDescription.trim();
-                shareText = `⚠️ INCIDENTE`;
-                if (desc) {
-                    shareText += `\n📝 ${desc}`;
-                }
-            } else {
-                shareText = `Usuario: ${capturedData.metadata.usuario}\nFecha: ${capturedData.metadata.fecha} ${capturedData.metadata.hora}\nAcción: ${capturedData.metadata.tipo}`;
-            }
+            let shareText = mode === 'incident' 
+                ? `⚠️ INCIDENTE\n📝 ${incidentDescription.trim()}`
+                : `Usuario: ${capturedData.metadata.usuario}\nFecha: ${capturedData.metadata.fecha} ${capturedData.metadata.hora}\nAcción: ${capturedData.metadata.tipo}`;
 
             const shareData = {
                 title: mode === 'incident' ? '⚠️ Reporte de Novedad' : 'Registro de Asistencia',
@@ -794,20 +947,25 @@ export default function Dashboard() {
                 files: [file]
             };
 
-            // Intentar compartir directamente
-            if (navigator.share) {
+            // Intentar compartir directamente si el móvil lo soporta (incluyendo los archivos)
+            if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
                 await navigator.share(shareData);
+                return true;
+            } else if (navigator.share) {
+                // Si no soporta enviar la imagen, enviamos al menos el texto
+                await navigator.share({ title: shareData.title, text: shareText });
+                return true;
             } else {
-                // Fallback: descargar imagen
+                // Fallback: descargar imagen en PC
                 const link = document.createElement('a');
                 link.href = capturedData.image;
-                link.download = `${mode === 'incident' ? 'incidente' : 'asistencia'}_${capturedData.metadata.fecha.replace(/\//g, '-')}_${capturedData.metadata.hora.replace(/:/g, '-')}.jpg`;
+                link.download = `${fileName.split('.')[0]}_${capturedData.metadata.fecha.replace(/\//g, '-')}_${capturedData.metadata.hora.replace(/:/g, '-')}.jpg`;
                 link.click();
+                return false;
             }
         } catch (error) {
-            console.error("Error sharing:", error);
-            // Si el usuario cancela o hay error, no hacer nada
-            // Los datos ya están guardados
+            console.warn("Compartir cancelado o bloqueado:", error.name);
+            return false;
         }
     };
 
@@ -855,6 +1013,9 @@ export default function Dashboard() {
         const isIncidente = mode === 'incident';
         const savePhoto = isIncidente ? storageSettings.storage_saveIncidentes : storageSettings.storage_saveAsistencia;
 
+        // Disparo de Compartir Inmediato para no perder "User Activation"
+        shareImage();
+
         try {
             // USAR TIMEOUT DE 3s PARA FIRESTORE: Si no responde, forzar offline
             const saveTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error("Firebase Timeout")), 3000));
@@ -869,7 +1030,25 @@ export default function Dashboard() {
                     capturedData.metadata.usuario,
                     capturedData.metadata.fecha,
                     capturedData.metadata.hora,
-                ).catch(err => {
+                ).then(async (url) => {
+                    if (url) {
+                        try {
+                            const md = capturedData.metadata;
+                            const safeEmail = md.usuario.replace(/[@.]/g, '-');
+                            const safeFecha = (md.fecha || '').replace(/\//g, '-');
+                            const safeHora = (md.hora || '').replace(/:/g, '-').replace(/\s/g, '');
+                            const deterministicDocId = `${safeEmail}_${safeFecha}_${safeHora}`;
+                            
+                            const collectionName = mode === 'incident' ? "incidents" : "attendance";
+                            await setDoc(doc(db, collectionName, deterministicDocId), {
+                                fotoURL: url
+                            }, { merge: true });
+                            console.log(`✅ fotoURL adjuntado exitosamente en doc de ${collectionName}: ${deterministicDocId}`);
+                        } catch(e) {
+                            console.warn("No se pudo atar la URL al doc:", e);
+                        }
+                    }
+                }).catch(err => {
                     console.warn('Storage upload failed, will be retried if possible:', err);
                 });
             }
@@ -888,8 +1067,6 @@ export default function Dashboard() {
                 longitude: capturedData.metadata.longitud
             });
         }
-
-        await shareImage();
 
         setStep('success');
         setStatusMessage('¡Registro Exitoso!');

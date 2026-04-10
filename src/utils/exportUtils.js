@@ -72,6 +72,10 @@ export const exportToExcelHTML = (filename, headers, rows) => {
                     ws[cellRef].t = 'n';
                     ws[cellRef].v = parseFloat(val);
                     ws[cellRef].z = '0.00';
+                } else if (val.startsWith('http://') || val.startsWith('https://')) {
+                    ws[cellRef].t = 's';
+                    ws[cellRef].v = 'Ver evidencia';
+                    ws[cellRef].l = { Target: val, Tooltip: 'Haz clic para ver la foto original' };
                 } else {
                     // Default to string to protect user IDs from scientific format
                     ws[cellRef].t = 's';
@@ -91,6 +95,13 @@ export const exportToExcelHTML = (filename, headers, rows) => {
             // First column styling (light green background and bold)
             if (c === 0) {
                 ws[cellRef].s.fill = { fgColor: { rgb: "E2EFDA" } };
+                ws[cellRef].s.font.bold = true;
+            }
+
+            // Link styling
+            if (ws[cellRef].l) {
+                ws[cellRef].s.font.color = { rgb: "0563C1" };
+                ws[cellRef].s.font.underline = true;
                 ws[cellRef].s.font.bold = true;
             }
         }

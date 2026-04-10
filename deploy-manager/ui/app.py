@@ -37,13 +37,14 @@ def _status_color(status: str) -> str:
 # ── Project Card (in sidebar) ─────────────────────────────────────────────────
 
 class ProjectCard(ctk.CTkFrame):
-    def __init__(self, parent, project: dict, on_select, selected=False):
+    def __init__(self, parent, project: dict, on_select, on_delete, selected=False):
         super().__init__(parent,
                          fg_color=T.ACCENT if selected else T.BG_CARD,
                          corner_radius=10,
                          cursor="hand2")
         self._project = project
         self._on_select = on_select
+        self._on_delete = on_delete
         self._selected = selected
 
         self.bind("<Button-1>", self._click)
@@ -54,7 +55,7 @@ class ProjectCard(ctk.CTkFrame):
         inner = ctk.CTkFrame(self, fg_color="transparent")
         inner.pack(fill="x", padx=12, pady=10)
 
-        # Row 1: checkbox + name
+        # Row 1: checkbox + name + delete
         row1 = ctk.CTkFrame(inner, fg_color="transparent")
         row1.pack(fill="x")
 
@@ -66,17 +67,29 @@ class ProjectCard(ctk.CTkFrame):
         )
         self.chk.pack(side="left", padx=(0, 8))
 
+        # Pack right-side items FIRST so they aren't pushed out by expanding labels
+        status = project.get("last_status") or "PENDING"
+        self.status_icon = ctk.CTkLabel(
+            row1, text=_status_icon(status),
+            font=(T.FONT_FAMILY, 16), text_color=_status_color(status)
+        )
+        self.status_icon.pack(side="right")
+
+        self.btn_del_quick = ctk.CTkButton(
+            row1, text="🗑", width=28, height=28,
+            fg_color="transparent", hover_color=T.ERROR,
+            text_color=T.TEXT_SEC, corner_radius=6,
+            font=(T.FONT_FAMILY, 14),
+            command=self._quick_delete
+        )
+        self.btn_del_quick.pack(side="right", padx=(4, 0))
+
+        # The label fills the remaining space in the middle
         self.lbl_name = ctk.CTkLabel(
             row1, text=project["name"],
             font=T.FONT_H2, text_color=T.TEXT_PRI, anchor="w"
         )
         self.lbl_name.pack(side="left", fill="x", expand=True)
-
-        status = project.get("last_status") or "PENDING"
-        ctk.CTkLabel(
-            row1, text=_status_icon(status),
-            font=(T.FONT_FAMILY, 16), text_color=_status_color(status)
-        ).pack(side="right")
 
         # Row 2: firebase id
         ctk.CTkLabel(
@@ -97,6 +110,9 @@ class ProjectCard(ctk.CTkFrame):
 
     def _click(self, _event=None):
         self._on_select(self._project["id"])
+
+    def _quick_delete(self):
+        self._on_delete(self._project["id"])
 
     def set_selected(self, val: bool):
         self._selected = val
@@ -474,6 +490,7 @@ class DeployManagerApp(ctk.CTk):
             card = ProjectCard(
                 self.cards_frame, p,
                 on_select=self._select_project,
+                on_delete=self._delete_project,
                 selected=(p["id"] == self._selected_id)
             )
             card.pack(fill="x", pady=4)

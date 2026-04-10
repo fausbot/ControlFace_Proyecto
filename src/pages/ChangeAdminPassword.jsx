@@ -124,6 +124,7 @@ export default function ChangeAdminPassword() {
                             className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
                         >
                             <option value="todas">Cambiar para Todas las Secciones</option>
+                            <option value="admin_only">Contraseña de Admin (Datos, Informes, Config.)</option>
                             <option value="/registro">Contraseña de Registro</option>
                             <option value="/datos">Contraseña de Datos</option>
                             <option value="/informes">Contraseña de Informes</option>

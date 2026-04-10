@@ -22,20 +22,22 @@ export const addWatermarkToImage = async (imageSrc, data) => {
                 // We calculate the banner height first, then extend the canvas to fit both photo + banner.
                 const fontSize = Math.max(20, img.width * 0.038);
                 const lineHeight = fontSize * 1.4;
-                const padding = 20;
+                const padding = 12;
                 // We'll estimate lines count: 3 header + ~2 address lines = 5 lines max
                 const estimatedBannerHeight = (lineHeight * 5) + (padding * 2);
 
-                // The canvas height = photo height + banner height (never overlap the face)
+                // Canvas = same size as photo (banner overlays the bottom of the image)
                 canvas.width = img.width;
-                canvas.height = img.height + estimatedBannerHeight;
+                canvas.height = img.height;
 
-                // Draw original image at the top
+                // Draw original image
                 ctx.drawImage(img, 0, 0);
 
-                // Fill banner area background
-                ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
-                ctx.fillRect(0, img.height, canvas.width, estimatedBannerHeight);
+                // Draw semi-transparent banner overlaid on the bottom of the photo
+                const bannerY = img.height - estimatedBannerHeight;
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.82)';
+                ctx.fillRect(0, bannerY, canvas.width, estimatedBannerHeight);
+
 
                 // --- Draw Mode Label (ENTRADA/SALIDA/INCIDENTE/VISITA) at Top ---
                 let modeText = 'ENTRADA';
@@ -145,10 +147,11 @@ export const addWatermarkToImage = async (imageSrc, data) => {
                     `UBICACION: ${data.coords}`
                 ];
 
-                // Draw text starting right at img.height + padding (banner area)
+                // Draw text starting inside the overlay banner
                 ctx.fillStyle = '#ffffff';
-                let currentY = img.height + padding;
+                let currentY = bannerY + padding;
                 const currentX = padding;
+
 
                 headerLines.forEach(line => {
                     ctx.fillText(line, currentX, currentY);

@@ -144,10 +144,18 @@ echo [5/5] Configurando Storage CORS...
 REM 8. Desplegar Reglas de Firestore
 echo [6/6] Desplegando Reglas de Firestore...
 call firebase deploy --only firestore --project {firebase_id} --non-interactive
+if errorlevel 1 (
+    echo [ERROR] Fallo el deploy de Firestore rules.
+    exit /b 1
+)
 
 REM 9. Desplegar Reglas de Storage
 echo [7/7] Desplegando Reglas de Storage...
 call firebase deploy --only storage --project {firebase_id} --non-interactive
+if errorlevel 1 (
+    echo [ERROR] Fallo el deploy de Storage rules.
+    exit /b 1
+)
 
 echo.
 echo =========================================
@@ -169,6 +177,18 @@ def run_deploy(
     Calls on_done when the process finishes.
     If new_version is provided, it is injected into the project's root .env.
     """
+    # Patterns that indicate a critical failure even when exit code is 0
+    _CRITICAL_ERROR_PATTERNS = [
+        "has been suspended",
+        "permission denied",
+        "http error: 403",
+        "403",
+        "failed to list functions",
+        "accessdeniedexception",
+        "error: request to",
+        "error: failed to",
+    ]
+
     def _worker():
         bat_content = _generate_bat(project, new_version=new_version)
 
@@ -191,23 +211,39 @@ def run_deploy(
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
 
+            critical_error_found = False
+            critical_error_lines = []
+
             for line in proc.stdout:
                 tag = "info"
-                if "[ERROR]" in line or "error" in line.lower():
+                line_lower = line.lower()
+                # Detect critical error keywords in output
+                if any(pat in line_lower for pat in _CRITICAL_ERROR_PATTERNS):
                     tag = "error"
-                elif "COMPLETADO" in line or "complete" in line.lower() or "success" in line.lower():
+                    critical_error_found = True
+                    critical_error_lines.append(line.strip())
+                elif "[error]" in line or "error" in line_lower:
+                    tag = "error"
+                elif "COMPLETADO" in line or "complete" in line_lower or "success" in line_lower:
                     tag = "success"
                 on_line(line, tag)
 
             proc.wait()
-            success = proc.returncode == 0
+
+            # A deploy is only successful if exit code is 0 AND no critical errors were detected
+            success = proc.returncode == 0 and not critical_error_found
             status = "OK" if success else "ERROR"
             db.update_deploy_status(project["id"], status)
 
             if success:
                 on_line(f"\n✅  Deploy de [{project['name']}] finalizado correctamente.\n", "success")
             else:
-                on_line(f"\n❌  Deploy de [{project['name']}] terminó con errores (code {proc.returncode}).\n", "error")
+                if critical_error_found:
+                    on_line(f"\n❌  Deploy de [{project['name']}] terminó con errores críticos detectados en la salida:\n", "error")
+                    for err_line in critical_error_lines[:5]:  # Show up to 5 error lines
+                        on_line(f"   ⚠ {err_line}\n", "error")
+                else:
+                    on_line(f"\n❌  Deploy de [{project['name']}] terminó con errores (code {proc.returncode}).\n", "error")
 
             on_done(success)
 

@@ -203,7 +203,7 @@ exports.changeAdminPassword = functions.https.onCall(async (data) => {
         if (target === '/registro') specificFieldValidation = 'adminPassword_registro';
         if (target === '/datos') specificFieldValidation = 'adminPassword_datos';
         if (target === '/informes') specificFieldValidation = 'adminPassword_informes';
-        if (target === '/configuracion') specificFieldValidation = 'adminPassword_configuracion';
+        if (target === '/configuracion' || target === 'admin_only') specificFieldValidation = 'adminPassword_configuracion';
 
         // Determinar qué contraseña se debe verificar como "Actual"
         let storedPasswordToVerify = null;
@@ -245,6 +245,13 @@ exports.changeAdminPassword = functions.https.onCall(async (data) => {
             updates = {
                 adminPassword: newHash,
                 adminPassword_registro: newHash,
+                adminPassword_datos: newHash,
+                adminPassword_informes: newHash,
+                adminPassword_configuracion: newHash
+            };
+        } else if (target === 'admin_only') {
+            updates = {
+                adminPassword: newHash,
                 adminPassword_datos: newHash,
                 adminPassword_informes: newHash,
                 adminPassword_configuracion: newHash
