@@ -89,7 +89,7 @@ export const uploadPhoto = async (imageDataUrl, tipo, email, fecha, hora) => {
 
         await uploadBytes(storageRef, blob, metadata);
         const url = await getDownloadURL(storageRef);
-        console.log("Storage upload OK");
+        console.log("✅ Storage upload OK:", storagePath);
 
         // Guardar metadatos en Firestore
         const isAsistencia = tipo === 'asistencia' || tipo === 'Entrada' || tipo === 'Salida';
@@ -110,10 +110,16 @@ export const uploadPhoto = async (imageDataUrl, tipo, email, fecha, hora) => {
             console.error("Error registrando en Firestore:", firestoreErr);
         }
 
-        console.log(`✅ Foto subida: ${storagePath} (${Math.round(blob.size / 1024)} KB)`);
+        console.log(`✅ Foto registrada correctamente: ${storagePath}`);
         return url;
     } catch (err) {
-        alert("❌ Error subiendo foto a Storage: " + err.message);
+        console.error("❌ Detalle de error en Storage:", {
+            code: err.code,
+            message: err.message,
+            serverResponse: err.customData?.serverResponse,
+            fullError: err
+        });
+        // NO mostrar alert aquí — el llamador maneja el error (guardar offline, reintentar)
         throw err;
     }
 };

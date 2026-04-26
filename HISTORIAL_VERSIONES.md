@@ -1,15 +1,20 @@
 # Historial de Versiones: Control de Asistencia y Acceso 📋
 
-Esta guía documenta la evolución del sistema, detallando las características principales de cada versión desde la 1.0.0 hasta la 1.7.20 actual.
+Esta guía documenta la evolución del sistema, detallando las características principales de cada versión desde la 1.0.0 hasta la 1.7.68 actual.
 
 ## Versión 1.7.68 (Actual) ✅
-**Fecha:** 04/04/2026
+**Fecha:** 15/04/2026
 **Estado:** Estable - Producción
 
+### Seguridad Avanzada y Anti-Spoofing
+- **Validación de Vida Pasiva**: Detección de patrones Moiré, reflejos y marcos de monitores/pantallas (ERR-07) para prevenir ataques con fotos digitales.
+- **Auditoría GPS Multifactor**: Implementación de verificación de altitud (ERR-01), precisión sospechosa (ERR-02) y discrepancia topográfica real (ERR-04) mediante API externa.
+- **Modo Visitas (Ruta)**: Capacidad de registrar operaciones externas sin cerrar el turno base, con validaciones biométricas y de geolocalización.
+
 ### Sistema de Gestión de Licencias (Licensing Core)
-- **Cifrado AES-256**: Implementación de un generador de licencias en Python compatible con CryptoJS en la web.
-- **Sincronización Firestore REST**: Integración del `deploy-manager` para instalar licencias directamente en bases de datos de clientes corporativos mediante la API REST de Google, optimizando el despliegue multi-tenant.
-- **Deploy Manager**: Nueva herramienta interna para administrar el ciclo de vida de las suscripciones y activación de módulos.
+- **Cifrado AES-256**: Implementación de un generador de licencias compatible con CryptoJS.
+- **Sincronización Firestore REST**: Integración del `deploy-manager` para instalar licencias directamente en bases de datos de clientes corporativos.
+- **Buffer-Flex**: Margen de cortesía configurable sobre el límite de empleados contratados.
 
 ## Versión 1.7.20
 **Fecha:** 23/03/2026

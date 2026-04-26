@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Settings, Lock, Save, CheckSquare, Square, Loader2, LogIn, LogOut, TriangleAlert, KeyRound, Eye, EyeOff } from 'lucide-react';
+import { Settings, Lock, Save, CheckSquare, Square, Loader2, LogIn, LogOut, TriangleAlert, KeyRound, Eye, EyeOff, ArrowLeft } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
@@ -77,6 +77,8 @@ const DEFAULT_CONFIG = {
     security_liveness: true,
     security_faceRecognition: true,
     security_faceThreshold: 0.63,
+    // camara para modo visitas
+    ruta_camera_facing: 'environment',
 };
 
 export default function Configuracion() {
@@ -139,9 +141,9 @@ export default function Configuracion() {
         setSavedOk(false);
     };
 
-    const handleNumberChange = (key, value, maxVal = 730) => {
+    const handleNumberChange = (key, value, maxVal = 730, minVal = 1) => {
         const val = parseInt(value, 10);
-        setConfig(prev => ({ ...prev, [key]: isNaN(val) ? 1 : val > maxVal ? maxVal : val < 1 ? 1 : val }));
+        setConfig(prev => ({ ...prev, [key]: isNaN(val) ? minVal : val > maxVal ? maxVal : val < minVal ? minVal : val }));
         setSavedOk(false);
     };
 
@@ -272,10 +274,10 @@ export default function Configuracion() {
                             Cambiar Contraseña
                         </button>
                         <button
-                            onClick={() => navigate('/dashboard')}
-                            className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 border border-gray-300"
+                            onClick={() => navigate('/login')}
+                            className="px-6 py-2.5 bg-white text-gray-800 font-bold flex items-center gap-2 rounded-xl border border-gray-100 shadow-lg hover:bg-gray-50 transition whitespace-nowrap"
                         >
-                            Volver
+                            <ArrowLeft size={20} /> Volver
                         </button>
                     </div>
                 </div>
@@ -550,10 +552,47 @@ export default function Configuracion() {
                 <div className="bg-white rounded-xl shadow-2xl p-6 mb-6 border-l-4 border-teal-500">
                     <h2 className="text-xl font-bold text-teal-800 mb-2">Cálculo de Tiempo Laborado</h2>
                     <p className="text-sm text-gray-600 mb-4">
-                        Configura el redondeo de entradas/salidas y el descuento automático de tiempo de almuerzo aplicable únicamente a turnos de más de 8 horas.
+                        Configura la duración del turno, el redondeo de entradas/salidas y el descuento automático de tiempo de almuerzo aplicable únicamente a turnos completos.
                     </p>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        {/* JORNADA LABORAL */}
+                        <div className="space-y-3 bg-fuchsia-50 p-4 rounded-xl border border-fuchsia-100">
+                            <h3 className="font-bold text-fuchsia-700">Jornada Laboral Diaria</h3>
+                            <button
+                                disabled
+                                className="w-full flex items-center justify-between px-4 py-3 rounded-lg border-2 border-fuchsia-500 bg-white text-fuchsia-800 text-left font-medium text-sm cursor-default"
+                            >
+                                <span className="flex items-center gap-2">
+                                    <CheckSquare size={20} className="text-fuchsia-600" />
+                                    Configurar duración
+                                </span>
+                            </button>
+                            <p className="text-xs text-fuchsia-700 opacity-80 leading-tight">Define la duración del turno oficial antes de aplicar descuentos o reglas extra.</p>
+                            <div className="grid grid-cols-2 gap-2 mt-1">
+                                <div className="flex flex-col gap-1">
+                                    <label className="text-xs font-bold text-fuchsia-800 opacity-80">Horas</label>
+                                    <input
+                                        type="number"
+                                        min="1" max="24"
+                                        value={config.calc_workdayHours ?? 8}
+                                        onChange={(e) => handleNumberChange('calc_workdayHours', e.target.value, 24)}
+                                        className="px-3 py-2 border border-fuchsia-200 rounded-lg focus:ring-2 focus:ring-fuchsia-500"
+                                    />
+                                </div>
+                                <div className="flex flex-col gap-1">
+                                    <label className="text-xs font-bold text-fuchsia-800 opacity-80">Minutos</label>
+                                    <input
+                                        type="number"
+                                        min="0" max="59"
+                                        value={config.calc_workdayMins ?? 0}
+                                        onChange={(e) => handleNumberChange('calc_workdayMins', e.target.value, 59, 0)}
+                                        className="px-3 py-2 border border-fuchsia-200 rounded-lg focus:ring-2 focus:ring-fuchsia-500"
+                                    />
+                                </div>
+                            </div>
+                        </div>
+
                         {/* REDONDEO */}
                         <div className="space-y-3 bg-teal-50 p-4 rounded-xl border border-teal-100">
                             <h3 className="font-bold text-teal-700">Redondeo de Horas</h3>
@@ -598,7 +637,7 @@ export default function Configuracion() {
                                     Descontar automáticamente
                                 </span>
                             </button>
-                            <p className="text-xs text-indigo-700 opacity-80 leading-tight">Solo aplicará si el empleado registra un tiempo laborado superior a 8 horas.</p>
+                            <p className="text-xs text-indigo-700 opacity-80 leading-tight">Solo aplicará si el empleado registra un tiempo laborado que iguale o supere la Jornada Laboral configurada.</p>
                             <div className="flex flex-col gap-1">
                                 <label className="text-xs font-bold text-indigo-800 opacity-80">Tiempo a descontar (Minutos)</label>
                                 <input
@@ -706,6 +745,43 @@ export default function Configuracion() {
                                 {config.security_faceRecognition !== false
                                     ? "Activo: Compara el rostro con la foto registrada para evitar suplantación."
                                     : "⚠️ Inactive: Solo verifica que haya un rostro presente."}
+                            </p>
+                        </div>
+
+                        {/* CÁMARA MODO VISITAS */}
+                        <div className="col-span-1 md:col-span-2 space-y-3 bg-teal-50 p-4 rounded-xl border border-teal-100">
+                            <h3 className="font-bold text-teal-700">📷 Cámara para Modo Visitas a Clientes</h3>
+                            <p className="text-sm text-teal-800 opacity-90">
+                                Elige qué cámara se activa al registrar llegadas y salidas en ruta. No aplica reconocimiento facial.
+                            </p>
+                            <div className="grid grid-cols-2 gap-3">
+                                <button
+                                    onClick={() => handleTextChange('ruta_camera_facing', 'environment')}
+                                    className={`flex flex-col items-center justify-center gap-2 p-4 rounded-xl border-2 text-sm font-bold transition ${
+                                        (config.ruta_camera_facing || 'environment') === 'environment'
+                                            ? 'border-teal-500 bg-white text-teal-800 shadow-md'
+                                            : 'border-gray-200 bg-gray-50 text-gray-500 hover:border-teal-300'
+                                    }`}
+                                >
+                                    <span className="text-2xl">🔭</span>
+                                    <span>Cámara Trasera</span>
+                                    <span className="text-[10px] opacity-70 font-normal">Para fotografiar el lugar / cliente</span>
+                                </button>
+                                <button
+                                    onClick={() => handleTextChange('ruta_camera_facing', 'user')}
+                                    className={`flex flex-col items-center justify-center gap-2 p-4 rounded-xl border-2 text-sm font-bold transition ${
+                                        config.ruta_camera_facing === 'user'
+                                            ? 'border-teal-500 bg-white text-teal-800 shadow-md'
+                                            : 'border-gray-200 bg-gray-50 text-gray-500 hover:border-teal-300'
+                                    }`}
+                                >
+                                    <span className="text-2xl">🤳</span>
+                                    <span>Cámara Frontal</span>
+                                    <span className="text-[10px] opacity-70 font-normal">Para selfie del empleado en campo</span>
+                                </button>
+                            </div>
+                            <p className="text-xs text-teal-700 opacity-80">
+                                Seleccionado: <b>{config.ruta_camera_facing === 'user' ? 'Cámara Frontal (Selfie)' : 'Cámara Trasera (Evidencia)'}</b>
                             </p>
                         </div>
                     </div>

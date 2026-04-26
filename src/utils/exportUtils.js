@@ -49,37 +49,47 @@ export const exportToExcelHTML = (filename, headers, rows) => {
             }
 
             if (ws[cellRef].v !== undefined && ws[cellRef].v !== null) {
-                // Remove trailing/leading artificial quotes if inherited from previous CSV logic
-                let val = String(ws[cellRef].v);
-                if (val.startsWith('"') && val.endsWith('"') && val.length >= 2) {
-                    val = val.slice(1, -1);
-                    val = val.replace(/""/g, '"');
-                }
+                const rawVal = ws[cellRef].v;
 
-                // Detect Time format HH:MM or HH:MM:SS
-                const timeMatch = val.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
-                // Detect known numeric column headers
-                const isNumericCol = /^(Horas|Total|Diu|Noc|Dom Diu|Dom Noc|Diurnas|Nocturnas|TotalHHMM)$/i.test(headers[c] || '');
-
-                if (timeMatch) {
-                    const h = parseInt(timeMatch[1], 10);
-                    const m = parseInt(timeMatch[2], 10);
-                    const s = parseInt(timeMatch[3] || '0', 10);
+                // ── CASO 1: El valor ya es un número JS (viene de parseFloat en Informes.jsx) ──
+                // Esto cubre todos los campos de horas decimales sin depender del encabezado.
+                if (typeof rawVal === 'number' && !isNaN(rawVal)) {
                     ws[cellRef].t = 'n';
-                    ws[cellRef].v = (h * 3600 + m * 60 + s) / 86400;
-                    ws[cellRef].z = timeMatch[3] ? 'hh:mm:ss' : 'hh:mm';
-                } else if (isNumericCol && !isNaN(val) && val.trim() !== '') {
-                    ws[cellRef].t = 'n';
-                    ws[cellRef].v = parseFloat(val);
+                    ws[cellRef].v = rawVal;
                     ws[cellRef].z = '0.00';
-                } else if (val.startsWith('http://') || val.startsWith('https://')) {
-                    ws[cellRef].t = 's';
-                    ws[cellRef].v = 'Ver evidencia';
-                    ws[cellRef].l = { Target: val, Tooltip: 'Haz clic para ver la foto original' };
                 } else {
-                    // Default to string to protect user IDs from scientific format
-                    ws[cellRef].t = 's';
-                    ws[cellRef].v = val;
+                    // Remove trailing/leading artificial quotes if inherited from previous CSV logic
+                    let val = String(rawVal);
+                    if (val.startsWith('"') && val.endsWith('"') && val.length >= 2) {
+                        val = val.slice(1, -1);
+                        val = val.replace(/""/g, '"');
+                    }
+
+                    // ── CASO 2: Formato HH:MM o HH:MM:SS ──
+                    const timeMatch = val.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+                    // ── CASO 3: Columna con encabezado conocido de horas ──
+                    const isNumericCol = /horas|total|diu|noc|dom\s*diu|dom\s*noc|diurnas|nocturnas|tiempo|clientes\s*visitados/i.test(headers[c] || '');
+
+                    if (timeMatch) {
+                        const h = parseInt(timeMatch[1], 10);
+                        const m = parseInt(timeMatch[2], 10);
+                        const s = parseInt(timeMatch[3] || '0', 10);
+                        ws[cellRef].t = 'n';
+                        ws[cellRef].v = (h * 3600 + m * 60 + s) / 86400;
+                        ws[cellRef].z = timeMatch[3] ? 'hh:mm:ss' : 'hh:mm';
+                    } else if (isNumericCol && !isNaN(val) && val.trim() !== '') {
+                        ws[cellRef].t = 'n';
+                        ws[cellRef].v = parseFloat(val);
+                        ws[cellRef].z = '0.00';
+                    } else if (val.startsWith('http://') || val.startsWith('https://')) {
+                        ws[cellRef].t = 's';
+                        ws[cellRef].v = 'Ver evidencia';
+                        ws[cellRef].l = { Target: val, Tooltip: 'Haz clic para ver la foto original' };
+                    } else {
+                        // Default to string to protect user IDs from scientific format
+                        ws[cellRef].t = 's';
+                        ws[cellRef].v = val;
+                    }
                 }
             } else {
                 ws[cellRef].t = 's';

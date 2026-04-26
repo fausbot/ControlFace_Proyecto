@@ -37,10 +37,12 @@ export const roundDateToNearest = (dateObj, intervalMinutes) => {
 };
 
 /**
- * Formatea un número de minutos a String HH:MM
+ * Convierte minutos a horas decimales (número real, 2 decimales).
+ * Ejemplo: 90 min → 1.5
+ * Devuelve un number (no string) para que Excel pueda sumarlo directamente.
  */
 const formatMinutesToHHMM = (totalMins) => {
-    return (totalMins / 60).toFixed(2);
+    return parseFloat((totalMins / 60).toFixed(2));
 };
 
 /**
@@ -123,11 +125,17 @@ export const calculateLaborHours = (entry, exit, config = {}) => {
     // Total en minutos para validar el almuerzo
     const totalMinutes = buckets.diurnas + buckets.nocturnas + buckets.domDiurnas + buckets.domNocturnas;
 
-    // 3. Descuento de Almuerzo (Sólo para turnos de 8 horas o más -> >= 480 min)
+    // Calcular duración de la jornada en minutos (por defecto 8 horas = 480 mins)
+    const workdayHours = config.calc_workdayHours !== undefined ? parseInt(config.calc_workdayHours, 10) : 8;
+    const workdayMins = config.calc_workdayMins !== undefined ? parseInt(config.calc_workdayMins, 10) : 0;
+    const requiredThresholdMins = (workdayHours * 60) + workdayMins;
+    const lunchMinsToDeduct = parseInt(config.calc_lunchMins, 10) || 60;
+
+    // 3. Descuento de Almuerzo (Sólo para turnos que igualen la jornada laboral + tiempo de almuerzo)
     let appliedLunchDeduction = false;
-    if (config.calc_lunch && config.calc_lunchMins && totalMinutes >= 480) {
+    if (config.calc_lunch && config.calc_lunchMins && totalMinutes >= (requiredThresholdMins + lunchMinsToDeduct)) {
         appliedLunchDeduction = true;
-        let lunchToDeduct = parseInt(config.calc_lunchMins, 10) || 60;
+        let lunchToDeduct = lunchMinsToDeduct;
 
         // Prioridad de descuento: Diurnas ordinarias > Nocturnas ordinarias > Dom/Fest Diurnas > Dom/Fest Nocturnas
         const categories = ['diurnas', 'nocturnas', 'domDiurnas', 'domNocturnas'];

@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Declaración de Garantía — FaceControl®</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+        :root {
+            --negro:       #2a2a2a;
+            --verde:       #00e03a;
+            --verde-claro: #e6fff0;
+            --verde-mid:   #b3ffd0;
+            --rojo-claro:  #fff0f0;
+            --rojo:        #cc2222;
+            --gris-texto:  #374151;
+            --gris-claro:  #f9fafb;
+            --borde:       #e5e7eb;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Inter', 'Calibri', sans-serif;
+            font-size: 11pt;
+            color: var(--negro);
+            background: #ebebeb;
+            line-height: 1.65;
+        }
+
+        /* ── Documento A4 ── */
+        .documento {
+            max-width: 210mm;
+            margin: 28px auto;
+            background: #fff;
+            box-shadow: 0 4px 40px rgba(0,0,0,0.18);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        /* ── Header negro con logo ── */
+        .header {
+            background: var(--negro);
+            padding: 30px 50px 24px;
+        }
+        .header-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 22px;
+            padding-bottom: 20px;
+            border-bottom: 2px solid var(--verde);
+        }
+        .logo-img {
+            height: 54px;
+            display: block;
+        }
+        .doc-ref {
+            text-align: right;
+            color: rgba(255,255,255,0.55);
+            font-size: 9pt;
+            line-height: 1.8;
+        }
+        .doc-ref strong { color: var(--verde); }
+        .header-title h1 {
+            font-size: 14pt;
+            font-weight: 700;
+            color: #fff;
+            line-height: 1.35;
+        }
+        .header-title p {
+            font-size: 9.5pt;
+            color: rgba(255,255,255,0.6);
+            margin-top: 5px;
+        }
+
+        /* ── Banda destinatario ── */
+        .destinatario {
+            background: var(--verde-claro);
+            border-bottom: 2px solid var(--verde);
+            padding: 16px 50px;
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            font-size: 10pt;
+            color: var(--gris-texto);
+        }
+        .dest-icon {
+            width: 34px; height: 34px;
+            background: var(--verde);
+            border-radius: 8px;
+            display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0;
+            font-size: 16px;
+        }
+
+        /* ── Cuerpo ── */
+        .cuerpo { padding: 36px 50px 44px; }
+
+        p { margin-bottom: 10px; font-size: 10.5pt; color: var(--gris-texto); }
+
+        /* ── Secciones ── */
+        .seccion { margin-bottom: 28px; }
+        .seccion-titulo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 13px;
+            padding-bottom: 9px;
+            border-bottom: 2px solid var(--verde);
+        }
+        .seccion-titulo .num {
+            width: 26px; height: 26px;
+            background: var(--negro);
+            color: var(--verde);
+            border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 10pt; font-weight: 800;
+            flex-shrink: 0;
+        }
+        .seccion-titulo h2 {
+            font-size: 10.5pt;
+            font-weight: 700;
+            color: var(--negro);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        /* ── Tablas ── */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 12px 0;
+            font-size: 10pt;
+        }
+        thead tr { background: var(--negro); color: #fff; }
+        thead th { padding: 9px 12px; text-align: left; font-weight: 600; font-size: 9.5pt; }
+        tbody tr { border-bottom: 1px solid var(--borde); }
+        tbody tr:last-child { border-bottom: none; }
+        tbody tr:nth-child(even) { background: var(--gris-claro); }
+        tbody td { padding: 9px 12px; color: var(--gris-texto); vertical-align: top; }
+        .si { color: #059669; font-weight: 600; }
+        .no { color: #dc2626; font-weight: 600; }
+
+        /* ── Alertas ── */
+        .alerta {
+            border-radius: 10px;
+            padding: 13px 16px;
+            margin: 13px 0;
+            display: flex;
+            gap: 11px;
+            align-items: flex-start;
+            font-size: 10pt;
+            color: var(--gris-texto);
+        }
+        .alerta .icono { font-size: 17px; flex-shrink: 0; line-height: 1.2; }
+        .alerta-verde { background: var(--verde-claro); border-left: 4px solid var(--verde); }
+        .alerta-neg   { background: #f3f3f3;            border-left: 4px solid var(--negro); }
+        .alerta-rojo  { background: var(--rojo-claro);  border-left: 4px solid #ef4444; }
+
+        /* ── Bloque pasos (verificación) ── */
+        .pasos { margin: 10px 0; }
+        .paso {
+            display: flex;
+            gap: 12px;
+            align-items: flex-start;
+            padding: 11px 14px;
+            border-radius: 10px;
+            background: var(--gris-claro);
+            margin-bottom: 8px;
+        }
+        .paso-num {
+            width: 26px; height: 26px;
+            background: var(--negro);
+            color: var(--verde);
+            border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 10pt; font-weight: 800;
+            flex-shrink: 0;
+        }
+        .paso-body { flex: 1; }
+        .paso-titulo { font-weight: 700; font-size: 10.5pt; color: var(--negro); }
+        .paso-ruta {
+            font-size: 9.5pt;
+            color: #555;
+            margin-top: 4px;
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+        .plataforma {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            background: #fff;
+            border: 1px solid var(--borde);
+            border-radius: 6px;
+            padding: 3px 8px;
+            font-size: 9pt;
+        }
+        .plat-ic { font-size: 13px; }
+
+        /* ── Lista de garantías ── */
+        .garantias { list-style: none; padding: 0; }
+        .garantias li {
+            display: flex;
+            gap: 10px;
+            align-items: flex-start;
+            padding: 9px 12px;
+            border-bottom: 1px solid var(--borde);
+            font-size: 10.5pt;
+            color: var(--gris-texto);
+        }
+        .garantias li:last-child { border-bottom: none; }
+        .garantias li::before {
+            content: '✓';
+            color: var(--verde);
+            font-weight: 900;
+            font-size: 13pt;
+            line-height: 1.2;
+            flex-shrink: 0;
+        }
+
+        /* ── Arquitectura texto ── */
+        .arq-grid {
+            display: grid;
+            grid-template-columns: 1fr auto 1fr 1fr 1fr;
+            gap: 0;
+            align-items: center;
+            margin: 14px 0;
+        }
+        .arq-box {
+            background: var(--negro);
+            color: #fff;
+            border-radius: 10px;
+            padding: 12px 16px;
+            text-align: center;
+            font-size: 9.5pt;
+        }
+        .arq-box .titulo { font-weight: 800; color: var(--verde); font-size: 11pt; }
+        .arq-box .sub   { color: rgba(255,255,255,0.65); font-size: 8.5pt; margin-top: 3px; }
+
+        .arq-emp {
+            background: var(--verde-claro);
+            border: 2px solid var(--verde);
+            border-radius: 10px;
+            padding: 10px 12px;
+            text-align: center;
+            font-size: 9.5pt;
+        }
+        .arq-emp .titulo { font-weight: 700; color: var(--negro); }
+        .arq-emp .sub   { color: #555; font-size: 8.5pt; margin-top: 2px; }
+
+        .arq-flecha {
+            text-align: center;
+            font-size: 18pt;
+            color: var(--verde);
+            padding: 0 6px;
+            line-height: 1;
+        }
+
+        hr { border: none; border-top: 1px solid var(--borde); margin: 26px 0; }
+
+        /* ── Firmas ── */
+        .firmas {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 32px;
+            margin-top: 20px;
+        }
+        .firma-bloque { text-align: center; }
+        .firma-linea {
+            border-bottom: 2px solid var(--negro);
+            margin-bottom: 10px;
+            padding-bottom: 52px;
+        }
+        .firma-nombre { font-weight: 700; font-size: 11pt; color: var(--negro); }
+        .firma-cc     { font-size: 9.5pt; color: #6b7280; margin-top: 2px; }
+        .firma-cargo  { font-size: 9.5pt; color: var(--negro); font-weight: 600; margin-top: 3px; }
+        .firma-marca  { font-size: 10.5pt; font-weight: 900; color: var(--negro); margin-top: 5px; letter-spacing: -0.3px; }
+        .firma-marca span { color: var(--verde); }
+
+        /* ── Nota final ── */
+        .nota-final {
+            background: var(--verde-claro);
+            border: 1px solid var(--verde-mid);
+            border-radius: 10px;
+            padding: 14px 16px;
+            margin-top: 24px;
+            font-size: 9.5pt;
+            color: #1a4731;
+        }
+
+        /* ── Footer ── */
+        .footer {
+            background: var(--negro);
+            padding: 16px 50px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .footer-logo { height: 26px; opacity: 0.85; }
+        .footer-right { font-size: 8.5pt; color: rgba(255,255,255,0.4); text-align: right; line-height: 1.6; }
+        .footer-right strong { color: rgba(255,255,255,0.7); }
+
+        /* ── Botón imprimir ── */
+        .btn-wrap {
+            max-width: 210mm;
+            margin: 0 auto 14px;
+            text-align: right;
+            padding: 0 10px;
+        }
+        .btn-wrap button {
+            background: var(--negro);
+            color: var(--verde);
+            border: none;
+            padding: 10px 24px;
+            border-radius: 8px;
+            font-size: 11pt;
+            font-weight: 700;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            letter-spacing: 0.2px;
+        }
+        .btn-wrap button:hover { background: #1a1a1a; }
+
+        @media print {
+            body { background: #fff; }
+            .documento { box-shadow: none; margin: 0; border-radius: 0; }
+            .btn-wrap { display: none; }
+            @page { margin: 0; size: A4; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="btn-wrap">
+    <button onclick="window.print()">🖨️ Imprimir / Guardar como PDF</button>
+</div>
+
+<div class="documento">
+
+    <!-- ══ HEADER ══ -->
+    <div class="header">
+        <div class="header-top">
+            <img src="C:/Users/fausb/Dropbox/FaceControl/Logos/logo negro.png"
+                 alt="FaceControl®" class="logo-img">
+            <div class="doc-ref">
+                <div><strong>Doc:</strong> FC-GAR-001</div>
+                <div><strong>Versión:</strong> 1.0</div>
+                <div><strong>Fecha:</strong> 14 de abril de 2026</div>
+                <div><strong>Vigencia:</strong> Indefinida</div>
+            </div>
+        </div>
+        <div class="header-title">
+            <h1>DECLARACIÓN DE GARANTÍA TÉCNICA<br>Y TRANSPARENCIA EN EL MANEJO DE DATOS</h1>
+            <p>Documento oficial · Para entrega a empresas clientes y sus colaboradores</p>
+        </div>
+    </div>
+
+    <!-- ══ DESTINATARIO ══ -->
+    <div class="destinatario">
+        <div class="dest-icon">📋</div>
+        <div>
+            <strong>Dirigida a:</strong> Empresas que han adquirido una licencia de uso del sistema FaceControl®
+            y a sus empleados que utilizan la aplicación para registrar asistencia.
+        </div>
+    </div>
+
+    <!-- ══ CUERPO ══ -->
+    <div class="cuerpo">
+
+        <p>
+            En calidad de desarrolladores y propietarios del sistema <strong>FaceControl®</strong>, presentamos esta
+            declaración <strong>formal, transparente y verificable</strong> sobre los alcances técnicos de nuestra
+            aplicación en relación con la privacidad y el tratamiento de datos personales.
+        </p>
+
+        <!-- ── 1. Qué es ── -->
+        <div class="seccion">
+            <div class="seccion-titulo"><div class="num">1</div><h2>¿Qué es FaceControl®?</h2></div>
+            <p>
+                FaceControl® es un <strong>software de control de asistencia biométrico</strong> desarrollado por
+                <strong>Jorge Botero Calderón</strong> y <strong>Faustino Botero Arbeláez</strong>, personas naturales
+                con domicilio en Bogotá D.C., Colombia. FaceControl® <strong>no es</strong> una empresa de vigilancia,
+                manejo de datos ni recursos humanos. Es un <strong>proveedor de tecnología</strong> que licencia su
+                software a empresas para que gestionen, bajo su propia responsabilidad, el control de asistencia.
+            </p>
+            <div class="alerta alerta-neg">
+                <div class="icono">💡</div>
+                <div>
+                    FaceControl® funciona como una <strong>Aplicación Web Progresiva (PWA)</strong>: no se instala desde
+                    tiendas de aplicaciones (Play Store / App Store). Corre dentro del navegador web (Chrome, Safari, etc.),
+                    que actúa como un escudo de seguridad limitando técnicamente lo que la aplicación puede acceder.
+                </div>
+            </div>
+        </div>
+
+        <!-- ── 2. Arquitectura ── -->
+        <div class="seccion">
+            <div class="seccion-titulo"><div class="num">2</div><h2>Arquitectura de Datos — Punto Fundamental</h2></div>
+            <p>
+                <strong>Cada empresa cliente tiene su propia base de datos, completamente independiente y separada.</strong>
+                Al contratar FaceControl®, la empresa configura su propio proyecto de <strong>Google Firebase</strong>
+                usando sus propias credenciales y su propia cuenta de Google. Esto significa que:
+            </p>
+            <ul style="margin: 10px 0 10px 20px; font-size:10.5pt; color:var(--gris-texto); line-height:1.9;">
+                <li>Los datos de los empleados de la Empresa A <strong>nunca pueden ser vistos</strong> por la Empresa B.</li>
+                <li>FaceControl® <strong>no es propietario</strong> de ninguna base de datos de sus clientes.</li>
+                <li>El cliente es el <strong>único dueño</strong> de su Firebase y puede revocar cualquier acceso en cualquier momento.</li>
+                <li>Los datos fluyen directamente desde el teléfono del empleado hasta el Firebase de <strong>su empresa</strong>,
+                    sin pasar por servidores de FaceControl®.</li>
+            </ul>
+            <div class="alerta alerta-verde">
+                <div class="icono">🔒</div>
+                <div>
+                    Equivale a tener cada empresa su propia caja fuerte privada. FaceControl® proporciona
+                    la llave del sistema, pero <strong>nunca tiene acceso al contenido</strong> de la caja.
+                </div>
+            </div>
+        </div>
+
+        <!-- ── 3. Acceso FC ── -->
+        <div class="seccion">
+            <div class="seccion-titulo"><div class="num">3</div><h2>Acceso de FaceControl® a los Datos</h2></div>
+            <p><strong>FaceControl® no accede, en ningún caso ordinario, a los datos de los empleados.</strong></p>
+            <table>
+                <thead><tr><th>Tipo de acceso</th><th>¿Tiene FaceControl® este acceso?</th></tr></thead>
+                <tbody>
+                    <tr><td>Leer datos o fotos de empleados</td><td class="no">❌ No — solo si el cliente lo solicita por escrito para soporte</td></tr>
+                    <tr><td>Modificar o eliminar registros</td><td class="no">❌ No</td></tr>
+                    <tr><td>Ser propietario del Firebase</td><td class="no">❌ No — propietario siempre es la empresa cliente</td></tr>
+                    <tr><td>Compartir datos con terceros</td><td class="no">❌ Técnicamente imposible — no es propietario</td></tr>
+                    <tr><td>Rol de "Editor" para soporte técnico y despliegue de actualizaciones</td><td class="si">✔ Solo con autorización del cliente — puede revocarlo en cualquier momento desde su consola de Google/Firebase</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- ── 4. Permisos ── -->
+        <div class="seccion">
+            <div class="seccion-titulo"><div class="num">4</div><h2>Permisos que Solicita la Aplicación</h2></div>
+            <table>
+                <thead>
+                    <tr><th>Permiso</th><th>¿Cuándo se activa?</th><th>Dato recopilado</th><th>¿Dónde se guarda?</th></tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>📷 <strong>Cámara</strong></td>
+                        <td>Solo al presionar "Registrar"</td>
+                        <td>Foto con marca de agua</td>
+                        <td>Firebase de la <strong>empresa cliente</strong></td>
+                    </tr>
+                    <tr>
+                        <td>📍 <strong>Ubicación GPS</strong></td>
+                        <td>Solo al presionar "Registrar"</td>
+                        <td>Coordenadas del momento</td>
+                        <td>Firebase de la <strong>empresa cliente</strong></td>
+                    </tr>
+                </tbody>
+            </table>
+            <div class="alerta alerta-rojo" style="margin-top:12px;">
+                <div class="icono">🚫</div>
+                <div>
+                    La app <strong>NO puede acceder</strong> a: contactos, mensajes, datos bancarios,
+                    archivos del dispositivo, galería de fotos, historial de llamadas, aplicaciones instaladas,
+                    historial de navegación, micrófono, IMEI ni número de teléfono.
+                    Esta limitación es <strong>técnica e inherente</strong> a la arquitectura PWA — no solo una promesa.
+                </div>
+            </div>
+        </div>
+
+        <!-- ── 5. Cómo verificarlo ── -->
+        <div class="seccion">
+            <div class="seccion-titulo"><div class="num">5</div><h2>Cómo Puede Verificarlo el Empleado</h2></div>
+            <p>Cualquier empleado puede confirmar de forma independiente que la aplicación solo usa cámara y GPS:</p>
+
+            <div class="pasos">
+                <div class="paso">
+                    <div class="paso-num">A</div>
+                    <div class="paso-body">
+                        <div class="paso-titulo">Ver los permisos exclusivos de FaceControl® en el teléfono</div>
+                        <div style="font-size:9.5pt; color:#555; margin:6px 0 10px; line-height:1.6;">
+                            FaceControl® se instala como una <strong>aplicación independiente (PWA)</strong> en el teléfono — no como sitio web de Chrome. Por eso aparece con su propio ícono y su propia lista de permisos, <strong>separada de todos los demás permisos del navegador</strong>. Esto permite verificar exactamente qué accesos tiene:
+                        </div>
+                        <div class="paso-ruta">
+                            <span class="plataforma" style="flex-direction:column; align-items:flex-start; gap:4px; padding:10px 12px;">
+                                <span><span class="plat-ic">🤖</span> <strong>Android:</strong></span>
+                                <span style="padding-left:22px;">Ajustes del teléfono → <strong>Aplicaciones</strong> → buscar <strong>"TU PROGRAMA"</strong> (el nombre que aparece en el ícono de la app instalada) → <strong>Permisos</strong> → verá únicamente <strong>Cámara</strong> y <strong>Ubicación</strong>.
+                                Todos los demás (contactos, archivos, teléfono, SMS) aparecerán en <em>"Sin permiso"</em>.</span>
+                            </span>
+                            <span class="plataforma" style="flex-direction:column; align-items:flex-start; gap:4px; padding:10px 12px;">
+                                <span><span class="plat-ic">🍎</span> <strong>iPhone (iOS):</strong></span>
+                                <span style="padding-left:22px;">En iPhone, FaceControl® también se instala como app independiente al agregar al inicio desde Safari. Una vez instalada, el sistema la registra como cualquier otra app:
+                                <br><br>
+                                Ajustes del iPhone → bajar hasta encontrar <strong>"TU PROGRAMA"</strong> en la lista de apps → tocándola verá sus permisos: solo <strong>Cámara</strong> y <strong>Ubicación</strong>.
+                                <br><br>
+                                También puede verificarlo en: Ajustes → <strong>Privacidad y seguridad</strong> → <strong>Cámara</strong> (o <strong>Servicios de localización</strong>) → buscar <strong>"TU PROGRAMA"</strong> — en ninguna otra categoría de privacidad aparecerá.</span>
+                            </span>
+                        </div>
+                        <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px; padding:9px 12px; margin-top:10px; font-size:9.5pt; color:#14532d;">
+                            ✅ <strong>Dato verificable:</strong> La PWA instalada no puede tener más permisos de los que el sistema operativo muestra en esa pantalla. Lo que allí aparece es todo lo que FaceControl® puede acceder — nada más es posible técnicamente.
+                        </div>
+                    </div>
+                </div>
+
+                <div class="paso">
+                    <div class="paso-num">B</div>
+                    <div class="paso-body">
+                        <div class="paso-titulo">Observar el ícono de GPS en la barra superior</div>
+                        <div class="paso-ruta">
+                            <span class="plataforma">
+                                <span class="plat-ic">🤖</span>
+                                <strong>Android:</strong>&nbsp; El ícono de flecha de ubicación aparece solo al registrar. Cierra la app → desaparece inmediatamente.
+                            </span>
+                            <span class="plataforma">
+                                <span class="plat-ic">🍎</span>
+                                <strong>iPhone (iOS):</strong>&nbsp; La flecha azul de ubicación en la esquina superior derecha solo aparece durante el registro.
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="paso">
+                    <div class="paso-num">C</div>
+                    <div class="paso-body">
+                        <div class="paso-titulo">Consultar la página de privacidad dentro de la app</div>
+                        <div class="paso-ruta">
+                            <span style="font-size:9.5pt; color:#555;">
+                                Accede a <strong>[URL de la empresa]/privacidad</strong> desde cualquier dispositivo,
+                                sin necesidad de iniciar sesión, para ver toda esta información de forma visual e interactiva.
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── 6. Garantías ── -->
+        <div class="seccion">
+            <div class="seccion-titulo"><div class="num">6</div><h2>Garantía Formal de FaceControl®</h2></div>
+            <ul class="garantias">
+                <li>El software no contiene ningún mecanismo para extraer, copiar o transmitir datos a servidores propios de FaceControl®.</li>
+                <li>Todos los datos se almacenan exclusivamente en el Firebase configurado y administrado por cada empresa cliente.</li>
+                <li>FaceControl® no comercializa, no cede ni vende ningún dato de los empleados de sus clientes.</li>
+                <li>El código de la aplicación puede ser auditado por un experto externo a solicitud de cualquier cliente.</li>
+                <li>FaceControl® solo accede a los sistemas de un cliente cuando éste lo solicita para soporte técnico o actualizaciones, y el cliente conserva siempre el control total como propietario de su Firebase.</li>
+            </ul>
+        </div>
+
+        <!-- ── 7. Responsabilidades ── -->
+        <div class="seccion">
+            <div class="seccion-titulo"><div class="num">7</div><h2>Responsabilidades Claramente Definidas</h2></div>
+            <table>
+                <thead><tr><th>Responsabilidad</th><th>FaceControl®</th><th>Empresa Cliente</th></tr></thead>
+                <tbody>
+                    <tr><td>Desarrollar y mantener el software</td><td class="si">✔ Sí</td><td>—</td></tr>
+                    <tr><td>Garantizar que la app no accede a datos indebidos</td><td class="si">✔ Sí</td><td>—</td></tr>
+                    <tr><td>Custodiar los datos de sus empleados</td><td>—</td><td class="si">✔ Sí</td></tr>
+                    <tr><td>Publicar Política de Datos (Ley 1581 de 2012)</td><td>—</td><td class="si">✔ Sí</td></tr>
+                    <tr><td>Solicitar consentimiento a sus empleados</td><td>—</td><td class="si">✔ Sí</td></tr>
+                    <tr><td>Propietario de la base de datos (Firebase)</td><td class="no">❌ No</td><td class="si">✔ Sí</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- ── 8. Nota empleado ── -->
+        <div class="seccion">
+            <div class="seccion-titulo"><div class="num">8</div><h2>Nota para el Empleado</h2></div>
+            <p>
+                Si usted es empleado de una empresa que usa FaceControl®: sus datos de asistencia están en la base
+                de datos de <strong>su empresa</strong>, no de FaceControl®. Para ejercer sus derechos de acceso,
+                rectificación o supresión según la <strong>Ley 1581 de 2012</strong>, diríjase al área de
+                Recursos Humanos o Administración de su empresa. FaceControl® no tiene acceso a esos datos
+                y no puede atender solicitudes individuales de empleados.
+            </p>
+        </div>
+
+        <hr>
+
+        <!-- Fecha y Firmas -->
+        <p style="text-align:center; margin-bottom:28px; font-size:10.5pt;">
+            Dado en <strong>Bogotá D.C.</strong>, a los <strong>14</strong> días del mes de <strong>abril</strong> de <strong>2026</strong>.
+        </p>
+
+        <div class="firmas">
+            <div class="firma-bloque">
+                <div class="firma-linea"></div>
+                <div class="firma-nombre">Jorge Botero Calderón</div>
+                <div class="firma-cc">C.C. N.° 79.732.648</div>
+                <div class="firma-cargo">Co-desarrollador y Co-fundador</div>
+                <div class="firma-marca">Face<span>Control</span>®</div>
+            </div>
+            <div class="firma-bloque">
+                <div class="firma-linea"></div>
+                <div class="firma-nombre">Faustino Botero Arbeláez</div>
+                <div class="firma-cc">C.C. N.° 79.591.167</div>
+                <div class="firma-cargo">Co-desarrollador y Co-fundador</div>
+                <div class="firma-marca">Face<span>Control</span>®</div>
+            </div>
+        </div>
+
+        <div class="nota-final">
+            📋 <strong>Nota:</strong> Este documento es genérico y aplica a todos los clientes de FaceControl®.
+            <strong>No reemplaza</strong> la Política de Tratamiento de Datos Personales que cada empresa debe
+            publicar para sus empleados conforme a la Ley 1581 de 2012.
+        </div>
+
+    </div>
+
+    <!-- ══ FOOTER ══ -->
+    <div class="footer">
+        <img src="C:/Users/fausb/Dropbox/FaceControl/Logos/logo negro.png"
+             alt="FaceControl®" class="footer-logo">
+        <div class="footer-right">
+            <strong>Documento FC-GAR-001 v1.0</strong><br>
+            Desarrollado por Jorge Botero Calderón y Faustino Botero Arbeláez<br>
+            Bogotá D.C., Colombia · © 2026 FaceControl®
+        </div>
+    </div>
+
+</div>
+</body>
+</html>

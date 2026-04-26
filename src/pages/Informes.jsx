@@ -1,7 +1,7 @@
 // src/pages/Informes.jsx
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Download, Calendar, Trash2, AlertTriangle, TriangleAlert, Image, Loader2, UserMinus, FileText, Printer, Image as ImageIcon, Navigation } from 'lucide-react';
+import { Download, Calendar, Trash2, AlertTriangle, TriangleAlert, Image, Loader2, UserMinus, FileText, Printer, Image as ImageIcon, Navigation, ArrowLeft } from 'lucide-react';
 import DeleteEmployeeModal from '../components/DeleteEmployeeModal';
 import { listPhotosByFilter, downloadPhotosAsZip, cleanOldPhotos } from '../services/storageService';
 import { httpsCallable } from 'firebase/functions';
@@ -367,7 +367,7 @@ export default function Informes() {
                 if (end) end.setHours(23, 59, 59, 999);
 
                 suspiciousLogs = suspiciousLogs.filter(log => {
-                    const d = parseSpanishDate(log.fecha);
+                    let d = parseSpanishDate(log.fecha);
                     if (!d && log.timestamp) {
                         try { d = log.timestamp.toDate(); } catch(e){}
                     }
@@ -717,7 +717,7 @@ export default function Informes() {
                                 visitTimeHrs = calcMsDiffHrs(v.entry.fecha, v.entry.hora, v.exit.fecha, v.exit.hora);
                                 sumOfVisitsHrs += visitTimeHrs;
                             }
-                            return { ...v, visitTimeHrs: visitTimeHrs.toFixed(2) };
+                            return { ...v, visitTimeHrs: parseFloat(visitTimeHrs.toFixed(2)) };
                         });
 
                         let horasTransporte = totalHorasTrabajadas - sumOfVisitsHrs;
@@ -744,7 +744,11 @@ export default function Informes() {
                             }
                         }
 
-                        rowData.push(sumOfVisitsHrs.toFixed(2), horasTransporte.toFixed(2), totalHorasTrabajadas.toFixed(2));
+                        rowData.push(
+                            parseFloat(sumOfVisitsHrs.toFixed(2)),
+                            parseFloat(horasTransporte.toFixed(2)),
+                            parseFloat(totalHorasTrabajadas.toFixed(2))
+                        );
                         rows.push(rowData);
                     });
                 });
@@ -825,9 +829,9 @@ export default function Informes() {
                     return [
                         email, emp.firstName, emp.lastName,
                         s.clientesVisitados,
-                        s.tiempoClientesHrs.toFixed(2),
-                        s.horasTotalesHrs.toFixed(2),
-                        horasTransporte.toFixed(2)
+                        parseFloat(s.tiempoClientesHrs.toFixed(2)),
+                        parseFloat(s.horasTotalesHrs.toFixed(2)),
+                        parseFloat(horasTransporte.toFixed(2))
                     ];
                 });
 
@@ -945,9 +949,9 @@ export default function Informes() {
                         rows.push([
                             email, emp.firstName, emp.lastName, diaStr, block.entry?.fecha || '-',
                             block.visits.length,
-                            totalVisitasHrs.toFixed(2),
-                            horasTotalesBruto.toFixed(2),
-                            horasTransporte.toFixed(2)
+                            parseFloat(totalVisitasHrs.toFixed(2)),
+                            parseFloat(horasTotalesBruto.toFixed(2)),
+                            parseFloat(horasTransporte.toFixed(2))
                         ]);
                     });
                 });
@@ -968,7 +972,7 @@ export default function Informes() {
                         const end = parseStringDate(exit.fecha, exit.hora);
                         const calc = calculateLaborHours(start, end, timeConfig);
                         if (!calc.error) {
-                            horasStr = (calc.raw.totalMins / 60).toFixed(2);
+                            horasStr = parseFloat((calc.raw.totalMins / 60).toFixed(2));
                             if (calc.appliedLunchDeduction) lunch = `Sí (${(timeConfig.calc_lunchMins || 60) / 60} Hora${(timeConfig.calc_lunchMins || 60) / 60 > 1 ? 's' : ''})`;
                         }
                     }
@@ -1022,7 +1026,12 @@ export default function Informes() {
                     }
                 });
                 rows = Object.values(summary).map(s => [
-                    s.u, s.fn, s.ln, (s.d / 60).toFixed(2), (s.n / 60).toFixed(2), (s.dd / 60).toFixed(2), (s.dn / 60).toFixed(2), ((s.d + s.n + s.dd + s.dn) / 60).toFixed(2)
+                    s.u, s.fn, s.ln,
+                    parseFloat((s.d / 60).toFixed(2)),
+                    parseFloat((s.n / 60).toFixed(2)),
+                    parseFloat((s.dd / 60).toFixed(2)),
+                    parseFloat((s.dn / 60).toFixed(2)),
+                    parseFloat(((s.d + s.n + s.dd + s.dn) / 60).toFixed(2))
                 ]);
             }
 
@@ -1146,7 +1155,9 @@ export default function Informes() {
                         Centro de Informes y Reportes
                         <span className="text-[10px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-mono ml-2 border border-gray-200">v{import.meta.env.VITE_APP_VERSION}</span>
                     </h1>
-                    <button onClick={() => navigate('/dashboard')} className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 transition">Volver</button>
+                    <button onClick={() => navigate('/login')} className="px-6 py-2.5 bg-white text-gray-800 font-bold flex items-center gap-2 rounded-xl border border-gray-100 shadow-lg hover:bg-gray-50 transition whitespace-nowrap">
+                        <ArrowLeft size={20} /> Volver
+                    </button>
                 </div>
 
                 {/* 1. EXPORTAR FOTOS / EVIDENCIAS */}
@@ -1247,16 +1258,19 @@ export default function Informes() {
                 {/* 3. EXPORTAR NOVEDADES */}
                 <div className="bg-white rounded-xl shadow-2xl p-6 mb-6 border-l-4 border-orange-400">
                     <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2"><TriangleAlert size={24} className="text-orange-500" /> Reporte de Novedades</h2>
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end mb-4">
-                        <div className="md:col-span-1"><label className="text-sm">Desde</label><input type="date" value={incidentStartDate} onChange={e => setIncidentStartDate(e.target.value)} className="w-full px-4 py-2 border rounded-lg" /></div>
-                        <div className="md:col-span-1"><label className="text-sm">Hasta</label><input type="date" value={incidentEndDate} onChange={e => setIncidentEndDate(e.target.value)} className="w-full px-4 py-2 border rounded-lg" /></div>
-                        <div className="md:col-span-1"><label className="text-sm">Usuario</label><input type="text" value={incidentCsvUserFilter} onChange={e => setIncidentCsvUserFilter(e.target.value)} className="w-full px-4 py-2 border rounded-lg" /></div>
-                        <div className="flex gap-2">
-                            <select value={exportFormatIncidents} onChange={e => setExportFormatIncidents(e.target.value)} className="border rounded-lg px-2"><option value="csv">CSV</option><option value="xlsx">XLSX</option></select>
-                            <button onClick={exportIncidentsToCSV} disabled={exportingIncidents} className="flex-1 bg-orange-600 text-white py-2 rounded-lg font-bold hover:bg-orange-700 flex justify-center gap-2">
-                                {exportingIncidents ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />} Exportar
-                            </button>
-                        </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                        <div><label className="text-sm">Desde</label><input type="date" value={incidentStartDate} onChange={e => setIncidentStartDate(e.target.value)} className="w-full px-4 py-2 border rounded-lg" /></div>
+                        <div><label className="text-sm">Hasta</label><input type="date" value={incidentEndDate} onChange={e => setIncidentEndDate(e.target.value)} className="w-full px-4 py-2 border rounded-lg" /></div>
+                        <div><label className="text-sm">Usuario</label><input type="text" value={incidentCsvUserFilter} onChange={e => setIncidentCsvUserFilter(e.target.value)} className="w-full px-4 py-2 border rounded-lg" /></div>
+                    </div>
+                    <div className="flex gap-4 flex-wrap justify-end">
+                        <select value={exportFormatIncidents} onChange={e => setExportFormatIncidents(e.target.value)} className="px-4 py-2 border rounded-lg">
+                            <option value="csv">CSV</option>
+                            <option value="xlsx">XLSX</option>
+                        </select>
+                        <button onClick={exportIncidentsToCSV} disabled={exportingIncidents} className="px-8 py-2 bg-orange-600 text-white font-bold rounded-lg hover:bg-orange-700 flex items-center gap-2 shadow-md">
+                            {exportingIncidents ? <Loader2 size={20} className="animate-spin" /> : <Download size={20} />} Exportar
+                        </button>
                     </div>
                     <div className="mt-4 pt-4 border-t border-red-50 flex items-center justify-between">
                         <p className="text-xs text-gray-500">Borrar novedades permanentemente en el rango de fechas.</p>
@@ -1268,16 +1282,19 @@ export default function Informes() {
                 {storageConfig?.ruta_active && (
                     <div className="bg-white rounded-xl shadow-2xl p-6 mb-6 border-l-4 border-blue-400">
                         <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2"><Navigation size={24} className="text-blue-500" /> Reporte de Visitas a Clientes</h2>
-                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end mb-4">
-                            <div className="md:col-span-1"><label className="text-sm">Desde</label><input type="date" value={visitStartDate} onChange={e => setVisitStartDate(e.target.value)} className="w-full px-4 py-2 border rounded-lg" /></div>
-                            <div className="md:col-span-1"><label className="text-sm">Hasta</label><input type="date" value={visitEndDate} onChange={e => setVisitEndDate(e.target.value)} className="w-full px-4 py-2 border rounded-lg" /></div>
-                            <div className="md:col-span-1"><label className="text-sm">Usuario</label><input type="text" value={visitCsvUserFilter} onChange={e => setVisitCsvUserFilter(e.target.value)} className="w-full px-4 py-2 border rounded-lg" /></div>
-                            <div className="flex gap-2">
-                                <select value={exportFormatVisits} onChange={e => setExportFormatVisits(e.target.value)} className="border rounded-lg px-2"><option value="csv">CSV</option><option value="xlsx">XLSX</option></select>
-                                <button onClick={handleExportVisitas} disabled={exportingVisits} className="flex-1 bg-blue-600 text-white py-2 rounded-lg font-bold hover:bg-blue-700 flex justify-center gap-2">
-                                    {exportingVisits ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />} Exportar
-                                </button>
-                            </div>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                            <div><label className="text-sm">Desde</label><input type="date" value={visitStartDate} onChange={e => setVisitStartDate(e.target.value)} className="w-full px-4 py-2 border rounded-lg" /></div>
+                            <div><label className="text-sm">Hasta</label><input type="date" value={visitEndDate} onChange={e => setVisitEndDate(e.target.value)} className="w-full px-4 py-2 border rounded-lg" /></div>
+                            <div><label className="text-sm">Usuario</label><input type="text" value={visitCsvUserFilter} onChange={e => setVisitCsvUserFilter(e.target.value)} className="w-full px-4 py-2 border rounded-lg" /></div>
+                        </div>
+                        <div className="flex gap-4 flex-wrap justify-end">
+                            <select value={exportFormatVisits} onChange={e => setExportFormatVisits(e.target.value)} className="px-4 py-2 border rounded-lg">
+                                <option value="csv">CSV</option>
+                                <option value="xlsx">XLSX</option>
+                            </select>
+                            <button onClick={handleExportVisitas} disabled={exportingVisits} className="px-8 py-2 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 flex items-center gap-2 shadow-md">
+                                {exportingVisits ? <Loader2 size={20} className="animate-spin" /> : <Download size={20} />} Exportar
+                            </button>
                         </div>
                         <div className="mt-4 pt-4 border-t border-red-50 flex items-center justify-between">
                             <p className="text-xs text-gray-500">Borrar visitas permanentemente en el rango de fechas.</p>
@@ -1292,16 +1309,19 @@ export default function Informes() {
                 <div className="bg-white rounded-xl shadow-2xl p-6 mb-6 border-l-4 border-red-600">
                     <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2"><AlertTriangle size={24} className="text-red-600" /> Reporte de Inconsistencias (Seguridad)</h2>
                     <p className="text-xs text-gray-500 mb-4">Muestra únicamente los registros donde el sistema detectó alertas de seguridad como probabilidad de interceptación satelital o engaños en la fotografía.</p>
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end mb-4">
-                        <div className="md:col-span-1"><label className="text-sm">Desde</label><input type="date" value={incStartDate} onChange={e => setIncStartDate(e.target.value)} className="w-full px-4 py-2 border border-red-300 rounded-lg focus:ring-red-500" /></div>
-                        <div className="md:col-span-1"><label className="text-sm">Hasta</label><input type="date" value={incEndDate} onChange={e => setIncEndDate(e.target.value)} className="w-full px-4 py-2 border border-red-300 rounded-lg focus:ring-red-500" /></div>
-                        <div className="md:col-span-1"><label className="text-sm">Usuario</label><input type="text" value={incCsvUserFilter} onChange={e => setIncCsvUserFilter(e.target.value)} className="w-full px-4 py-2 border border-red-300 rounded-lg focus:ring-red-500" placeholder="Opcional..." /></div>
-                        <div className="flex gap-2">
-                            <select value={exportFormatInc} onChange={e => setExportFormatInc(e.target.value)} className="border border-red-300 rounded-lg px-2"><option value="csv">CSV</option><option value="xlsx">Excel</option></select>
-                            <button onClick={handleExportInconsistencias} disabled={exportingInc} className="flex-1 bg-red-600 text-white py-2 rounded-lg font-bold hover:bg-red-700 flex justify-center gap-2">
-                                {exportingInc ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />} Extraer
-                            </button>
-                        </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                        <div><label className="text-sm">Desde</label><input type="date" value={incStartDate} onChange={e => setIncStartDate(e.target.value)} className="w-full px-4 py-2 border border-red-300 rounded-lg focus:ring-red-500" /></div>
+                        <div><label className="text-sm">Hasta</label><input type="date" value={incEndDate} onChange={e => setIncEndDate(e.target.value)} className="w-full px-4 py-2 border border-red-300 rounded-lg focus:ring-red-500" /></div>
+                        <div><label className="text-sm">Usuario</label><input type="text" value={incCsvUserFilter} onChange={e => setIncCsvUserFilter(e.target.value)} className="w-full px-4 py-2 border border-red-300 rounded-lg focus:ring-red-500" placeholder="Opcional..." /></div>
+                    </div>
+                    <div className="flex gap-4 flex-wrap justify-end">
+                        <select value={exportFormatInc} onChange={e => setExportFormatInc(e.target.value)} className="px-4 py-2 border border-red-300 rounded-lg">
+                            <option value="csv">CSV</option>
+                            <option value="xlsx">Excel</option>
+                        </select>
+                        <button onClick={handleExportInconsistencias} disabled={exportingInc} className="px-8 py-2 bg-red-600 text-white font-bold rounded-lg hover:bg-red-700 flex items-center gap-2 shadow-md">
+                            {exportingInc ? <Loader2 size={20} className="animate-spin" /> : <Download size={20} />} Exportar
+                        </button>
                     </div>
                     {/* Botón Descargar Diccionario */}
                     <div className="mt-4 pt-4 border-t border-red-100 flex flex-col md:flex-row items-center justify-between gap-4">

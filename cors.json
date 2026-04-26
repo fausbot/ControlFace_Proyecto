@@ -4,12 +4,19 @@
             "*"
         ],
         "method": [
-            "GET"
+            "GET",
+            "PUT",
+            "POST",
+            "HEAD",
+            "DELETE"
         ],
         "responseHeader": [
             "Content-Type",
             "Content-Disposition",
-            "Content-Length"
+            "Content-Length",
+            "Authorization",
+            "x-goog-resumable",
+            "x-goog-meta-*"
         ],
         "maxAgeSeconds": 3600
     }

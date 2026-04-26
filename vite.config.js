@@ -53,6 +53,14 @@ export default defineConfig(({ mode }) => {
               handler: 'NetworkOnly'
             },
             {
+              urlPattern: /^https:\/\/www\.timeapi\.io\/api\/Time\/current\/zone/,
+              handler: 'NetworkOnly'
+            },
+            {
+              urlPattern: /^https:\/\/firebasestorage\.googleapis\.com/,
+              handler: 'NetworkOnly'
+            },
+            {
               urlPattern: /^https:\/\/nominatim\.openstreetmap\.org\/reverse/,
               handler: 'NetworkFirst',
               options: {

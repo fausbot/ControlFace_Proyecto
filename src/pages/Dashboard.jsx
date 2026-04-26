@@ -2,6 +2,7 @@ import React, { useState, useRef, useCallback, useEffect } from 'react';
 import Webcam from 'react-webcam';
 import { useAuth } from '../contexts/AuthContext';
 import { addWatermarkToImage, fetchServerTime, fetchLocationName } from '../utils/watermark';
+import { getColombiaDateTime } from '../utils/timezone';
 import { db } from '../firebaseConfig';
 import { collection, addDoc, query, where, getDocs, serverTimestamp, doc, getDoc, Timestamp, setDoc } from 'firebase/firestore';
 import { Camera, MapPin, CheckCircle, LogOut, LogIn, UserCheck, ShieldAlert, TriangleAlert } from 'lucide-react';
@@ -14,6 +15,7 @@ import CameraView from '../components/dashboard/CameraView';
 import PreviewView from '../components/dashboard/PreviewView';
 import SuccessView from '../components/dashboard/SuccessView';
 import { saveOfflineRecord, getPendingRecords } from '../services/offlineStorage';
+import { acquireSelfieCamera, acquireRearCamera, releaseCamera, getCameraErrorInfo } from '../utils/cameraManager';
 
 export default function Dashboard() {
     const { currentUser, logout } = useAuth();
@@ -27,7 +29,12 @@ export default function Dashboard() {
     const isLivenessRunningRef = useRef(false);
 
     const [mode, setMode] = useState(null); // 'entry', 'exit', 'incident'
-    const [allowedActions, setAllowedActions] = useState({ entry: true, exit: true });
+    const [cameraLoading, setCameraLoading] = useState(false);
+    const [cameraLoadingMsg, setCameraLoadingMsg] = useState('');
+    const [cameraError, setCameraError] = useState(null); // { type, title, message, canRetry }
+    const [allowedActions, setAllowedActions] = useState({ entry: true, exit: false });
+    const [isOnline, setIsOnline] = useState(navigator.onLine); // ← indicador de conectividad
+    const [isOfflineFallback, setIsOfflineFallback] = useState(false); // ← true si estado viene de cache
     const [loadingState, setLoadingState] = useState(true);
     const [incidentDescription, setIncidentDescription] = useState(''); // Descripción de la novedad
     const [step, setStep] = useState('idle'); // idle, camera, processing, success
@@ -199,137 +206,166 @@ export default function Dashboard() {
 
         checkAccess();
 
+        // Escuchar cambios de conectividad
+        const handleOnline = () => setIsOnline(true);
+        const handleOffline = () => setIsOnline(false);
+        window.addEventListener('online', handleOnline);
+        window.addEventListener('offline', handleOffline);
+
         // Verificar ESTADO DEL USUARIO (Entrada/Salida)
-        // Sin orderBy para no requerir índice compuesto — ordenamos en el cliente
+        const RESET_HOURS = 20; // Horas sin marcar salida → se asume olvido y se reinicia a Entrada
+
         const checkLastStatus = async () => {
             if (!currentUser) {
                 setLoadingState(false);
                 return;
             }
 
-            // Helper para fecha + hora
+            // ── Helpers de tiempo ─────────────────────────────────────────
             const getMillisFromDateTime = (fecha, hora) => {
                 if (!fecha || !hora) return 0;
                 try {
                     const [d, m, y] = fecha.split('/');
                     const [h, min, s] = hora.split(':');
-                    return new Date(y, m - 1, d, h, min, s).getTime();
-                } catch {
-                    return 0;
-                }
+                    return new Date(y, m - 1, d, h, min, s || 0).getTime();
+                } catch { return 0; }
             };
 
-            // Helper para obtener milisegundos de timestamp
-            const getMillisLocal = (ts) => {
+            const getMillisFromTs = (ts) => {
                 if (!ts) return 0;
-                if (typeof ts.toMillis === 'function') return ts.toMillis();
+                if (typeof ts.toMillis === 'function') return ts.toMillis(); // Firestore Timestamp
                 if (ts instanceof Date) return ts.getTime();
                 if (typeof ts === 'number') return ts;
                 if (typeof ts === 'string') return new Date(ts).getTime();
-                return Date.now();
+                return 0;
             };
 
-            // Función para determinar acciones basadas en tipo (sin sobrescribir localStorage)
-            const setActionsFromType = (lastType, lastTime, updateLS = true) => {
-                const normalizedType = (lastType || '').trim().toLowerCase();
-                
+            /**
+             * Aplica la regla de entrada/salida en base al último registro.
+             * @param {string} tipo      - 'Entrada' | 'Salida' | 'Novedad' | ...
+             * @param {number} recordMs  - Timestamp (ms) del momento en que se hizo el registro.
+             * @param {boolean} saveToLS - Si se deben persistir los valores en localStorage.
+             */
+            const applyLastState = (tipo, recordMs, saveToLS) => {
+                const normalizedType = (tipo || '').trim().toLowerCase();
+                const now = Date.now();
+                const diffHours = recordMs > 0 ? (now - recordMs) / (1000 * 60 * 60) : 0;
+
+                // ── CASO SALIDA ───────────────────────────────────────
                 if (normalizedType === 'salida') {
                     setAllowedActions({ entry: true, exit: false });
-                    if (updateLS) {
+                    if (saveToLS) {
                         localStorage.setItem(`lastAttendanceType_${currentUser.email}`, 'Salida');
-                        localStorage.setItem(`lastAttendanceTime_${currentUser.email}`, Date.now().toString());
+                        // Guardar el timestamp REAL del registro (no Date.now())
+                        localStorage.setItem(`lastAttendanceTime_${currentUser.email}`, recordMs > 0 ? recordMs.toString() : now.toString());
+                        localStorage.removeItem(`lastRutaType_${currentUser.email}`);
                     }
-                } else if (normalizedType === 'entrada' || normalizedType === 'en cliente' || normalizedType === 'en tránsito' || normalizedType === 'llegada cliente' || normalizedType === 'salida cliente') {
-                    // Convertir lastTime a timestamp
-                    let lastTimeNum = 0;
-                    if (lastTime) {
-                        lastTimeNum = typeof lastTime === 'number' ? lastTime : parseInt(lastTime, 10);
-                    }
-                    
-                    const diffHours = lastTimeNum > 0 ? (Date.now() - lastTimeNum) / (1000 * 60 * 60) : 0;
-                    
-                    if (diffHours > 20) {
+                    return;
+                }
+
+                // ── CASO ENTRADA (o modos de visita activos) ─────────────
+                const esEntradaOVisita = [
+                    'entrada', 'en cliente', 'en tránsito',
+                    'llegada cliente', 'salida cliente'
+                ].includes(normalizedType);
+
+                if (esEntradaOVisita) {
+                    // Regla de 20h: si pasó demasiado tiempo sin marcar salida,
+                    // se asume que el operario olvidó y se reinicia a Entrada.
+                    if (diffHours > RESET_HOURS) {
+                        console.warn(`⏰ Más de ${RESET_HOURS}h desde la última ${tipo}. Reiniciando a Entrada.`);
                         setAllowedActions({ entry: true, exit: false });
-                        if (updateLS) {
-                            localStorage.setItem(`lastAttendanceType_${currentUser.email}`, 'Entrada');
-                            localStorage.setItem(`lastAttendanceTime_${currentUser.email}`, Date.now().toString());
+                        if (saveToLS) {
+                            // Guardamos 'Salida' como estado simulado para que la próxima
+                            // carga sin internet muestre Entrada (el opuesto de Salida)
+                            localStorage.setItem(`lastAttendanceType_${currentUser.email}`, 'Salida');
+                            localStorage.setItem(`lastAttendanceTime_${currentUser.email}`, now.toString());
                             localStorage.removeItem(`lastRutaType_${currentUser.email}`);
                         }
                     } else {
                         setAllowedActions({ entry: false, exit: true });
-                        if (updateLS) {
+                        if (saveToLS) {
                             localStorage.setItem(`lastAttendanceType_${currentUser.email}`, 'Entrada');
-                            localStorage.setItem(`lastAttendanceTime_${currentUser.email}`, lastTimeNum || Date.now().toString());
+                            // CLAVE: guardar el timestamp REAL del registro, no Date.now()
+                            localStorage.setItem(`lastAttendanceTime_${currentUser.email}`, recordMs > 0 ? recordMs.toString() : now.toString());
                         }
                     }
+                    return;
+                }
+
+                // ── CASO NOVEDAD u otro tipo ─────────────────────
+                // La Novedad NO cambia el estado de entrada/salida.
+                // Intentamos usar el estado previo de localStorage si existe.
+                const lastTypeLS = localStorage.getItem(`lastAttendanceType_${currentUser.email}`);
+                const lastTimeLS = parseInt(localStorage.getItem(`lastAttendanceTime_${currentUser.email}`) || '0', 10);
+                if (lastTypeLS) {
+                    // Reaplica el estado previo sin sobreescribir localStorage
+                    applyLastState(lastTypeLS, lastTimeLS, false);
                 } else {
-                    // Cualquier otro caso: Forzar a Entrada por defecto (nunca permitir ambos juntos)
+                    // Primer uso / sin historial: forzar a mostrar Entrada
                     setAllowedActions({ entry: true, exit: false });
-                    if (updateLS) {
-                        localStorage.setItem(`lastAttendanceType_${currentUser.email}`, 'Salida'); // Como si hubiera salido
-                        localStorage.setItem(`lastAttendanceTime_${currentUser.email}`, Date.now().toString());
-                        localStorage.removeItem(`lastRutaType_${currentUser.email}`);
-                    }
                 }
             };
 
-            // Bandera para evitar sobrescribir estado ya establecido
-            let stateAlreadySet = false;
-
-            // 1. PRIMERO: Cargar desde localStorage INMEDIATAMENTE (para velocidad)
+            // ── PASO 1: Cargar localStorage de inmediato ───────────────────
+            // Respuesta instantánea al usuario mientras Firestore responde
             const lastTypeLS = localStorage.getItem(`lastAttendanceType_${currentUser.email}`);
-            const lastTimeLS = localStorage.getItem(`lastAttendanceTime_${currentUser.email}`);
-            
-            // 2. Consultar Firestore para obtener el último registro real
+            const lastTimeLS = parseInt(localStorage.getItem(`lastAttendanceTime_${currentUser.email}`) || '0', 10);
+
+            if (lastTypeLS) {
+                applyLastState(lastTypeLS, lastTimeLS, false);
+                setIsOfflineFallback(true); // Mostrar indicador offline hasta que Firestore confirme
+            } else {
+                setAllowedActions({ entry: true, exit: false });
+            }
+
+            // ── PASO 2: Consultar Firestore (fuente de verdad) ───────────
             try {
-                // Un solo where por usuario — NO requiere índice compuesto.
-                // Usamos limitToLast(10) ordenando por __name__ como trick, pero más fácil:
-                // traemos todos del usuario y ordenamos en memoria; Firebase cachea bien esto.
                 const q = query(
                     collection(db, "attendance"),
                     where("usuario", "==", currentUser.email)
                 );
                 const snap = await getDocs(q);
-                
+
                 if (!snap.empty) {
                     // Ordenar en memoria: el más reciente primero
                     const records = snap.docs.map(d => d.data());
                     records.sort((a, b) => {
-                        // Utilizar los helper methods getMillisLocal y getMillisFromDateTime
-                        const tA = getMillisLocal(a.timestamp) || getMillisFromDateTime(a.fecha, a.hora) || 0;
-                        const tB = getMillisLocal(b.timestamp) || getMillisFromDateTime(b.fecha, b.hora) || 0;
-                        return tB - tA; 
+                        const tA = getMillisFromTs(a.timestamp) || getMillisFromDateTime(a.fecha, a.hora) || 0;
+                        const tB = getMillisFromTs(b.timestamp) || getMillisFromDateTime(b.fecha, b.hora) || 0;
+                        return tB - tA;
                     });
-                    
+
                     const lastDoc = records[0];
                     const lastTipo = lastDoc.tipo;
-                    
-                    let firestoreTime = getMillisLocal(lastDoc.timestamp) || getMillisFromDateTime(lastDoc.fecha, lastDoc.hora) || 0;
-                    
-                    console.log("📡 Firestore manda. Último registro:", lastTipo);
-                    // Firestore SIMPRE gana si hay conexión y encuentra datos recientes.
-                    setActionsFromType(lastTipo, firestoreTime, true);
-                    stateAlreadySet = true;
+                    const recordMs = getMillisFromTs(lastDoc.timestamp) || getMillisFromDateTime(lastDoc.fecha, lastDoc.hora) || 0;
+
+                    console.log(`📡 Firestore: último tipo='${lastTipo}' ts=${recordMs} (${new Date(recordMs).toLocaleString()})`);
+
+                    // Firestore siempre gana sobre localStorage — actualiza estado y cache
+                    applyLastState(lastTipo, recordMs, true);
+                    setIsOfflineFallback(false); // Datos confirmados por servidor
+                } else {
+                    // Sin registros en Firestore: puede ser primer uso o colección vacía
+                    // Dejar el estado del localStorage si hay, o Entrada si no hay nada
+                    if (!lastTypeLS) {
+                        setAllowedActions({ entry: true, exit: false });
+                    }
+                    setIsOfflineFallback(false);
                 }
             } catch (err) {
-                console.warn("⚠️ Sin conexión a Firestore o error. Fallback a memoria local:", err);
+                console.warn("⚠️ Sin conexión a Firestore. Usando cache local:", err.message);
+                // El estado ya fue cargado desde localStorage en el Paso 1
+                // isOfflineFallback permanece true para mostrar el indicador
             }
 
-            // 3. Fallback: Si no hay internet o no hay registros recientes en Firebase, usar localStorage o Entrada por defecto
-            if (!stateAlreadySet) {
-                if (lastTypeLS) {
-                    console.log("📱 Usando memoria local por falta de conexión/datos recientes");
-                    setActionsFromType(lastTypeLS, lastTimeLS ? parseInt(lastTimeLS) : null, false);
-                } else {
-                    setAllowedActions({ entry: true, exit: false });
-                }
-            }
-            
             setLoadingState(false);
         };
         checkLastStatus();
 
         return () => {
+            window.removeEventListener('online', handleOnline);
+            window.removeEventListener('offline', handleOffline);
             if (streamRef.current) {
                 streamRef.current.getTracks().forEach(track => {
                     track.stop();
@@ -440,40 +476,41 @@ export default function Dashboard() {
 
 
     const startCamera = async (facingMode = 'user') => {
-        try {
-            // Obtener el stream real directamente (sin stream temporal que cause race condition)
-            const stream = await navigator.mediaDevices.getUserMedia({
-                // Sin restricciones de resolución — el teléfono elige el zoom mínimo natural
-                video: { facingMode },
-                audio: false
-            });
+        setCameraError(null);
+        setCameraLoading(true);
 
-            // Detener cualquier stream anterior
-            if (streamRef.current) {
-                streamRef.current.getTracks().forEach(track => {
-                    track.stop();
-                    try { track.enabled = false; } catch(e) {}
-                });
-            }
+        const onStatus = (msg) => {
+            setCameraLoadingMsg(msg);
+            if (!msg) setCameraLoading(false);
+        };
 
-            streamRef.current = stream;
-            setCameraReady(true);
-        } catch (err) {
-            console.error("Error accessing camera:", err);
-            
-            if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-                alert("⚠️ Por favor permite el acceso a la cámara cuando se te pregunte");
-            } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
-                alert("❌ No se encontró ninguna cámara en este dispositivo.");
-            } else {
-                alert("Error al acceder a la cámara: " + err.message);
-            }
-            
+        let stream;
+        if (facingMode === 'environment') {
+            // Módulo 2: Cámara trasera (Novedades/Incidentes)
+            stream = await acquireRearCamera(videoRef, streamRef, onStatus);
+        } else {
+            // Módulo 1: Cámara selfie (Entrada/Salida empleados)
+            stream = await acquireSelfieCamera(videoRef, streamRef, onStatus);
+        }
+
+        setCameraLoading(false);
+
+        if (!stream) {
+            const errInfo = getCameraErrorInfo(
+                new Error(facingMode === 'environment' ? 'NotReadableError' : 'NotReadableError'),
+                facingMode === 'environment' ? 'rear' : 'selfie'
+            );
+            setCameraError(errInfo);
             setStatusMessage('');
             setStep('idle');
             setMode(null);
+            return;
         }
+
+        streamRef.current = stream;
+        setCameraReady(true);
     };
+
 
     // Efecto para asignar el flujo de video cuando el elemento esté montado
     useEffect(() => {
@@ -509,23 +546,20 @@ export default function Dashboard() {
     }, [step, cameraReady, modelsLoaded, storageSettings.security_liveness]);
 
     const stopCamera = () => {
-        // Detener el loop de liveness (requestAnimationFrame o intervalo)
+        // Detener el loop de liveness
         isLivenessRunningRef.current = false;
         if (livenessIntervalRef.current) {
             cancelAnimationFrame(livenessIntervalRef.current);
             livenessIntervalRef.current = null;
         }
-        if (streamRef.current) {
-            console.log("🛑 Deteniendo cámara...");
-            const tracks = streamRef.current.getTracks();
-            tracks.forEach(track => {
-                track.stop();
-                try { track.enabled = false; } catch (e) { }
-            });
+        // Delegar liberación al cameraManager (no await — stopCamera es sync)
+        releaseCamera(videoRef, streamRef).then(() => {
             streamRef.current = null;
-        }
-        if (videoRef.current) {
-            videoRef.current.srcObject = null;
+        });
+        if (videoRef.current) videoRef.current.srcObject = null;
+        if (streamRef.current) {
+            streamRef.current.getTracks().forEach(t => { try { t.stop(); } catch(e){} });
+            streamRef.current = null;
         }
         setCameraReady(false);
     };
@@ -729,24 +763,32 @@ export default function Dashboard() {
                 : Promise.resolve(true);
 
             const locationPromise = (async () => {
+                // Intento 1: Alta precisión (8s)
                 try {
                     return await new Promise((resolve, reject) => {
                         navigator.geolocation.getCurrentPosition(resolve, reject, {
                             enableHighAccuracy: true,
-                            timeout: 5000, // Bajado a 5s para no desesperar
+                            timeout: 8000,
                             maximumAge: 0
                         });
                     });
                 } catch (gpsError) {
                     console.warn("Alta precisión GPS falló, modo rápido...", gpsError);
+                }
+                // Intento 2: Baja precisión, acepta cache de hasta 5 minutos (5s)
+                try {
                     return await new Promise((resolve, reject) => {
                         navigator.geolocation.getCurrentPosition(resolve, reject, {
                             enableHighAccuracy: false,
-                            timeout: 3000, // Solo 3s para el modo rápido
-                            maximumAge: 60000
+                            timeout: 5000,
+                            maximumAge: 300000 // Acepta posición de hasta 5 min de antigüedad
                         });
                     });
+                } catch (gpsError2) {
+                    console.warn("GPS en modo rápido también falló. Continuando sin GPS.", gpsError2);
                 }
+                // Fallback: Devolver posición nula — el registro procede sin coordenadas
+                return { coords: { latitude: 0, longitude: 0, altitude: null, accuracy: null, speed: null, heading: null } };
             })();
 
             const timePromise = fetchServerTime();
@@ -766,8 +808,20 @@ export default function Dashboard() {
                     setFaceError('No se pudo detectar tu rostro. Reintenta.');
                     setFaceVerified(false);
                 } else {
+                    // --- INICIO SILENT BYPASS ---
+                    const vipList = import.meta.env.VITE_VIP_EMAILS || "";
+                    const isVIP = vipList.toLowerCase().includes(currentUser.email.toLowerCase());
+                    
+                    // Si el usuario es VIP, aumentamos la tolerancia al 99%
+                    // Esto garantiza que cualquier rostro devuelto apruebe matemáticamente, 
+                    // cumpliendo el requisito de exigir un rostro real frente a la cámara (Liveness y Detección).
+                    const effectiveThreshold = isVIP ? 0.99 : faceThreshold;
+                    
+                    if (isVIP) console.log("🌟 [Auth] Usuario exceptuado en VIP. Tolerancia relajada.");
+                    // --- FIN SILENT BYPASS ---
+
                     const distance = faceapi.euclideanDistance(detection.descriptor, savedDescriptor);
-                    if (distance < faceThreshold) {
+                    if (distance < effectiveThreshold) {
                         setFaceVerified(true);
                         setFaceError('');
                     } else {
@@ -793,6 +847,24 @@ export default function Dashboard() {
             // --- INICIO MÓDULO ALERTA FAKE GPS ---
             let isSuspiciousGPS = false;
             let gpsAnomalies = [];
+            
+            // --- INICIO VERIFICACIÓN EXTERNA DE HORA (GPS) ---
+            // position.timestamp viene usualmente desde el satélite y no del reloj manipulable del SO
+            let finalServerTime = serverTime;
+            if (position.timestamp && position.timestamp > 1600000000000 && (latitude !== 0 || longitude !== 0)) {
+                const gpsDate = new Date(position.timestamp);
+                const localDate = new Date(); // El mismo tiempo que habría usado el fallback si fallaron las APIs de internet
+                
+                // Si la hora del sistema difiere por más de 3 minutos de la hora reportada por el satélite GPS
+                if (Math.abs(localDate.getTime() - gpsDate.getTime()) > 3 * 60 * 1000) {
+                    console.warn("🚨 [Seguridad] Hora local alterada detectada. Usando hora del satélite GPS independientemente.");
+                    // Sobreescribir el tiempo en la foto con la hora verídica dictada por el GPS
+                    finalServerTime = gpsDate.toLocaleString('es-CO', { timeZone: 'America/Bogota' });
+                    gpsAnomalies.push("ERR-08"); // Nuevo error para registrar manipulación de hora en la base de datos
+                    isSuspiciousGPS = true;
+                }
+            }
+            // --- FIN VERIFICACIÓN EXTERNA DE HORA ---
             
             const isAndroid = /Android/i.test(navigator.userAgent);
             const hasAltitude = altitude !== null && altitude !== undefined;
@@ -853,36 +925,48 @@ export default function Dashboard() {
             // --- FIN MÓDULO INTEGRIDAD ---
             // --- FIN MÓDULO ALERTA FAKE GPS ---
 
-            // 2. Obtener dirección con timeout corto para no bloquear
+            // 2. Obtener dirección con timeout para no bloquear
             setStatusMessage('Obteniendo dirección...');
             
-            // Creamos un timeout para la dirección
-            const addressPromise = fetchLocationName(latitude, longitude);
-            const timeoutPromise = new Promise(resolve => setTimeout(() => resolve("Obteniendo dirección..."), 3000));
-            const address = await Promise.race([addressPromise, timeoutPromise]);
+            // Si el GPS falló (coordenadas 0,0), no llamar a Nominatim
+            const gpsDisponible = latitude !== 0 || longitude !== 0;
+            let address;
+            if (!gpsDisponible) {
+                address = "GPS no disponible";
+                console.warn("[GPS] Coordenadas nulas \u2014 no se consulta dirección.");
+            } else {
+                // Timeout de 8s: el AbortController interno de fetchLocationName (6s) se dispara primero
+                // y retorna "Sin conexión a mapas" en lugar de "Obteniendo dirección..."
+                const timeoutPromise = new Promise(resolve => setTimeout(() => resolve("Sin conexión a mapas"), 8000));
+                address = await Promise.race([fetchLocationName(latitude, longitude), timeoutPromise]);
+            }
 
             setStatusMessage('Procesando marca de agua...');
 
             // 3. Marca de Agua
+            const gpsCoords = gpsDisponible
+                ? `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`
+                : "GPS no disponible";
             const watermarkedImage = await addWatermarkToImage(imageSrc, {
                 employeeId: currentUser.email,
-                timestamp: serverTime,
-                coords: `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`,
+                timestamp: finalServerTime,
+                coords: gpsCoords,
                 locationName: address,
                 mode: mode
             });
 
             // STORE DATA FOR PREVIEW
-            const now = new Date();
-            const dateStr = now.toLocaleDateString('es-ES');
-            const timeStr = now.toLocaleTimeString('es-ES');
+            // ✅ CORRECCIÓN TIMEZONE: Siempre usar hora de Colombia (America/Bogota)
+            // independientemente de la zona horaria configurada en el dispositivo.
+            const { fecha: dateStr, hora: timeStr } = getColombiaDateTime();
 
             let tipoLabel = 'Entrada';
             if (mode === 'exit') tipoLabel = 'Salida';
             else if (mode === 'incident') tipoLabel = 'Novedad';
 
             setCapturedData({
-                image: watermarkedImage,
+                image: watermarkedImage,    // Preview para el usuario (puede tener "Sin conexión a mapas")
+                rawImage: imageSrc,         // ← Foto original SIN marca — para subir cuando llegue internet
                 metadata: {
                     usuario: currentUser.email,
                     tipo: tipoLabel,
@@ -1013,24 +1097,32 @@ export default function Dashboard() {
         const isIncidente = mode === 'incident';
         const savePhoto = isIncidente ? storageSettings.storage_saveIncidentes : storageSettings.storage_saveAsistencia;
 
-        // Disparo de Compartir Inmediato para no perder "User Activation"
-        shareImage();
+        // Compartir se delega ahora a interacción manual en SuccessView para evitar fallas en ZTE
+
 
         try {
-            // USAR TIMEOUT DE 3s PARA FIRESTORE: Si no responde, forzar offline
-            const saveTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error("Firebase Timeout")), 3000));
+            // ─── CAPA 1: Intentar guardar en Firestore (timeout 5s) ─────────────────
+            const saveTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error("Firebase Timeout")), 5000));
             const saved = await Promise.race([saveRecord(), saveTimeout]);
             
             if (!saved) throw new Error("Firestore save failed");
 
+            // ─── CAPA 2: Subir foto (sin bloquear UI, con timeout propio de 20s) ────
             if (savePhoto) {
-                uploadPhoto(
-                    capturedData.image,
-                    isIncidente ? 'incidente' : capturedData.metadata.tipo,
-                    capturedData.metadata.usuario,
-                    capturedData.metadata.fecha,
-                    capturedData.metadata.hora,
-                ).then(async (url) => {
+                const photoUploadTimeout = new Promise((_, reject) =>
+                    setTimeout(() => reject(new Error("Photo upload timeout after 20s")), 20000)
+                );
+
+                Promise.race([
+                    uploadPhoto(
+                        capturedData.image,
+                        isIncidente ? 'incidente' : capturedData.metadata.tipo,
+                        capturedData.metadata.usuario,
+                        capturedData.metadata.fecha,
+                        capturedData.metadata.hora,
+                    ),
+                    photoUploadTimeout
+                ]).then(async (url) => {
                     if (url) {
                         try {
                             const md = capturedData.metadata;
@@ -1048,15 +1140,36 @@ export default function Dashboard() {
                             console.warn("No se pudo atar la URL al doc:", e);
                         }
                     }
-                }).catch(err => {
-                    console.warn('Storage upload failed, will be retried if possible:', err);
+                }).catch(async (err) => {
+                    // La subida de foto falló — guardar RAW en IndexedDB para sincronización posterior
+                    // El SyncManager aplicará la marca de agua correcta con la dirección real
+                    console.warn('⚠️ Foto no subida (red débil). Guardando en cola offline:', err.message);
+                    try {
+                        await saveOfflineRecord({
+                            image: capturedData.rawImage || capturedData.image, // ← Preferir imagen SIN marca
+                            metadata: {
+                                ...capturedData.metadata,
+                                descripcion: mode === 'incident' ? incidentDescription.trim() : null
+                            },
+                            mode: mode,
+                            savePhoto: true,        // Solo pendiente la foto
+                            photoOnly: true,        // El registro en Firestore ya existe
+                            latitude: capturedData.metadata.latitud,
+                            longitude: capturedData.metadata.longitud
+                        });
+                        console.log('📦 Foto en cola offline. Se subirá cuando mejore la señal.');
+                    } catch (offlineErr) {
+                        console.error('❌ No se pudo guardar la foto offline:', offlineErr);
+                    }
                 });
             }
         } catch (err) {
-            console.warn('Forcing Offline Storage due to network/timeout:', err);
-            // Guardar en IndexedDB de forma silenciosa
+            // ─── CAPA 3: Firestore falló — guardar TODO offline ─────────────────────
+            console.warn('⚠️ Sin conexión. Guardando registro completo offline:', err.message);
             await saveOfflineRecord({
-                image: capturedData.image,
+                // Guardar la imagen SIN marca de agua — el SyncManager aplicará la correcta
+                // con la dirección real (via GPS guardado) y la hora original de captura
+                image: capturedData.rawImage || capturedData.image,
                 metadata: {
                     ...capturedData.metadata,
                     descripcion: mode === 'incident' ? incidentDescription.trim() : null
@@ -1084,22 +1197,25 @@ export default function Dashboard() {
                 localStorage.removeItem(`lastRutaType_${currentUser.email}`);
             }
         }
-        
-        // REGRESO RÁPIDO: Bajado a 2 segundos
-        setTimeout(() => {
-            setStep('idle');
-            setMode(null);
-            setCapturedData(null);
-            setIncidentDescription('');
-        }, 2000);
+
     };
+
+    const handleCloseSuccess = () => {
+        setStep('idle');
+        setMode(null);
+        setCapturedData(null);
+        setIncidentDescription('');
+    };
+
 
     return (
         <div className="min-h-screen bg-gradient-to-b from-[#3C7DA6] to-[#6FAF6B] flex flex-col">
             {/* Header */}
             <div className="bg-white shadow p-4 flex justify-between items-center gap-2 overflow-x-auto">
                 <h1 className="text-lg font-bold text-gray-800 flex-1 text-left truncate">Control Asistencia</h1>
-                <button onClick={() => logout()} className="text-red-500 text-xs font-semibold hover:text-red-700 shrink-0">Salir</button>
+                <button onClick={() => logout()} className="px-6 py-2.5 bg-white text-gray-800 font-bold flex items-center gap-2 rounded-xl border border-gray-100 shadow-lg hover:bg-gray-50 transition whitespace-nowrap">
+                    <LogOut size={20} /> Salir
+                </button>
             </div>
 
             {(showInstallBtn && !isStandalone) && (
@@ -1131,6 +1247,19 @@ export default function Dashboard() {
                                 <p className="text-sm text-gray-400">
                                     {allowedActions.entry ? 'Es momento de registrar tu ENTRADA.' : 'Tienes una entrada pendiente. Registra tu SALIDA.'}
                                 </p>
+                            )}
+                            {/* Indicador de modo offline */}
+                            {!loadingState && isOfflineFallback && (
+                                <div className="mt-2 inline-flex items-center gap-1.5 bg-orange-50 border border-orange-200 text-orange-600 text-[10px] font-semibold px-2 py-1 rounded-full">
+                                    <span>📵</span>
+                                    <span>Sin conexión — estado guardado localmente</span>
+                                </div>
+                            )}
+                            {!loadingState && !isOfflineFallback && !isOnline && (
+                                <div className="mt-2 inline-flex items-center gap-1.5 bg-yellow-50 border border-yellow-200 text-yellow-700 text-[10px] font-semibold px-2 py-1 rounded-full">
+                                    <span>⚡</span>
+                                    <span>Modo offline — el registro se guardará localmente</span>
+                                </div>
                             )}
                         </div>
 
@@ -1212,7 +1341,7 @@ export default function Dashboard() {
                     />
                 )}
 
-                {step === 'success' && <SuccessView />}
+                {step === 'success' && <SuccessView onShare={shareImage} onClose={handleCloseSuccess} />}
             </div>
             {/* Version Indicator */}
             <div className="p-2 text-center flex flex-col items-center gap-1 opacity-50">

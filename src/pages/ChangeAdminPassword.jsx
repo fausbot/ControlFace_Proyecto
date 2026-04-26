@@ -80,13 +80,15 @@ export default function ChangeAdminPassword() {
     return (
         <div className="min-h-screen bg-gradient-to-b from-[#3C7DA6] to-[#6FAF6B] flex items-center justify-center p-4">
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8">
-                <button
-                    onClick={() => navigate('/login')}
-                    className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-6 transition"
-                >
-                    <ArrowLeft size={20} />
-                    Volver
-                </button>
+                <div className="flex justify-start mb-6">
+                    <button
+                        onClick={() => navigate('/login')}
+                        className="px-6 py-2.5 bg-white text-gray-800 font-bold flex items-center gap-2 rounded-xl border border-gray-100 shadow-lg hover:bg-gray-50 transition whitespace-nowrap"
+                    >
+                        <ArrowLeft size={20} />
+                        Volver
+                    </button>
+                </div>
 
                 <div className="flex items-center gap-3 mb-6">
                     <div className="p-3 bg-blue-100 rounded-full">

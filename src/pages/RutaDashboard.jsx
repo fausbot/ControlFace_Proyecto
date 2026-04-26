@@ -1,12 +1,14 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { db } from '../firebaseConfig';
-import { collection, addDoc, serverTimestamp, doc, setDoc, query, where, getDocs } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, doc, getDoc, setDoc, query, where, getDocs } from 'firebase/firestore';
 import { Camera, MapPin, ArrowLeft, Send, CheckCircle, Navigation } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { uploadPhoto } from '../services/storageService';
 import { addWatermarkToImage, fetchServerTime, fetchLocationName } from '../utils/watermark';
+import { getColombiaDateTime } from '../utils/timezone';
 import { saveOfflineRecord } from '../services/offlineStorage';
+import { acquireVariableCamera, releaseCamera, getCameraErrorInfo } from '../utils/cameraManager';
 
 export default function RutaDashboard() {
     const { currentUser } = useAuth();
@@ -14,6 +16,7 @@ export default function RutaDashboard() {
     const videoRef = useRef(null);
     const canvasRef = useRef(null);
     const streamRef = useRef(null);
+    const rutaCameraFacingRef = useRef('environment'); // ref para que startCamera siempre lea el valor actualizado
 
     const [allowedActions, setAllowedActions] = useState({ entry: true, exit: false });
     const [step, setStep] = useState('idle'); // idle, camera, preview, processing, success
@@ -21,11 +24,30 @@ export default function RutaDashboard() {
     const [observacion, setObservacion] = useState('');
     const [capturedData, setCapturedData] = useState(null);
     const [statusMessage, setStatusMessage] = useState('');
+    const [rutaCameraFacing, setRutaCameraFacing] = useState('environment'); // solo para UI, la lógica usa la ref
+    const [sharing, setSharing] = useState(false);
+    const [cameraLoading, setCameraLoading] = useState(false);
+    const [cameraLoadingMsg, setCameraLoadingMsg] = useState('Activando cámara...');
+    const [cameraError, setCameraError] = useState(null); // { type, title, message, canRetry }
+    const [pendingMode, setPendingMode] = useState(null); // modo a usar cuando se reintenta
 
     useEffect(() => {
         const checkVisitStatus = async () => {
             if (!currentUser) return;
             
+            // 0. Consultar la configuración de cámara primero, antes de cualquier return
+            try {
+                const snapCam = await getDoc(doc(db, 'settings', 'employeeFields'));
+                if (snapCam.exists()) {
+                    const facing = snapCam.data().ruta_camera_facing || 'environment';
+                    setRutaCameraFacing(facing);
+                    rutaCameraFacingRef.current = facing; // sincronizar ref
+                    console.log('📷 Cámara modo visitas cargada desde Firestore:', facing);
+                }
+            } catch (err) {
+                console.warn("Error obteniendo configuracion cámara:", err);
+            }
+
             // 1. Cargar estado inicial desde localStorage para evitar parpadeos
             const lastTypeLS = localStorage.getItem(`lastRutaType_${currentUser.email}`);
             if (lastTypeLS === 'Llegada Cliente') {
@@ -99,32 +121,44 @@ export default function RutaDashboard() {
                     }
                 }
             } catch (err) {
-                console.warn("⚠️ Sin conexión a Firestore. Usando caché local de visitas:", err);
+                console.warn("⚠️ Sin conexión a Firestore para visitas:", err);
             }
         };
         
         checkVisitStatus();
     }, [currentUser]);
 
-    const startCamera = async () => {
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({
-                video: { facingMode: 'environment', width: { ideal: 1080 }, height: { ideal: 1440 } },
-                audio: false
-            });
-            if (streamRef.current) {
-                streamRef.current.getTracks().forEach(track => {
-                    track.stop();
-                    try { track.enabled = false; } catch (e) {}
-                });
-            }
-            streamRef.current = stream;
-            setStep('camera');
-        } catch (err) {
-            console.error(err);
-            alert("No se pudo acceder a la cámara trasera.");
+    const startCamera = async (selectedMode) => {
+        setCameraError(null);
+        setCameraLoading(true);
+        setCameraLoadingMsg('Activando cámara...');
+
+        const preferredFacing = rutaCameraFacingRef.current || rutaCameraFacing || 'environment';
+        console.log('📷 Iniciando cámara variable con facing:', preferredFacing);
+
+        const onStatus = (msg) => {
+            if (msg) setCameraLoadingMsg(msg);
+        };
+
+        // Módulo 3: Cámara variable según configuración
+        const stream = await acquireVariableCamera(videoRef, streamRef, preferredFacing, onStatus);
+
+        setCameraLoading(false);
+
+        if (!stream) {
+            // Determinar el tipo de error real
+            // acquireVariableCamera retorna null si todos los intentos fallaron
+            // Usamos un error genérico recuperable para mostrar el botón Reintentar
+            const errInfo = getCameraErrorInfo({ name: 'NotReadableError', message: 'All strategies failed' }, 'variable');
+            setCameraError(errInfo);
+            setPendingMode(selectedMode);
+            return; // No cambiar step, permanece en idle con el panel de error
         }
+
+        streamRef.current = stream;
+        setStep('camera');
     };
+
 
     useEffect(() => {
         if (step === 'camera' && videoRef.current && streamRef.current) {
@@ -133,22 +167,20 @@ export default function RutaDashboard() {
     }, [step]);
 
     const stopCamera = () => {
+        // Delegar liberación al cameraManager (async, no bloquea)
+        releaseCamera(videoRef, streamRef);
+        if (videoRef.current) videoRef.current.srcObject = null;
         if (streamRef.current) {
-            streamRef.current.getTracks().forEach(track => {
-                track.stop();
-                try { track.enabled = false; } catch (e) {}
-            });
+            streamRef.current.getTracks().forEach(t => { try { t.stop(); } catch(e){} });
             streamRef.current = null;
-        }
-        if (videoRef.current) {
-            videoRef.current.srcObject = null;
         }
     };
 
-    const handleStartAction = (selectedMode) => {
+    const handleStartAction = async (selectedMode) => {
         setMode(selectedMode);
+        setPendingMode(selectedMode);
         setObservacion('');
-        startCamera();
+        await startCamera(selectedMode);
     };
 
     const capture = async () => {
@@ -182,21 +214,32 @@ export default function RutaDashboard() {
             setStatusMessage('Obteniendo ubicación...');
             setStep('processing');
 
-            const locationPromise = new Promise((resolve, reject) => {
-                navigator.geolocation.getCurrentPosition(resolve, reject, {
-                    enableHighAccuracy: true,
-                    timeout: 5000,
-                    maximumAge: 0
-                });
-            }).catch(() => {
-                return new Promise((resolve, reject) => {
-                    navigator.geolocation.getCurrentPosition(resolve, reject, {
-                        enableHighAccuracy: false,
-                        timeout: 3000,
-                        maximumAge: 60000
+            const locationPromise = (async () => {
+                // Intento 1: Alta precisión (8s)
+                try {
+                    return await new Promise((resolve, reject) => {
+                        navigator.geolocation.getCurrentPosition(resolve, reject, {
+                            enableHighAccuracy: true,
+                            timeout: 8000,
+                            maximumAge: 0
+                        });
                     });
-                });
-            });
+                } catch {}
+                // Intento 2: Baja precisión, acepta cache de hasta 5 minutos
+                try {
+                    return await new Promise((resolve, reject) => {
+                        navigator.geolocation.getCurrentPosition(resolve, reject, {
+                            enableHighAccuracy: false,
+                            timeout: 5000,
+                            maximumAge: 300000
+                        });
+                    });
+                } catch (gpsErr) {
+                    console.warn("GPS en modo rápido también falló. Continuando sin GPS.", gpsErr);
+                }
+                // Fallback: Sin GPS — el registro procede sin coordenadas
+                return { coords: { latitude: 0, longitude: 0, altitude: null, accuracy: null, speed: null, heading: null } };
+            })();
 
             const [position, serverTime] = await Promise.all([
                 locationPromise,
@@ -204,11 +247,31 @@ export default function RutaDashboard() {
             ]);
 
             const { latitude, longitude, altitude, accuracy, speed, heading } = position.coords;
-            const address = await fetchLocationName(latitude, longitude).catch(() => "Ubicación desconocida");
+            
+            // Si el GPS falló (coords 0,0), no consultar Nominatim
+            const gpsDisponible = latitude !== 0 || longitude !== 0;
+            const address = gpsDisponible
+                ? await fetchLocationName(latitude, longitude).catch(() => "Ubicación desconocida")
+                : "GPS no disponible";
 
             // --- INICIO MÓDULO ALERTA FAKE GPS ---
             let isSuspiciousGPS = false;
             let gpsAnomalies = [];
+            
+            // --- INICIO VERIFICACIÓN EXTERNA DE HORA (GPS) ---
+            let finalServerTime = serverTime;
+            if (position.timestamp && position.timestamp > 1600000000000 && gpsDisponible) {
+                const gpsDate = new Date(position.timestamp);
+                const localDate = new Date();
+                
+                if (Math.abs(localDate.getTime() - gpsDate.getTime()) > 3 * 60 * 1000) {
+                    console.warn("🚨 [Seguridad] Hora local alterada detectada. Usando hora satelital GPS.");
+                    finalServerTime = gpsDate.toLocaleString('es-CO', { timeZone: 'America/Bogota' });
+                    gpsAnomalies.push("ERR-08"); // Manipulación de hora
+                    isSuspiciousGPS = true;
+                }
+            }
+            // --- FIN VERIFICACIÓN EXTERNA DE HORA ---
             
             const isAndroid = /Android/i.test(navigator.userAgent);
             const hasAltitude = altitude !== null && altitude !== undefined;
@@ -247,22 +310,28 @@ export default function RutaDashboard() {
             // --- FIN MÓDULO ALERTA FAKE GPS ---
 
             setStatusMessage('Aplicando marca de agua...');
+            const gpsCoords = gpsDisponible
+                ? `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`
+                : "GPS no disponible";
             const watermarkedImage = await addWatermarkToImage(imageSrc, {
                 employeeId: currentUser.email,
-                timestamp: serverTime,
-                coords: `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`,
+                timestamp: finalServerTime,
+                coords: gpsCoords,
                 locationName: address,
                 mode: mode
             });
 
-            const now = new Date();
+            // ✅ CORRECCIÓN TIMEZONE: Siempre usar hora de Colombia (America/Bogota)
+            // independientemente de la zona horaria configurada en el dispositivo.
+            const { fecha, hora } = getColombiaDateTime();
             setCapturedData({
                 image: watermarkedImage,
+                rawImage: imageSrc,
                 metadata: {
                     usuario: currentUser.email,
                     tipo: mode,
-                    fecha: now.toLocaleDateString('es-ES'),
-                    hora: now.toLocaleTimeString('es-ES'),
+                    fecha,
+                    hora,
                     localidad: address,
                     latitud: latitude,
                     longitud: longitude,
@@ -345,26 +414,26 @@ export default function RutaDashboard() {
         };
 
         try {
-            // USAR TIMEOUT DE 3s PARA FIRESTORE: Si no responde, forzar offline
+            // Timeout de 5s para Firestore/Storage: Si no responde, forzar offline
             const saveTimeout = new Promise((_, reject) => setTimeout(() => {
                 timeoutTriggered = true;
                 reject(new Error("Firebase Timeout"));
-            }, 3000));
+            }, 5000));
             
             let url = null;
             try {
                 url = await Promise.race([saveRecordOnline(), saveTimeout]);
             } catch (err) {
-                console.warn('Forcing Offline Storage due to network/timeout:', err);
-                // Guardar en IndexedDB de forma silenciosa
+                console.warn('⚠️ Sin conexión (Ruta). Guardando localmente:', err.message);
+                // Guardar imagen SIN marca — SyncManager la marcará con la dirección real al sincronizar
                 await saveOfflineRecord({
-                    image: capturedData.image,
+                    image: capturedData.rawImage || capturedData.image,
                     metadata: {
                         ...capturedData.metadata,
                         observacion: observacion.trim()
                     },
                     mode: 'visita',
-                    savePhoto: true, // Siempre queremos fotos de visitas
+                    savePhoto: true,
                     latitude: capturedData.metadata.latitud,
                     longitude: capturedData.metadata.longitud
                 });
@@ -382,42 +451,6 @@ export default function RutaDashboard() {
                 localStorage.setItem(`lastRutaType_${currentUser.email}`, 'Salida Cliente');
             }
 
-            // Preparar archivo para compartir (si el navegador lo soporta)
-            let filesToShare = null;
-            if (navigator.canShare && capturedData.image) {
-                try {
-                    const response = await fetch(capturedData.image);
-                    const blob = await response.blob();
-                    const file = new File([blob], `ruta_${mode.replace(/\s+/g, '_')}.jpg`, { type: 'image/jpeg' });
-                    if (navigator.canShare({ files: [file] })) {
-                        filesToShare = [file];
-                    }
-                } catch (e) {
-                    console.error("Error preparando archivo para compartir:", e);
-                }
-            }
-
-            // Preparar y enviar mensaje por WhatsApp/Share API
-            const shareText = `📍 *${mode} registrada*\nObservación: ${observacion.trim() || 'Ninguna'}`;
-            
-            if (navigator.share) {
-                try {
-                    const shareData = {
-                        title: `Reporte de ${mode}`,
-                        text: shareText
-                    };
-                    if (filesToShare) shareData.files = filesToShare;
-                    await navigator.share(shareData);
-                } catch (shareErr) {
-                    console.log('Share cancelado o no soportado.', shareErr);
-                }
-            }
-
-            setTimeout(() => {
-                setStep('idle');
-                setCapturedData(null);
-            }, 2000);
-
         } catch (error) {
             console.error(error);
             alert(`Error crítico guardando: ${error.message}`);
@@ -425,11 +458,49 @@ export default function RutaDashboard() {
         }
     };
 
+    const handleManualShare = async () => {
+        setSharing(true);
+        let filesToShare = null;
+        if (navigator.canShare && capturedData?.image) {
+            try {
+                const response = await fetch(capturedData.image);
+                const blob = await response.blob();
+                const file = new File([blob], `ruta_${mode.replace(/\s+/g, '_')}.jpg`, { type: 'image/jpeg' });
+                if (navigator.canShare({ files: [file] })) {
+                    filesToShare = [file];
+                }
+            } catch (e) {
+                console.error("Error preparando archivo para compartir:", e);
+            }
+        }
+
+        const shareText = `📍 *${mode} registrada*\nObservación: ${observacion.trim() || 'Ninguna'}`;
+        
+        if (navigator.share) {
+            try {
+                const shareData = {
+                    title: `Reporte de ${mode}`,
+                    text: shareText
+                };
+                if (filesToShare) shareData.files = filesToShare;
+                await navigator.share(shareData);
+            } catch (shareErr) {
+                console.log('Share cancelado o no soportado.', shareErr);
+            }
+        }
+
+        // Una vez que el selector de apps cierra (compartido o cancelado), regresar al inicio
+        setSharing(false);
+        setStep('idle');
+        setCapturedData(null);
+        setObservacion('');
+    };
+
     return (
         <div className="min-h-screen bg-gradient-to-b from-[#3C7DA6] to-[#6FAF6B] flex flex-col">
             <div className="bg-white/10 backdrop-blur-md p-4 flex items-center gap-3 border-b border-white/20">
-                <button onClick={() => navigate('/dashboard')} className="text-white hover:bg-white/20 p-2 rounded-full transition">
-                    <ArrowLeft size={24} />
+                <button onClick={() => navigate('/dashboard')} className="px-6 py-2.5 bg-white text-gray-800 font-bold flex items-center gap-2 rounded-xl border border-gray-100 shadow-lg hover:bg-gray-50 transition whitespace-nowrap">
+                    <ArrowLeft size={20} /> Volver
                 </button>
                 <div className="flex-1">
                     <h1 className="text-xl font-bold text-white flex items-center gap-2">
@@ -442,19 +513,58 @@ export default function RutaDashboard() {
             <div className="flex-1 p-4 flex flex-col items-center justify-center max-w-md mx-auto w-full">
                 {step === 'idle' && (
                     <div className="w-full flex flex-col gap-6">
+
+                        {/* Título */}
                         <div className="bg-white rounded-2xl p-6 text-center shadow-lg border border-white/60">
                             <h2 className="text-gray-800 font-bold text-lg mb-2">Registro de Clientes</h2>
                             <p className="text-gray-500 text-sm">
                                 {allowedActions.entry ? 'Usa esta opción al llegar a las instalaciones del cliente.' : 'Registra tu salida al concluir la visita.'}
                             </p>
                         </div>
-                        
-                        <div className="grid grid-cols-2 gap-4">
+
+                        {/* Spinner de carga de cámara */}
+                        {cameraLoading && (
+                            <div className="w-full bg-white/20 backdrop-blur-md rounded-2xl p-6 flex flex-col items-center gap-3 border border-white/30">
+                                <div className="animate-spin rounded-full h-12 w-12 border-t-4 border-b-4 border-white"></div>
+                                <p className="text-white font-semibold text-sm">{cameraLoadingMsg}</p>
+                                <p className="text-white/70 text-xs">Por favor espera, esto puede tomar unos segundos en Android...</p>
+                            </div>
+                        )}
+
+                        {/* Panel de error con botón Reintentar */}
+                        {cameraError && (
+                            <div className="w-full bg-red-50 border border-red-200 rounded-2xl p-5 shadow-lg flex flex-col gap-3">
+                                <h3 className="text-red-700 font-bold text-base">{cameraError.title}</h3>
+                                <p className="text-red-600 text-sm whitespace-pre-line">{cameraError.message}</p>
+                                <div className="flex gap-3 mt-1">
+                                    {cameraError.canRetry && (
+                                        <button
+                                            onClick={() => {
+                                                setCameraError(null);
+                                                if (pendingMode) handleStartAction(pendingMode);
+                                            }}
+                                            className="flex-1 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition active:scale-95"
+                                        >
+                                            🔄 Reintentar
+                                        </button>
+                                    )}
+                                    <button
+                                        onClick={() => setCameraError(null)}
+                                        className="flex-1 py-3 bg-white text-gray-600 font-bold rounded-xl border border-gray-200 hover:bg-gray-50 transition"
+                                    >
+                                        Cancelar
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Botones de acción — deshabilitados mientras carga */}
+                        <div className={`grid grid-cols-2 gap-4 ${cameraLoading ? 'opacity-40 pointer-events-none' : ''}`}>
                             <button
-                                disabled={!allowedActions.entry}
+                                disabled={!allowedActions.entry || cameraLoading}
                                 onClick={() => handleStartAction('Llegada Cliente')}
                                 className={`flex flex-col items-center justify-center gap-3 p-6 rounded-2xl shadow-xl transition-all ${
-                                    allowedActions.entry
+                                    allowedActions.entry && !cameraLoading
                                         ? 'bg-gradient-to-br from-blue-500 to-indigo-600 hover:scale-105 hover:shadow-2xl border border-blue-400 cursor-pointer'
                                         : 'bg-white/5 border border-white/10 opacity-50 cursor-not-allowed'
                                 }`}
@@ -464,10 +574,10 @@ export default function RutaDashboard() {
                             </button>
 
                             <button
-                                disabled={!allowedActions.exit}
+                                disabled={!allowedActions.exit || cameraLoading}
                                 onClick={() => handleStartAction('Salida Cliente')}
                                 className={`flex flex-col items-center justify-center gap-3 p-6 rounded-2xl shadow-xl transition-all ${
-                                    allowedActions.exit
+                                    allowedActions.exit && !cameraLoading
                                         ? 'bg-gradient-to-br from-orange-500 to-red-600 hover:scale-105 hover:shadow-2xl border border-orange-400 cursor-pointer'
                                         : 'bg-white/5 border border-white/10 opacity-50 cursor-not-allowed'
                                 }`}
@@ -555,10 +665,25 @@ export default function RutaDashboard() {
                 )}
 
                 {step === 'success' && (
-                    <div className="bg-white p-8 rounded-3xl shadow-2xl max-w-sm text-center animate-bounce-in border-4 border-indigo-100">
-                        <CheckCircle className="w-20 h-20 text-indigo-500 mx-auto mb-4" />
-                        <h2 className="text-2xl font-bold text-gray-800 mb-2">¡Evidencia Guardada!</h2>
-                        <p className="text-gray-500 font-medium">El registro ha sido almacenado correctamente.</p>
+                    <div className="bg-white p-8 rounded-3xl shadow-2xl max-w-sm text-center animate-bounce-in border-4 border-indigo-100 flex flex-col gap-3">
+                        <CheckCircle className="w-20 h-20 text-indigo-500 mx-auto mb-2" />
+                        <h2 className="text-2xl font-bold text-gray-800 mb-1">¡Evidencia Guardada!</h2>
+                        <p className="text-gray-500 font-medium mb-4">El registro ha sido almacenado correctamente.</p>
+                        
+                        <button 
+                            onClick={handleManualShare}
+                            disabled={sharing}
+                            className="w-full flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-700 transition shadow-lg mt-2 disabled:opacity-70"
+                        >
+                            {sharing ? 'Compartiendo...' : 'Compartir Evidencia'}
+                        </button>
+                        <button 
+                            onClick={() => { setStep('idle'); setCapturedData(null); setObservacion(''); }}
+                            disabled={sharing}
+                            className="w-full flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-gray-100 text-gray-700 font-bold hover:bg-gray-200 transition disabled:opacity-50"
+                        >
+                            Finalizar
+                        </button>
                     </div>
                 )}
             </div>

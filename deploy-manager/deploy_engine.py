@@ -26,7 +26,22 @@ def bump_version(version: str) -> str:
 
 
 # CORS configuration that will be applied to every bucket
-CORS_RULES = [{"origin": ["*"], "method": ["GET"], "responseHeader": ["Content-Type", "Content-Disposition", "Content-Length"], "maxAgeSeconds": 3600}]
+# CORS configuration that will be applied to every bucket
+CORS_RULES = [
+    {
+        "origin": ["*"],
+        "method": ["GET", "PUT", "POST", "HEAD", "DELETE"],
+        "responseHeader": [
+            "Content-Type",
+            "Content-Disposition",
+            "Content-Length",
+            "Authorization",
+            "x-goog-resumable",
+            "x-goog-meta-*"
+        ],
+        "maxAgeSeconds": 3600
+    }
+]
 
 
 def _write_cors_temp_file() -> str:

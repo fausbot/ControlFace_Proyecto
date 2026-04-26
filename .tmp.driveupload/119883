@@ -1,0 +1,60 @@
+[debug] [2026-04-25T05:03:59.042Z] ----------------------------------------------------------------------
+[debug] [2026-04-25T05:03:59.044Z] Command:       C:\Program Files\nodejs\node.exe C:\Users\fausb\AppData\Roaming\npm\node_modules\firebase-tools\lib\bin\firebase.js deploy --only storage --project attendance-pwa-dev --non-interactive
+[debug] [2026-04-25T05:03:59.044Z] CLI Version:   15.13.0
+[debug] [2026-04-25T05:03:59.044Z] Platform:      win32
+[debug] [2026-04-25T05:03:59.044Z] Node Version:  v25.5.0
+[debug] [2026-04-25T05:03:59.044Z] Time:          Sat Apr 25 2026 00:03:59 GMT-0500 (hora estándar de Colombia)
+[debug] [2026-04-25T05:03:59.045Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-04-25T05:04:00.104Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-04-25T05:04:00.104Z] > authorizing via signed-in user (fausbotkindle@gmail.com)
+[debug] [2026-04-25T05:04:00.104Z] [iam] checking project attendance-pwa-dev for permissions ["firebase.projects.get","firebaserules.releases.create","firebaserules.releases.update","firebaserules.rulesets.create"]
+[debug] [2026-04-25T05:04:00.105Z] Checked if tokens are valid: true, expires at: 1777095823927
+[debug] [2026-04-25T05:04:00.105Z] Checked if tokens are valid: true, expires at: 1777095823927
+[debug] [2026-04-25T05:04:00.106Z] >>> [apiv2][query] POST https://cloudresourcemanager.googleapis.com/v1/projects/attendance-pwa-dev:testIamPermissions [none]
+[debug] [2026-04-25T05:04:00.106Z] >>> [apiv2][(partial)header] POST https://cloudresourcemanager.googleapis.com/v1/projects/attendance-pwa-dev:testIamPermissions  x-goog-user-project=attendance-pwa-dev
+[debug] [2026-04-25T05:04:00.106Z] >>> [apiv2][body] POST https://cloudresourcemanager.googleapis.com/v1/projects/attendance-pwa-dev:testIamPermissions {"permissions":["firebase.projects.get","firebaserules.releases.create","firebaserules.releases.update","firebaserules.rulesets.create"]}
+[debug] [2026-04-25T05:04:00.634Z] <<< [apiv2][status] POST https://cloudresourcemanager.googleapis.com/v1/projects/attendance-pwa-dev:testIamPermissions 200
+[debug] [2026-04-25T05:04:00.635Z] <<< [apiv2][body] POST https://cloudresourcemanager.googleapis.com/v1/projects/attendance-pwa-dev:testIamPermissions {"permissions":["firebase.projects.get","firebaserules.releases.create","firebaserules.releases.update","firebaserules.rulesets.create"]}
+[info] 
+[info] === Deploying to 'attendance-pwa-dev'...
+[info] 
+[info] i  deploying storage 
+[info] i  storage: ensuring required API firebasestorage.googleapis.com is enabled... 
+[debug] [2026-04-25T05:04:00.638Z] Checked if tokens are valid: true, expires at: 1777095823927
+[debug] [2026-04-25T05:04:00.638Z] Checked if tokens are valid: true, expires at: 1777095823927
+[debug] [2026-04-25T05:04:00.638Z] >>> [apiv2][query] GET https://firebasestorage.googleapis.com/v1alpha/projects/attendance-pwa-dev/defaultBucket [none]
+[debug] [2026-04-25T05:04:00.982Z] <<< [apiv2][status] GET https://firebasestorage.googleapis.com/v1alpha/projects/attendance-pwa-dev/defaultBucket 200
+[debug] [2026-04-25T05:04:00.983Z] <<< [apiv2][body] GET https://firebasestorage.googleapis.com/v1alpha/projects/attendance-pwa-dev/defaultBucket {"name":"projects/attendance-pwa-dev/defaultBucket","location":"US-CENTRAL1","bucket":{"name":"projects/attendance-pwa-dev/buckets/attendance-pwa-dev.firebasestorage.app"},"storageClass":"REGIONAL"}
+[info] i  firebase.storage: checking storage.rules for compilation errors... 
+[debug] [2026-04-25T05:04:00.984Z] Checked if tokens are valid: true, expires at: 1777095823927
+[debug] [2026-04-25T05:04:00.984Z] Checked if tokens are valid: true, expires at: 1777095823927
+[debug] [2026-04-25T05:04:00.984Z] >>> [apiv2][query] POST https://firebaserules.googleapis.com/v1/projects/attendance-pwa-dev:test [none]
+[debug] [2026-04-25T05:04:00.984Z] >>> [apiv2][body] POST https://firebaserules.googleapis.com/v1/projects/attendance-pwa-dev:test [omitted]
+[debug] [2026-04-25T05:04:01.330Z] <<< [apiv2][status] POST https://firebaserules.googleapis.com/v1/projects/attendance-pwa-dev:test 200
+[debug] [2026-04-25T05:04:01.331Z] <<< [apiv2][body] POST https://firebaserules.googleapis.com/v1/projects/attendance-pwa-dev:test {}
+[info] +  firebase.storage: rules file storage.rules compiled successfully 
+[debug] [2026-04-25T05:04:01.332Z] Checked if tokens are valid: true, expires at: 1777095823927
+[debug] [2026-04-25T05:04:01.332Z] Checked if tokens are valid: true, expires at: 1777095823927
+[debug] [2026-04-25T05:04:01.332Z] >>> [apiv2][query] GET https://firebaserules.googleapis.com/v1/projects/attendance-pwa-dev/releases pageSize=10&pageToken=
+[debug] [2026-04-25T05:04:01.538Z] <<< [apiv2][status] GET https://firebaserules.googleapis.com/v1/projects/attendance-pwa-dev/releases 200
+[debug] [2026-04-25T05:04:01.538Z] <<< [apiv2][body] GET https://firebaserules.googleapis.com/v1/projects/attendance-pwa-dev/releases {"releases":[{"name":"projects/attendance-pwa-dev/releases/cloud.firestore","rulesetName":"projects/attendance-pwa-dev/rulesets/b76110c9-3e3f-4fc3-8330-bbe47058919b","createTime":"2025-12-26T17:55:03.588426Z","updateTime":"2026-04-25T05:03:58.512285Z"},{"name":"projects/attendance-pwa-dev/releases/firebase.storage/attendance-pwa-dev.firebasestorage.app","rulesetName":"projects/attendance-pwa-dev/rulesets/9e3932cf-1c9c-421d-bf02-1eab43a3856a","createTime":"2026-02-21T18:08:29.929987Z","updateTime":"2026-04-25T04:55:07.433539Z"}]}
+[debug] [2026-04-25T05:04:01.547Z] Checked if tokens are valid: true, expires at: 1777095823927
+[debug] [2026-04-25T05:04:01.547Z] Checked if tokens are valid: true, expires at: 1777095823927
+[debug] [2026-04-25T05:04:01.547Z] >>> [apiv2][query] GET https://firebaserules.googleapis.com/v1/projects/attendance-pwa-dev/rulesets/9e3932cf-1c9c-421d-bf02-1eab43a3856a [none]
+[debug] [2026-04-25T05:04:01.845Z] <<< [apiv2][status] GET https://firebaserules.googleapis.com/v1/projects/attendance-pwa-dev/rulesets/9e3932cf-1c9c-421d-bf02-1eab43a3856a 200
+[debug] [2026-04-25T05:04:01.845Z] <<< [apiv2][body] GET https://firebaserules.googleapis.com/v1/projects/attendance-pwa-dev/rulesets/9e3932cf-1c9c-421d-bf02-1eab43a3856a [omitted]
+[info] i  storage: latest version of storage.rules already up to date, skipping upload... 
+[debug] [2026-04-25T05:04:01.846Z] [rules] releasing firebase.storage/attendance-pwa-dev.firebasestorage.app with ruleset projects/attendance-pwa-dev/rulesets/9e3932cf-1c9c-421d-bf02-1eab43a3856a
+[debug] [2026-04-25T05:04:01.847Z] Checked if tokens are valid: true, expires at: 1777095823927
+[debug] [2026-04-25T05:04:01.847Z] Checked if tokens are valid: true, expires at: 1777095823927
+[debug] [2026-04-25T05:04:01.847Z] >>> [apiv2][query] PATCH https://firebaserules.googleapis.com/v1/projects/attendance-pwa-dev/releases/firebase.storage/attendance-pwa-dev.firebasestorage.app [none]
+[debug] [2026-04-25T05:04:01.847Z] >>> [apiv2][body] PATCH https://firebaserules.googleapis.com/v1/projects/attendance-pwa-dev/releases/firebase.storage/attendance-pwa-dev.firebasestorage.app {"release":{"name":"projects/attendance-pwa-dev/releases/firebase.storage/attendance-pwa-dev.firebasestorage.app","rulesetName":"projects/attendance-pwa-dev/rulesets/9e3932cf-1c9c-421d-bf02-1eab43a3856a"}}
+[debug] [2026-04-25T05:04:02.254Z] <<< [apiv2][status] PATCH https://firebaserules.googleapis.com/v1/projects/attendance-pwa-dev/releases/firebase.storage/attendance-pwa-dev.firebasestorage.app 200
+[debug] [2026-04-25T05:04:02.254Z] <<< [apiv2][body] PATCH https://firebaserules.googleapis.com/v1/projects/attendance-pwa-dev/releases/firebase.storage/attendance-pwa-dev.firebasestorage.app {"name":"projects/attendance-pwa-dev/releases/firebase.storage/attendance-pwa-dev.firebasestorage.app","rulesetName":"projects/attendance-pwa-dev/rulesets/9e3932cf-1c9c-421d-bf02-1eab43a3856a","createTime":"2026-02-21T18:08:29.929987Z","updateTime":"2026-04-25T05:04:02.391986Z"}
+[debug] [2026-04-25T05:04:02.254Z] [rules] updated release projects/attendance-pwa-dev/releases/firebase.storage/attendance-pwa-dev.firebasestorage.app
+[info] +  storage: released rules storage.rules to firebase.storage 
+[info] 
+[info] +  Deploy complete! 
+[info] 
+[info] Project Console: https://console.firebase.google.com/project/attendance-pwa-dev/overview

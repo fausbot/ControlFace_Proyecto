@@ -1,4 +1,4 @@
-const functions = require("firebase-functions");
+const functionsV1 = require("firebase-functions/v1");
 const admin = require("firebase-admin");
 const bcrypt = require("bcrypt");
 const CryptoJS = require("crypto-js");
@@ -9,15 +9,7 @@ admin.initializeApp();
  * Función para obtener la lista de todos los usuarios de Authentication.
  * Útil para exportar CSV con la lista real de usuarios.
  */
-exports.getUsersList = functions.https.onCall(async () => {
-    // Opcional: Verificar que el usuario esté autenticado (Se omite porque el admin usa React state)
-    /* if (!context.auth) {
-        throw new functions.https.HttpsError(
-            "unauthenticated",
-            "Debes estar autenticado para realizar esta acción."
-        );
-    } */
-
+exports.getUsersList = functionsV1.https.onCall(async (data, context) => {
     try {
         const listUsersResult = await admin.auth().listUsers(1000);
         const users = listUsersResult.users.map(user => ({
@@ -31,7 +23,7 @@ exports.getUsersList = functions.https.onCall(async () => {
         return { users };
     } catch (error) {
         console.error("Error listando usuarios:", error);
-        throw new functions.https.HttpsError(
+        throw new functionsV1.https.HttpsError(
             "internal",
             "Error al obtener la lista de usuarios."
         );
@@ -42,33 +34,25 @@ exports.getUsersList = functions.https.onCall(async () => {
  * Función para eliminar un usuario de Authentication.
  * Útil para gestionar usuarios desde el panel de administración.
  */
-exports.deleteUser = functions.https.onCall(async (data) => {
-    /* if (!context.auth) {
-        throw new functions.https.HttpsError(
-            "unauthenticated",
-            "Debes estar autenticado para realizar esta acción."
-        );
-    } */
-
+exports.deleteUser = functionsV1.https.onCall(async (data, context) => {
     const { uid } = data;
     if (!uid) {
-        throw new functions.https.HttpsError(
+        throw new functionsV1.https.HttpsError(
             "invalid-argument",
             "Se requiere el UID del usuario."
         );
     }
 
     try {
-        // 1. Obtener el email del usuario ANTES de eliminarlo de Authentication
         const db = admin.firestore();
         const userRecord = await admin.auth().getUser(uid).catch(() => null);
         const userEmail = userRecord ? userRecord.email : null;
 
-        // 2. Eliminar de Authentication
+        // Eliminar de Authentication
         await admin.auth().deleteUser(uid);
 
         if (userEmail) {
-            // 3. Agregar a la cola de borrado en Firestore
+            // Agregar a la cola de borrado en Firestore
             const queueRef = db.collection('deletionQueue').doc();
             await queueRef.set({
                 email: userEmail.toLowerCase().trim(),
@@ -76,7 +60,7 @@ exports.deleteUser = functions.https.onCall(async (data) => {
                 uid: uid
             });
 
-            // 4. Eliminar de la colección employees si existe
+            // Eliminar de la colección employees si existe
             const employeesQuery = db.collection('employees').where('email', '==', userEmail.toLowerCase().trim());
             const employeesSnapshot = await employeesQuery.get();
 
@@ -92,7 +76,7 @@ exports.deleteUser = functions.https.onCall(async (data) => {
         return { success: true };
     } catch (error) {
         console.error("Error eliminando usuario:", error);
-        throw new functions.https.HttpsError(
+        throw new functionsV1.https.HttpsError(
             "internal",
             "Error al eliminar el usuario."
         );
@@ -103,10 +87,10 @@ exports.deleteUser = functions.https.onCall(async (data) => {
  * Función para verificar la contraseña de administrador de manera segura.
  * Usa bcrypt para comparar contraseñas hasheadas.
  */
-exports.verifyAdminPassword = functions.https.onCall(async (data) => {
+exports.verifyAdminPassword = functionsV1.https.onCall(async (data, context) => {
     const { password, target = '' } = data;
     if (!password) {
-        throw new functions.https.HttpsError(
+        throw new functionsV1.https.HttpsError(
             "invalid-argument",
             "Se requiere una contraseña."
         );
@@ -139,8 +123,6 @@ exports.verifyAdminPassword = functions.https.onCall(async (data) => {
         }
 
         // --- LÓGICA DE BOOTSTRAP (PRIMER INICIO) ---
-        // Si no hay ninguna contraseña guardada en el campo correspondiente (ni en el master), 
-        // permitimos entrar con la clave maestra CF1234.
         if (!storedPassword) {
             if (password.trim() === BOOTSTRAP_PASSWORD) {
                 return { success: true };
@@ -162,7 +144,7 @@ exports.verifyAdminPassword = functions.https.onCall(async (data) => {
 
     } catch (error) {
         console.error("Error verificando contraseña:", error);
-        throw new functions.https.HttpsError(
+        throw new functionsV1.https.HttpsError(
             "internal",
             "Error interno al verificar credenciales."
         );
@@ -173,18 +155,18 @@ exports.verifyAdminPassword = functions.https.onCall(async (data) => {
  * Función para cambiar la contraseña de administrador.
  * Requiere la contraseña actual para autorizar el cambio.
  */
-exports.changeAdminPassword = functions.https.onCall(async (data) => {
+exports.changeAdminPassword = functionsV1.https.onCall(async (data, context) => {
     const { currentPassword, newPassword, target = 'todas' } = data;
 
     if (!currentPassword || !newPassword) {
-        throw new functions.https.HttpsError(
+        throw new functionsV1.https.HttpsError(
             "invalid-argument",
             "Se requieren la contraseña actual y la nueva contraseña."
         );
     }
 
     if (newPassword.length < 6) {
-        throw new functions.https.HttpsError(
+        throw new functionsV1.https.HttpsError(
             "invalid-argument",
             "La nueva contraseña debe tener al menos 6 caracteres."
         );
@@ -198,7 +180,7 @@ exports.changeAdminPassword = functions.https.onCall(async (data) => {
         const configData = docSnap.exists ? docSnap.data() : {};
         const BOOTSTRAP_PASSWORD = "CF1234";
 
-        // Mapear el target actual al campo que debemos validar para autorizar el cambio
+        // Mapear el target actual al campo que debemos validar
         let specificFieldValidation = null;
         if (target === '/registro') specificFieldValidation = 'adminPassword_registro';
         if (target === '/datos') specificFieldValidation = 'adminPassword_datos';
@@ -217,7 +199,6 @@ exports.changeAdminPassword = functions.https.onCall(async (data) => {
         let isCurrentValid = false;
 
         if (!storedPasswordToVerify) {
-            // Si no hay contraseña guardada, validamos contra la maestra de bootstrap
             isCurrentValid = currentPassword.trim() === BOOTSTRAP_PASSWORD;
         } else {
             const isBcryptHash = storedPasswordToVerify.startsWith('$2b$') || storedPasswordToVerify.startsWith('$2a$');
@@ -267,7 +248,7 @@ exports.changeAdminPassword = functions.https.onCall(async (data) => {
 
     } catch (error) {
         console.error("Error cambiando contraseña:", error);
-        throw new functions.https.HttpsError(
+        throw new functionsV1.https.HttpsError(
             "internal",
             "Error interno al cambiar la contraseña."
         );
@@ -275,69 +256,64 @@ exports.changeAdminPassword = functions.https.onCall(async (data) => {
 });
 
 
-
 /**
  * Función protegida para crear empleados validando el Token de Licencia.
  * Evita que un cliente cree usuarios superando su límite contratado.
  */
-exports.createEmployeeSecure = functions.https.onCall(async (data) => {
-    // 1. Autorización: Opcional, asegurar que sea admin (Se omite porque el admin usa React state)
-    /* if (!context.auth) {
-        throw new functions.https.HttpsError("unauthenticated", "Debe iniciar sesión primero.");
-    } */
-
+exports.createEmployeeSecure = functionsV1.https.onCall(async (data, context) => {
     const { email, password, firstName, lastName, faceDescriptor, extraFields } = data;
     if (!email || !password || !faceDescriptor) {
-        throw new functions.https.HttpsError("invalid-argument", "Faltan datos obligatorios (Email, Contraseña o Rostro).");
+        throw new functionsV1.https.HttpsError("invalid-argument", "Faltan datos obligatorios (Email, Contraseña o Rostro).");
     }
 
     try {
         const db = admin.firestore();
 
-        // 2. Leer la licencia actual
+        // Leer la licencia actual
         const licenseSnap = await db.collection("settings").doc("license").get();
         if (!licenseSnap.exists || !licenseSnap.data().token) {
-            throw new functions.https.HttpsError("permission-denied", "No hay una licencia instalada en el sistema.");
+            throw new functionsV1.https.HttpsError("permission-denied", "No hay una licencia instalada en el sistema.");
         }
 
         const rawToken = licenseSnap.data().token;
-        const SECRET_KEY = functions.config().keys ? functions.config().keys.license_secret : "ZAPATO_ROJO_MASTER_KEY_2026";
+        // En v2 era process.env, para V1 se usa functions.config(), pero si lo pasasté por environment vars sirve
+        const SECRET_KEY = process.env.LICENSE_SECRET_KEY || "ZAPATO_ROJO_MASTER_KEY_2026";
 
-        // 3. Desencriptar Token
+        // Desencriptar Token
         let decoded = null;
         try {
             const bytes = CryptoJS.AES.decrypt(rawToken, SECRET_KEY);
             const decryptedString = bytes.toString(CryptoJS.enc.Utf8);
             decoded = JSON.parse(decryptedString);
         } catch (error) {
-            throw new functions.https.HttpsError("permission-denied", "El token de licencia está corrupto o es inválido.");
+            throw new functionsV1.https.HttpsError("permission-denied", "El token de licencia está corrupto o es inválido.");
         }
 
         if (!decoded || !decoded.maxEmployees || !decoded.expirationDate) {
-            throw new functions.https.HttpsError("permission-denied", "El token no tiene un formato válido.");
+            throw new functionsV1.https.HttpsError("permission-denied", "El token no tiene un formato válido.");
         }
 
-        // 4. Validar Fecha de Expiración
+        // Validar Fecha de Expiración
         const today = new Date();
         const expiration = new Date(decoded.expirationDate);
         if (today > expiration) {
-            throw new functions.https.HttpsError("permission-denied", `Su licencia expiró el ${decoded.expirationDate}. Contacte a ${decoded.providerName}.`);
+            throw new functionsV1.https.HttpsError("permission-denied", `Su licencia expiró el ${decoded.expirationDate}. Contacte a ${decoded.providerName}.`);
         }
 
-        // 5. Contar Empleados Actuales
+        // Contar Empleados Actuales
         const listUsersResult = await admin.auth().listUsers(1000);
         const currentCount = listUsersResult.users.length;
 
-        // 6. Validar Límite con Gabela (Buffer)
+        // Validar Límite con Gabela (Buffer)
         const maxEmp = parseInt(decoded.maxEmployees, 10);
         const bufferPct = parseInt(decoded.bufferPercentage || 0, 10);
         const absoluteMax = maxEmp + Math.ceil(maxEmp * (bufferPct / 100));
 
         if (currentCount >= absoluteMax) {
-            throw new functions.https.HttpsError("resource-exhausted", `Límite absoluto de ${absoluteMax} alcanzado (Contrato: ${maxEmp} + ${bufferPct}% de cortesía). Contacte a ${decoded.providerName}.`);
+            throw new functionsV1.https.HttpsError("resource-exhausted", `Límite absoluto de ${absoluteMax} alcanzado (Contrato: ${maxEmp} + ${bufferPct}% de cortesía). Contacte a ${decoded.providerName}.`);
         }
 
-        // 7. FLUJO DE CREACIÓN - Límite Aprobado
+        // FLUJO DE CREACIÓN - Límite Aprobado
         // A. Crear usuario en Auth
         const userRecord = await admin.auth().createUser({
             email: email.toLowerCase().trim(),
@@ -355,8 +331,7 @@ exports.createEmployeeSecure = functions.https.onCall(async (data) => {
             ...(extraFields || {})
         });
 
-        // C. LIMPIEZA: Si el usuario estaba en la cola de borrado, lo sacamos 
-        // (porque ahora vuelve a ser un empleado activo y válido)
+        // C. LIMPIEZA: Si el usuario estaba en la cola de borrado, lo sacamos
         const qSnap = await db.collection('deletionQueue').where('email', '==', email.toLowerCase().trim()).get();
         if (!qSnap.empty) {
             const batchRemove = db.batch();
@@ -369,23 +344,23 @@ exports.createEmployeeSecure = functions.https.onCall(async (data) => {
     } catch (error) {
         console.error("Error en createEmployeeSecure:", error);
 
-        // Si el usuario ya existe en Auth, lanzamos el error amigable
         if (error.code === 'auth/email-already-exists') {
-            throw new functions.https.HttpsError("already-exists", "El correo ya está registrado.");
+            throw new functionsV1.https.HttpsError("already-exists", "El correo ya está registrado.");
         }
 
-        // Re-lanzar los errores controlados de Firebase Functions
-        throw new functions.https.HttpsError("internal", "Logica de creación fallida: " + error.message);
+        throw new functionsV1.https.HttpsError("internal", "Logica de creación fallida: " + error.message);
     }
 });
 
 /**
  * Tarea Programada: Limpieza Automática de Archivos Fantasma
- * Se ejecuta el día 1 de cada mes a la medianoche (Aprox cada 30 días).
+ * Se ejecuta el día 1 de cada mes a la medianoche.
  * Elimina documentos de Firestore en 'fotos' e 'incidents' que no tienen una foto real
  * asociada en Firebase Storage (orphaned data).
  */
-exports.scheduledPhantomCleanup = functions.pubsub.schedule('0 0 1 * *').timeZone('America/Bogota').onRun(async (context) => {
+exports.scheduledPhantomCleanup = functionsV1.pubsub.schedule('0 0 1 * *')
+    .timeZone('America/Bogota')
+    .onRun(async (context) => {
     const db = admin.firestore();
     const bucket = admin.storage().bucket();
     let deletedFotos = 0;
@@ -429,7 +404,6 @@ exports.scheduledPhantomCleanup = functions.pubsub.schedule('0 0 1 * *').timeZon
             const data = docSnap.data();
             if (data.fotoURL) {
                 try {
-                    // Extraer path de URL
                     const urlPath = decodeURIComponent(data.fotoURL.split('/o/')[1]?.split('?')[0] || '');
                     if (urlPath) {
                         const file = bucket.file(urlPath);
@@ -456,5 +430,107 @@ exports.scheduledPhantomCleanup = functions.pubsub.schedule('0 0 1 * *').timeZon
     } catch (err) {
         console.error("Error en Limpieza Programada:", err);
         return null;
+    }
+});
+
+/**
+ * Función para buscar si un usuario existe por correo y devolver sus datos públicos (nombres).
+ */
+exports.checkEmployeeExists = functionsV1.https.onCall(async (data, context) => {
+    const { email } = data;
+    if (!email) throw new functionsV1.https.HttpsError("invalid-argument", "El email es requerido.");
+
+    try {
+        const db = admin.firestore();
+        const emailLower = email.toLowerCase().trim();
+        const querySnapshot = await db.collection("employees").where("email", "==", emailLower).limit(1).get();
+
+        if (querySnapshot.empty) {
+            return { exists: false };
+        }
+
+        const doc = querySnapshot.docs[0];
+        const empData = doc.data();
+
+        // Extraemos campos extra que existan (todo menos lo base)
+        const { email: _, firstName, lastName, fechaCreacion, faceDescriptor, password, ...extraFields } = empData;
+
+        return {
+            exists: true,
+            docId: doc.id,
+            firstName: firstName || '',
+            lastName: lastName || '',
+            extraFields: extraFields || {}
+        };
+    } catch (error) {
+        console.error("Error en checkEmployeeExists:", error);
+        throw new functionsV1.https.HttpsError("internal", "Error al verificar el empleado.");
+    }
+});
+
+/**
+ * Función protegida para actualizar un empleado existente verificando la clave de configuración.
+ */
+exports.updateEmployeeSecure = functionsV1.https.onCall(async (data, context) => {
+    const { docId, email, firstName, lastName, faceDescriptor, extraFields, configPassword } = data;
+
+    if (!docId || !email || !configPassword) {
+        throw new functionsV1.https.HttpsError("invalid-argument", "Faltan datos obligatorios para actualizar.");
+    }
+
+    try {
+        const db = admin.firestore();
+
+        // 1. Verificar Master Password de Configuración
+        const configSnap = await db.collection('settings').doc('config').get();
+        const configData = configSnap.exists ? configSnap.data() : {};
+        const storedPassword = configData.adminPassword_configuracion || configData.adminPassword;
+        const BOOTSTRAP_PASSWORD = "CF1234";
+
+        let isCurrentValid = false;
+        if (!storedPassword) {
+            isCurrentValid = configPassword.trim() === BOOTSTRAP_PASSWORD;
+        } else {
+            const isBcrypt = storedPassword.startsWith('$2b$') || storedPassword.startsWith('$2a$');
+            if (isBcrypt) {
+                isCurrentValid = await bcrypt.compare(configPassword.trim(), storedPassword);
+            } else {
+                isCurrentValid = configPassword.trim() === storedPassword.trim();
+            }
+        }
+
+        if (!isCurrentValid) {
+            throw new functionsV1.https.HttpsError("permission-denied", "Contraseña de Configuración incorrecta. Edición denegada.");
+        }
+
+        // 2. Actualizar Auth (Google)
+        try {
+            const userRecord = await admin.auth().getUserByEmail(email.toLowerCase().trim());
+            await admin.auth().updateUser(userRecord.uid, {
+                displayName: `${firstName} ${lastName}`.trim()
+            });
+        } catch (authErr) {
+            console.error("Error actualizando Auth (puede que no exista en Auth, ignorando):", authErr);
+        }
+
+        // 3. Actualizar Firestore
+        const updateData = {
+            firstName: firstName.trim(),
+            lastName: lastName.trim(),
+            ...(extraFields || {})
+        };
+
+        if (faceDescriptor && Array.isArray(faceDescriptor) && faceDescriptor.length > 0) {
+            updateData.faceDescriptor = faceDescriptor;
+        }
+
+        await db.collection("employees").doc(docId).update(updateData);
+
+        return { success: true, message: "Empleado actualizado correctamente." };
+
+    } catch (error) {
+        console.error("Error en updateEmployeeSecure:", error);
+        if (error.code === 'functions/permission-denied') throw error;
+        throw new functionsV1.https.HttpsError("internal", "Error al actualizar empleado: " + error.message);
     }
 });

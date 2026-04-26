@@ -10,13 +10,15 @@
     },
     "engines": {
         "node": "20"
+
     },
+
     "main": "index.js",
     "dependencies": {
         "bcrypt": "^6.0.0",
         "crypto-js": "^4.2.0",
-        "firebase-admin": "^11.8.0",
-        "firebase-functions": "^4.3.1"
+        "firebase-admin": "^12.7.0",
+        "firebase-functions": "^7.2.5"
     },
     "private": true
 }

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 
-import { Settings } from 'lucide-react';
+import { Settings, Shield } from 'lucide-react';
 import AdminPasswordModal from '../components/AdminPasswordModal';
 import { fetchLicenseStatus } from '../services/licenseService';
 
@@ -230,7 +230,7 @@ export default function Login() {
 
             {/* Tarjeta Principal */}
             <div className="w-full flex-1 flex items-center justify-center">
-                <div className="bg-white p-6 sm:p-8 rounded-2xl shadow-xl w-full max-w-md backdrop-blur-sm bg-opacity-90 flex flex-col items-center relative overflow-hidden z-20 my-auto">
+                <div className="bg-white p-6 sm:p-8 pt-16 sm:pt-20 rounded-2xl shadow-xl w-full max-w-md backdrop-blur-sm bg-opacity-90 flex flex-col items-center relative overflow-hidden z-20 my-auto">
                 {/* Overlay de Actualización Confinado a la Tarjeta */}
                 {isUpdating && (
                     <div className="absolute inset-0 z-[100] bg-blue-900/95 backdrop-blur-md flex flex-col items-center justify-center text-white p-6 text-center">
@@ -250,14 +250,14 @@ export default function Login() {
                 <img
                     src="/LogolFaceContro.jpg"
                     alt="ControlFace Logo"
-                    className="absolute top-4 left-4 w-36 object-contain opacity-80"
+                    className="absolute top-4 left-4 sm:top-5 sm:left-5 w-32 sm:w-36 object-contain opacity-80"
                 />
                 <img
                     src={import.meta.env.VITE_CLIENT_LOGO_URL || "/logo.jpg"}
                     alt="Logo"
-                    className="w-40 h-40 mb-4 rounded-xl object-contain"
+                    className="w-auto max-w-[240px] max-h-32 mb-1 rounded-xl object-contain relative z-10"
                 />
-                <h2 className="text-3xl font-bold text-center mb-2 text-gray-800 w-full">
+                <h2 className="text-3xl font-bold text-center mb-2 text-gray-800 w-full relative z-10 mt-1">
                     {import.meta.env.VITE_CLIENT_NAME || "Acceso Empleados"}
                 </h2>
                 <h3 className="text-sm text-gray-500 font-medium mb-6 uppercase tracking-wider">
@@ -329,6 +329,13 @@ export default function Login() {
                     className="text-[9px] text-white underline decoration-white/30 hover:text-white/80 transition"
                 >
                     Limpiar App si no se actualiza
+                </button>
+                <button
+                    onClick={() => navigate('/privacidad', { state: { from: 'login' } })}
+                    className="mt-3 mb-2 px-3 py-1.5 flex items-center gap-1.5 text-xs text-white/90 font-medium bg-black/20 rounded-full hover:bg-black/40 hover:text-white border border-white/10 hover:border-white/30 backdrop-blur-sm transition-all duration-300 shadow-sm"
+                >
+                    <Shield size={14} />
+                    Privacidad y Tratamiento de Datos
                 </button>
             </div>
         </div>

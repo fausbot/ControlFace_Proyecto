@@ -142,26 +142,29 @@ export default function SyncManager() {
                             console.log(`✅ Foto sincronizada: ${photoPath}`);
 
                             // Registrar metadatos en la colección 'fotos' (para el visualizador de reportes)
-                            try {
-                                const isAsistencia = category === 'asistencia' || category === 'Entrada' || category === 'Salida';
-                                const isVisita = category === 'Visita';
-                                
-                                await addDoc(collection(db, 'fotos'), {
-                                    tipo: isAsistencia ? 'asistencia' : (isVisita ? 'visita' : 'incidente'),
-                                    tipoOriginal: category,
-                                    email: finalMetadata.usuario,
-                                    fecha: finalMetadata.fecha,
-                                    hora: finalMetadata.hora,
-                                    year: year,
-                                    month: month,
-                                    carpeta: isAsistencia ? 'asistencia' : (isVisita ? 'visitas' : 'incidentes'),
-                                    path: photoPath,
-                                    url: photoURL,
-                                    timestamp: serverTimestamp()
-                                });
-                                console.log(`📸 Metadatos de foto registrados en 'fotos'`);
-                            } catch (err) {
-                                console.error("Error registrando metadatos en 'fotos':", err);
+                            // Solo si el registro NO es 'photoOnly' (para evitar duplicados en la colección 'fotos')
+                            if (!record.photoOnly) {
+                                try {
+                                    const isAsistencia = category === 'asistencia' || category === 'Entrada' || category === 'Salida';
+                                    const isVisita = category === 'Visita';
+                                    
+                                    await addDoc(collection(db, 'fotos'), {
+                                        tipo: isAsistencia ? 'asistencia' : (isVisita ? 'visita' : 'incidente'),
+                                        tipoOriginal: category,
+                                        email: finalMetadata.usuario,
+                                        fecha: finalMetadata.fecha,
+                                        hora: finalMetadata.hora,
+                                        year: year,
+                                        month: month,
+                                        carpeta: isAsistencia ? 'asistencia' : (isVisita ? 'visitas' : 'incidentes'),
+                                        path: photoPath,
+                                        url: photoURL,
+                                        timestamp: serverTimestamp()
+                                    });
+                                    console.log(`📸 Metadatos de foto registrados en 'fotos'`);
+                                } catch (err) {
+                                    console.error("Error registrando metadatos en 'fotos':", err);
+                                }
                             }
                         } catch (err) {
                             console.error("Error subiendo foto a Storage:", err);
@@ -177,6 +180,27 @@ export default function SyncManager() {
                     const safeFecha = (finalMetadata.fecha || '').replace(/\//g, '-');
                     const safeHora = (finalMetadata.hora || '').replace(/:/g, '-').replace(/\s/g, '');
                     const deterministicDocId = `${safeEmail}_${safeFecha}_${safeHora}`;
+
+                    // ── MODO PHOTO ONLY: Solo actualizar la fotoURL en el doc existente ──
+                    if (record.photoOnly) {
+                        if (photoURL) {
+                            console.log(`📸 [photoOnly] Adjuntando fotoURL en ${collectionName}/${deterministicDocId}`);
+                            await setDoc(doc(db, collectionName, deterministicDocId), { fotoURL: photoURL }, { merge: true });
+                            if (record.mode === 'visita') {
+                                // También actualizar en attendance
+                                await setDoc(doc(db, 'attendance', deterministicDocId), { fotoURL: photoURL }, { merge: true });
+                            }
+                            console.log(`✅ fotoURL adjuntada al doc existente.`);
+                        } else {
+                            console.warn(`⚠️ [photoOnly] No se pudo subir la foto aún. El registro offline se mantiene.`);
+                            // No borrar el registro offline — se reintentará en el próximo ciclo
+                            continue;
+                        }
+                        // Limpiar local y continuar
+                        await deleteOfflineRecord(record.id);
+                        console.log(`✅ Registro photoOnly ${record.id} completado.`);
+                        continue;
+                    }
 
                     console.log(`💾 Guardando en ${collectionName} con ID: ${deterministicDocId}`, finalMetadata);
                     

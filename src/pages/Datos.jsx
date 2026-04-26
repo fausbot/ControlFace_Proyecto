@@ -1,10 +1,11 @@
 // src/pages/Datos.jsx
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Trash2, ChevronLeft, ChevronRight, Loader2, FileText, CheckCircle, Search, X } from 'lucide-react';
+import { Trash2, ChevronLeft, ChevronRight, Loader2, FileText, CheckCircle, Search, X, ArrowLeft, Camera } from 'lucide-react';
 import { db } from '../firebaseConfig';
 import { collection, query, where, getDocs, doc, setDoc, getDoc, deleteDoc } from 'firebase/firestore';
 import { useAuth } from '../contexts/AuthContext';
+import AdminPasswordModal from '../components/AdminPasswordModal';
 
 // ✅ Importamos desde los servicios
 import {
@@ -40,6 +41,10 @@ export default function Datos() {
     const [mAmPm, setMAmPm] = useState(() => new Date().getHours() < 12 ? 'AM' : 'PM');
     const [mReason, setMReason] = useState('');
     const [mSaving, setMSaving] = useState(false);
+
+    // Estado para borrado protegido
+    const [deletingId, setDeletingId] = useState(null);
+    const [showDeleteModal, setShowDeleteModal] = useState(false);
 
     const navigate = useNavigate();
     const { adminAccess } = useAuth();
@@ -203,8 +208,13 @@ export default function Datos() {
         }
     };
 
-    const handleDelete = async (id) => {
+    const confirmDelete = async (id) => {
         if (!window.confirm('¿Eliminar este registro permanentemente?')) return;
+        setDeletingId(id);
+        setShowDeleteModal(true);
+    };
+
+    const executeDelete = async (id) => {
         try {
             await deleteAttendanceLog(id);
             setLogs(logs.filter(log => log.id !== id));
@@ -212,6 +222,8 @@ export default function Datos() {
         } catch (error) {
             console.error(error);
             alert('No se pudo borrar el registro.');
+        } finally {
+            setDeletingId(null);
         }
     };
 
@@ -256,12 +268,27 @@ export default function Datos() {
                                 </button>
                             )}
                         </div>
-                        <button onClick={() => navigate('/dashboard')} className="px-6 py-2.5 bg-white text-gray-800 font-bold flex items-center gap-2 rounded-xl border border-gray-100 shadow-lg hover:bg-gray-50 transition whitespace-nowrap">
-                            Volver
+                        <button onClick={() => navigate('/login')} className="px-6 py-2.5 bg-white text-gray-800 font-bold flex items-center gap-2 rounded-xl border border-gray-100 shadow-lg hover:bg-gray-50 transition whitespace-nowrap">
+                            <ArrowLeft size={20} /> Volver
                         </button>
                     </div>
                 </div>
 
+                {/* Modal de Protección para Borrado */}
+                <AdminPasswordModal
+                    isOpen={showDeleteModal}
+                    target="/configuracion"
+                    onClose={() => {
+                        setShowDeleteModal(false);
+                        setDeletingId(null);
+                    }}
+                    onSuccess={() => {
+                        setShowDeleteModal(false);
+                        if (deletingId) {
+                            executeDelete(deletingId);
+                        }
+                    }}
+                />
 
                 {/* Tabla */}
                 <div className="bg-white rounded-xl shadow-2xl overflow-hidden">
@@ -300,9 +327,20 @@ export default function Datos() {
                                             <td className="p-4">{log.hora}</td>
                                             <td className="p-4 text-xs text-gray-400 max-w-[200px] truncate" title={log.localidad || log.ubicacion}>{log.localidad || log.ubicacion}</td>
                                             <td className="p-4 text-center">
-                                                <button onClick={() => handleDelete(log.id)} className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded transition">
-                                                    <Trash2 size={16} />
-                                                </button>
+                                                <div className="flex items-center justify-center gap-2">
+                                                    {log.fotoURL && (
+                                                        <button 
+                                                            onClick={() => window.open(log.fotoURL, '_blank')} 
+                                                            className="p-1.5 text-blue-500 hover:text-blue-700 hover:bg-blue-50 rounded transition"
+                                                            title="Ver foto"
+                                                        >
+                                                            <Camera size={16} />
+                                                        </button>
+                                                    )}
+                                                    <button onClick={() => confirmDelete(log.id)} className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded transition">
+                                                        <Trash2 size={16} />
+                                                    </button>
+                                                </div>
                                             </td>
                                         </tr>
                                     );

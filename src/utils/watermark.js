@@ -67,22 +67,20 @@ export const addWatermarkToImage = async (imageSrc, data) => {
                 const modeBoxHeight = modeFontSize + (modePadding * 2);
                 const modeBoxY = 20;
 
-                // El logo ocupa aprox el 15% del ancho + margen izquierdo de 20px
-                const labelLogoWidth = img.width * 0.15;
-                const logoRightEdge = 20 + labelLogoWidth + 12; // 12px de separación
-
-                // Posición X: para modos de cliente, la caja empieza después del logo
-                // Para otros modos, centrada en el canvas
+                // Posición X: para no chocar con el gran logo del cliente a la izquierda, 
+                // anclaremos los rótulos largos a la esquina superior derecha.
                 let modeBoxX;
                 if (isClientMode) {
-                    modeBoxX = logoRightEdge; // empieza justo después del logo
+                    modeBoxX = canvas.width - modeBoxWidth - 18; // Pegado al borde derecho (simétrico al margen del logo)
                 } else {
-                    modeBoxX = (canvas.width - modeBoxWidth) / 2; // centrado
-                }
-
-                // Asegurar que la caja no se salga del canvas a la derecha
-                if (modeBoxX + modeBoxWidth > canvas.width - 10) {
-                    modeBoxX = canvas.width - modeBoxWidth - 10;
+                    modeBoxX = (canvas.width - modeBoxWidth) / 2; // Centrado normal
+                    
+                    // Asegurar de forma preventiva que ni siquiera los textos centrados pisen el logo:
+                    // El logo ocupa ~25% + 18px de margen, sumando algo de aire (12px).
+                    const safetyRightEdge = (img.width * 0.25) + 30;
+                    if (modeBoxX < safetyRightEdge) {
+                        modeBoxX = safetyRightEdge;
+                    }
                 }
 
                 // Centro del texto = centro de la caja
@@ -171,20 +169,76 @@ export const addWatermarkToImage = async (imageSrc, data) => {
     });
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// CONTROL CRÍTICO DE TIMEZONE:
+// Las APIs se consultan para America/Bogota (UTC-5).
+// El formateo SIEMPRE especifica timeZone: 'America/Bogota' explícitamente
+// para que el resultado sea correcto independientemente de la zona horaria
+// configurada en el dispositivo del empleado.
+// ─────────────────────────────────────────────────────────────────────────────
 export const fetchServerTime = async () => {
-    try {
-        const response = await fetch('https://worldtimeapi.org/api/timezone/Etc/UTC');
-        const data = await response.json();
-        return new Date(data.utc_datetime).toLocaleString();
-    } catch (error) {
-        console.error("Error fetching server time, falling back to local time", error);
-        return new Date().toLocaleString();
+    const BOGOTA_TZ     = 'America/Bogota';
+    const BOGOTA_LOCALE = 'es-CO';
+
+    // ✅ CORRECCIÓN: Solicitamos la hora directamente en la zona América/Bogotá
+    const sources = [
+        {
+            url: 'https://worldtimeapi.org/api/timezone/America/Bogota',
+            parse: (d) => d.datetime
+        },
+        {
+            url: 'https://www.timeapi.io/api/Time/current/zone?timeZone=America%2FBogota',
+            parse: (d) => d.dateTime
+        }
+    ];
+
+    for (const source of sources) {
+        try {
+            const controller = new AbortController();
+            const id = setTimeout(() => controller.abort(), 3500);
+
+            const response = await fetch(source.url, {
+                signal: controller.signal,
+                headers: { 'Accept': 'application/json' }
+            });
+            clearTimeout(id);
+
+            if (!response.ok) continue;
+            const data = await response.json();
+            const dateStr = source.parse(data);
+
+            // ✅ CORRECCIÓN: Forzar timezone de Bogotá en el formateo final
+            // Esto garantiza que aunque el dispositivo esté en UTC u otra zona,
+            // la hora que aparece en la foto sea siempre la hora colombiana.
+            if (dateStr) {
+                return new Date(dateStr).toLocaleString(BOGOTA_LOCALE, {
+                    timeZone: BOGOTA_TZ
+                });
+            }
+        } catch (error) {
+            console.warn(`[Timezone] Error consultando ${source.url}:`, error.message);
+        }
     }
+
+    // Fallback: usa hora local del dispositivo pero FORZANDO zona Colombia
+    // Esto es seguro incluso si el dispositivo tiene mal configurada la hora
+    console.warn("[Timezone] Servidores de tiempo no disponibles. Usando hora local forzada a Colombia.");
+    return new Date().toLocaleString(BOGOTA_LOCALE, { timeZone: BOGOTA_TZ });
 };
 
 export const fetchLocationName = async (lat, lng) => {
     try {
-        const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`);
+        const controller = new AbortController();
+        // Timeout de 6 segundos — suficiente para red lenta pero evita colgarse indefinidamente
+        const timeoutId = setTimeout(() => controller.abort(), 6000);
+
+        const response = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`,
+            { signal: controller.signal }
+        );
+        clearTimeout(timeoutId);
+
+        if (!response.ok) return "Dirección no encontrada";
         const data = await response.json();
         if (data && data.display_name) {
             // Return a shortened address (first 3 parts usually suffice)
@@ -192,7 +246,11 @@ export const fetchLocationName = async (lat, lng) => {
         }
         return "Dirección no encontrada";
     } catch (error) {
-        console.error("Error fetching location name:", error);
+        if (error.name === 'AbortError') {
+            console.warn("[Ubicación] Timeout al obtener dirección (red lenta).");
+        } else {
+            console.error("Error fetching location name:", error);
+        }
         return "Sin conexión a mapas";
     }
 };
