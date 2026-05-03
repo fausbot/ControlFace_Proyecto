@@ -356,7 +356,7 @@ export function getCameraErrorInfo(error, module = 'variable') {
         return {
             type: 'busy',
             title: '📷 Cámara ocupada',
-            message: 'El hardware de la cámara aún no se ha liberado completamente.\n\nEspera 3-5 segundos y presiona "Reintentar". Si el problema persiste, cierra todas las apps y vuelve a intentarlo.',
+            message: 'La cámara está ocupada.\n\nCierra todas las aplicaciones y presiona "Reintentar".',
             canRetry: true,
         };
     }

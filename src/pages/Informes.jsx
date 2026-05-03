@@ -9,7 +9,7 @@ import { functions, db } from '../firebaseConfig';
 import { exportToExcelHTML } from '../utils/exportUtils';
 import { calculateLaborHours, parseStringDate } from '../utils/timeCalculator';
 import { useAuth } from '../contexts/AuthContext';
-import { collection, getDocs, query, orderBy, getDoc, doc } from 'firebase/firestore';
+import { collection, getDocs, query, orderBy, getDoc, doc, where } from 'firebase/firestore';
 
 // ✅ Importamos desde los servicios
 import {

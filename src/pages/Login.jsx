@@ -17,6 +17,7 @@ export default function Login() {
     const [deferredPrompt, setDeferredPrompt] = useState(null);
     const [showInstallBtn, setShowInstallBtn] = useState(false);
     const [isIOS, setIsIOS] = useState(false);
+    const [isAndroid, setIsAndroid] = useState(false);
     const [isStandalone, setIsStandalone] = useState(false);
     const [isLicenseValid, setIsLicenseValid] = useState(true);
     const [isUpdating, setIsUpdating] = useState(false);
@@ -28,10 +29,12 @@ export default function Login() {
             setIsStandalone(true);
         }
 
-        // Detectar iOS
+        // Detectar SO
         const userAgent = window.navigator.userAgent.toLowerCase();
         if (userAgent.includes('iphone') || userAgent.includes('ipad') || userAgent.includes('ipod')) {
             setIsIOS(true);
+        } else if (userAgent.includes('android')) {
+            setIsAndroid(true);
         }
 
         window.addEventListener('beforeinstallprompt', (e) => {
@@ -301,18 +304,28 @@ export default function Login() {
                 </form>
 
                 {(showInstallBtn && !isStandalone) && (
-                    <button
-                        onClick={handleInstallClick}
-                        className="mt-6 w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-green-500 text-white rounded-lg font-bold hover:bg-green-600 transition shadow-md border-b-4 border-green-700 animate-bounce"
-                    >
-                        + DESCARGAR APP EN CELULAR
-                    </button>
+                    <div className="mt-6 w-full flex flex-col gap-3">
+                        <button
+                            onClick={handleInstallClick}
+                            className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-green-500 text-white rounded-xl font-bold hover:bg-green-600 transition shadow-lg border-b-4 border-green-700 animate-bounce active:translate-y-1 active:border-b-0"
+                        >
+                            + DESCARGAR APP EN CELULAR
+                        </button>
+                        
+                        {isAndroid && (
+                            <div className="bg-yellow-50 border border-yellow-200 p-3 rounded-lg text-[10px] text-yellow-800 leading-tight">
+                                <p className="font-bold mb-1">⚠️ IMPORTANTE PARA XIAOMI / REDMI:</p>
+                                <p>Si al tocar el botón no aparece nada en tu pantalla de inicio, debes ir a:</p>
+                                <p className="mt-1 font-mono bg-yellow-100 p-1 rounded">Ajustes &gt; Aplicaciones &gt; Gestionar apps &gt; Chrome &gt; Otros permisos &gt; <span className="font-bold underline">Accesos directos en pantalla de inicio</span> &gt; Marcar "Siempre permitir".</p>
+                            </div>
+                        )}
+                    </div>
                 )}
 
                 {(isIOS && !isStandalone && !showInstallBtn) && (
-                    <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-800 flex flex-col items-center gap-2">
+                    <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-800 flex flex-col items-center gap-2 shadow-sm">
                         <p className="font-bold text-center">Para descargar en iPhone:</p>
-                        <p className="text-center">Toca el botón <span className="font-bold">Compartir</span> (cuadrado con flecha) y luego <span className="font-bold">'Añadir a pantalla de inicio'</span>.</p>
+                        <p className="text-center italic">Toca el botón <span className="font-bold">Compartir</span> (cuadrado con flecha) y luego <span className="font-bold">'Añadir a pantalla de inicio'</span>.</p>
                     </div>
                 )}
                 </div>

@@ -21,25 +21,29 @@ export default defineConfig(({ mode }) => {
       writeVersionPlugin(),
       VitePWA({
         registerType: 'autoUpdate',
-        includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg', env.VITE_CLIENT_LOGO_URL],
+        includeAssets: [env.VITE_CLIENT_LOGO_URL, 'logo.jpg'],
         manifest: {
           name: env.VITE_PWA_NAME || 'Control de Asistencia',
-          short_name: env.VITE_PWA_SHORT_NAME || 'Asistencia',
+          short_name: env.VITE_PWA_SHORT_NAME || 'FaceControl',
           description: 'Sistema de control de asistencia para empleados',
-          theme_color: '#ffffff',
+          theme_color: '#3C7DA6',
           background_color: '#ffffff',
           display: 'standalone',
+          orientation: 'portrait',
+          scope: '/',
           start_url: '/',
           icons: [
             {
               src: env.VITE_CLIENT_LOGO_URL || 'logo.jpg',
               sizes: '192x192',
-              type: env.VITE_CLIENT_LOGO_URL?.endsWith('.png') ? 'image/png' : 'image/jpeg'
+              type: env.VITE_CLIENT_LOGO_URL?.endsWith('.png') ? 'image/png' : 'image/jpeg',
+              purpose: 'any maskable'
             },
             {
               src: env.VITE_CLIENT_LOGO_URL || 'logo.jpg',
               sizes: '512x512',
-              type: env.VITE_CLIENT_LOGO_URL?.endsWith('.png') ? 'image/png' : 'image/jpeg'
+              type: env.VITE_CLIENT_LOGO_URL?.endsWith('.png') ? 'image/png' : 'image/jpeg',
+              purpose: 'any maskable'
             }
           ]
         },

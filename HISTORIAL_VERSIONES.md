@@ -2,8 +2,8 @@
 
 Esta guía documenta la evolución del sistema, detallando las características principales de cada versión desde la 1.0.0 hasta la 1.7.68 actual.
 
-## Versión 1.7.68 (Actual) ✅
-**Fecha:** 15/04/2026
+## Versión 1.7.175 (Actual) ✅
+**Fecha:** 02/05/2026
 **Estado:** Estable - Producción
 
 ### Seguridad Avanzada y Anti-Spoofing

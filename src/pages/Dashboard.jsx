@@ -45,6 +45,7 @@ export default function Dashboard() {
     const [faceVerified, setFaceVerified] = useState(false);
     const [faceError, setFaceError] = useState('');
     const [cameraReady, setCameraReady] = useState(false);
+    const [employeePhoto, setEmployeePhoto] = useState(null);
     // Liveness detection states
     const [blinkCount, setBlinkCount] = useState(0);
     const [autoCapturePending, setAutoCapturePending] = useState(false);
@@ -167,6 +168,11 @@ export default function Dashboard() {
                         console.log("🧬 Descriptor facial cargado desde cache local.");
                     }
 
+                    const cachedPhoto = localStorage.getItem(`employee_photo_${currentUser.email}`);
+                    if (cachedPhoto) {
+                        setEmployeePhoto(cachedPhoto);
+                    }
+
                     // Intentar actualizar desde Firestore si hay red
                     const q = query(collection(db, "employees"), where("email", "==", currentUser.email));
                     const snap = await getDocs(q);
@@ -177,6 +183,13 @@ export default function Dashboard() {
                             setSavedDescriptor(desc);
                             // Actualizar cache local
                             localStorage.setItem(`face_descriptor_${currentUser.email}`, JSON.stringify(Array.from(desc)));
+                        }
+                        if (data.fotoBase64_1) {
+                            setEmployeePhoto(data.fotoBase64_1);
+                            localStorage.setItem(`employee_photo_${currentUser.email}`, data.fotoBase64_1);
+                        } else if (data.photoURL) {
+                            setEmployeePhoto(data.photoURL);
+                            localStorage.setItem(`employee_photo_${currentUser.email}`, data.photoURL);
                         }
                     }
                 }
@@ -564,7 +577,7 @@ export default function Dashboard() {
         setCameraReady(false);
     };
 
-    const handleStopCamera = () => {
+    const handleStopCamera = useCallback(() => {
         stopCamera();
         setStep('idle');
         setMode(null);
@@ -574,7 +587,19 @@ export default function Dashboard() {
         setAutoCapturePending(false);
         blinkCountRef.current = 0;
         eyeClosedRef.current = false;
-    };
+    }, []);
+
+    // Liberar cámara al mandar la app a segundo plano (soluciona cámara ocupada)
+    useEffect(() => {
+        const handleVisibilityChange = () => {
+            if (document.hidden && step === 'camera') {
+                console.log("App en segundo plano, liberando dispositivo de cámara...");
+                handleStopCamera();
+            }
+        };
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+    }, [step, handleStopCamera]);
 
     const handleStart = async (selectedMode) => {
         // Fix #2: limpiar sesión anterior COMPLETAMENTE antes de abrir la nueva cámara
@@ -1239,7 +1264,14 @@ export default function Dashboard() {
 
                 {step === 'idle' && (
                     <div className="grid grid-cols-1 gap-6 w-full">
-                        <div className="bg-white p-6 rounded-xl shadow-2xl text-center">
+                        <div className="bg-white p-6 rounded-xl shadow-2xl text-center flex flex-col items-center">
+                            {employeePhoto && (
+                                <img 
+                                    src={employeePhoto} 
+                                    alt="Perfil Empleado" 
+                                    className="w-20 h-20 rounded-full object-cover border-4 border-white shadow-lg mb-3"
+                                />
+                            )}
                             <h2 className="text-lg font-medium text-gray-600 mb-2">Bienvenido, {currentUser.email}</h2>
                             {loadingState ? (
                                 <p className="text-sm text-blue-500 animate-pulse">Verificando estado de asistencia...</p>

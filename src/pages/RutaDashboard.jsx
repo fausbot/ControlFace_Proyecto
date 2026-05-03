@@ -19,6 +19,8 @@ export default function RutaDashboard() {
     const rutaCameraFacingRef = useRef('environment'); // ref para que startCamera siempre lea el valor actualizado
 
     const [allowedActions, setAllowedActions] = useState({ entry: true, exit: false });
+    const [hasActiveShift, setHasActiveShift] = useState(false); // DEFAULT FALSE para evitar turnos huerfanos (loophole)
+    const [isLoadingShift, setIsLoadingShift] = useState(true);
     const [step, setStep] = useState('idle'); // idle, camera, preview, processing, success
     const [mode, setMode] = useState(null); // 'Llegada Cliente', 'Salida Cliente'
     const [observacion, setObservacion] = useState('');
@@ -34,9 +36,10 @@ export default function RutaDashboard() {
     useEffect(() => {
         const checkVisitStatus = async () => {
             if (!currentUser) return;
+            setIsLoadingShift(true);
             
-            // 0. Consultar la configuración de cámara primero, antes de cualquier return
             try {
+                // 0. Consultar la configuración de cámara primero, antes de cualquier return
                 const snapCam = await getDoc(doc(db, 'settings', 'employeeFields'));
                 if (snapCam.exists()) {
                     const facing = snapCam.data().ruta_camera_facing || 'environment';
@@ -60,8 +63,99 @@ export default function RutaDashboard() {
             const attType = localStorage.getItem(`lastAttendanceType_${currentUser.email}`);
             if (attType === 'Salida') {
                 setAllowedActions({ entry: true, exit: false });
+                setHasActiveShift(false); // Salida general → no hay turno activo
                 localStorage.removeItem(`lastRutaType_${currentUser.email}`);
                 return; // Cortamos aquí porque la salida de turno manda (inicio nuevo)
+            }
+
+            // Helper de timeout para no bloquear la UI si hay internet lento/offline
+            const fetchWithTimeout = (promise, ms = 3000) => {
+                return Promise.race([
+                    promise,
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('Firebase Timeout')), ms))
+                ]);
+            };
+
+            // 2.5. Verificar en Firestore si el empleado tiene una Entrada activa en asistencia general
+            // REGLA CRÍTICA: No se puede registrar Llegada Cliente sin haber marcado Entrada primero.
+            try {
+                const qAtt = query(
+                    collection(db, 'attendance'),
+                    where('usuario', '==', currentUser.email)
+                );
+                const snapAtt = await fetchWithTimeout(getDocs(qAtt));
+
+                const getMillisAtt = (ts) => {
+                    if (!ts) return 0;
+                    if (typeof ts.toMillis === 'function') return ts.toMillis();
+                    if (ts instanceof Date) return ts.getTime();
+                    if (typeof ts === 'number') return ts;
+                    if (typeof ts === 'string') return new Date(ts).getTime();
+                    return 0;
+                };
+                const getMillisFromDT = (fecha, hora) => {
+                    if (!fecha || !hora) return 0;
+                    try {
+                        const [d, m, y] = fecha.split('/');
+                        const [h, min, s] = hora.split(':');
+                        return new Date(y, m - 1, d, h, min, s || 0).getTime();
+                    } catch { return 0; }
+                };
+
+                if (!snapAtt.empty) {
+                    const attRecords = snapAtt.docs.map(d => d.data());
+                    // Filtrar solo registros de asistencia general (Entrada/Salida), excluir visitas
+                    const generalRecords = attRecords.filter(r => {
+                        const t = (r.tipo || '').toLowerCase();
+                        return t === 'entrada' || t === 'salida';
+                    });
+
+                    if (generalRecords.length > 0) {
+                        generalRecords.sort((a, b) => {
+                            const tA = getMillisAtt(a.timestamp) || getMillisFromDT(a.fecha, a.hora) || 0;
+                            const tB = getMillisAtt(b.timestamp) || getMillisFromDT(b.fecha, b.hora) || 0;
+                            return tB - tA;
+                        });
+                        const lastGeneral = generalRecords[0];
+                        const lastGeneralMs = getMillisAtt(lastGeneral.timestamp) || getMillisFromDT(lastGeneral.fecha, lastGeneral.hora) || 0;
+                        const diffHoursGeneral = lastGeneralMs > 0 ? (Date.now() - lastGeneralMs) / (1000 * 60 * 60) : 999;
+
+                        const lastTipoGeneral = (lastGeneral.tipo || '').toLowerCase();
+                        // Turno activo = último registro es Entrada y no pasaron más de 20h
+                        const isActive = lastTipoGeneral === 'entrada' && diffHoursGeneral <= 20;
+                        setHasActiveShift(isActive);
+
+                        if (!isActive) {
+                            // No hay turno activo: resetear visitas también
+                            setAllowedActions({ entry: true, exit: false });
+                            localStorage.removeItem(`lastRutaType_${currentUser.email}`);
+                            return; // No continuar cargando estado de visitas
+                        }
+                    } else {
+                        // Sin registros generales → nunca marcó Entrada
+                        setHasActiveShift(false);
+                        setAllowedActions({ entry: true, exit: false });
+                        localStorage.removeItem(`lastRutaType_${currentUser.email}`);
+                        return;
+                    }
+                } else {
+                    // Sin ningún registro de attendance → primer uso, sin turno activo
+                    setHasActiveShift(false);
+                    setAllowedActions({ entry: true, exit: false });
+                    localStorage.removeItem(`lastRutaType_${currentUser.email}`);
+                    return;
+                }
+            } catch (attErr) {
+                // Sin conexión: usar localStorage como fallback
+                console.warn('⚠️ Sin conexión para verificar turno activo. Usando caché local:', attErr.message);
+                // Si el localStorage dice Entrada, asumir que hay turno activo (beneficio de la duda offline)
+                const fallbackActive = attType === 'Entrada';
+                setHasActiveShift(fallbackActive);
+                if (!fallbackActive) {
+                    setAllowedActions({ entry: true, exit: false });
+                    localStorage.removeItem(`lastRutaType_${currentUser.email}`);
+                    return;
+                }
             }
 
             // 3. Consultar la base de datos para recuperar la última visita real de la nube
@@ -70,7 +164,7 @@ export default function RutaDashboard() {
                     collection(db, "visitas"),
                     where("usuario", "==", currentUser.email)
                 );
-                const snap = await getDocs(q);
+                const snap = await fetchWithTimeout(getDocs(q));
                 if (!snap.empty) {
                     const records = snap.docs.map(d => d.data());
                     
@@ -122,6 +216,8 @@ export default function RutaDashboard() {
                 }
             } catch (err) {
                 console.warn("⚠️ Sin conexión a Firestore para visitas:", err);
+            } finally {
+                setIsLoadingShift(false);
             }
         };
         
@@ -166,7 +262,7 @@ export default function RutaDashboard() {
         }
     }, [step]);
 
-    const stopCamera = () => {
+    const stopCamera = useCallback(() => {
         // Delegar liberación al cameraManager (async, no bloquea)
         releaseCamera(videoRef, streamRef);
         if (videoRef.current) videoRef.current.srcObject = null;
@@ -174,14 +270,41 @@ export default function RutaDashboard() {
             streamRef.current.getTracks().forEach(t => { try { t.stop(); } catch(e){} });
             streamRef.current = null;
         }
-    };
+    }, []);
+
+    // Liberar cámara al mandar la app a segundo plano (soluciona cámara ocupada)
+    useEffect(() => {
+        const handleVisibilityChange = () => {
+            if (document.hidden && step === 'camera') {
+                console.log("App en segundo plano, liberando dispositivo de cámara...");
+                stopCamera();
+                setStep('idle');
+                setMode(null);
+            }
+        };
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+    }, [step, stopCamera]);
 
     const handleStartAction = async (selectedMode) => {
+        if (!hasActiveShift) {
+            alert('Acción denegada: No se ha detectado un turno de entrada activo.');
+            return;
+        }
         setMode(selectedMode);
         setPendingMode(selectedMode);
         setObservacion('');
         await startCamera(selectedMode);
     };
+
+    // Auto-resume action after a hard reload (e.g. from "Reintentar" on camera error)
+    useEffect(() => {
+        const pendingAction = sessionStorage.getItem('pendingRutaMode');
+        if (pendingAction && hasActiveShift) {
+            sessionStorage.removeItem('pendingRutaMode');
+            setTimeout(() => handleStartAction(pendingAction), 500);
+        }
+    }, [hasActiveShift]);
 
     const capture = async () => {
         try {
@@ -514,11 +637,36 @@ export default function RutaDashboard() {
                 {step === 'idle' && (
                     <div className="w-full flex flex-col gap-6">
 
+                        {/* Aviso: Sin turno activo */}
+                        {!hasActiveShift && !isLoadingShift && (
+                            <div className="w-full bg-amber-50 border border-amber-300 rounded-2xl p-5 shadow-lg flex flex-col gap-2">
+                                <div className="flex items-center gap-2">
+                                    <span className="text-2xl">⚠️</span>
+                                    <h3 className="text-amber-800 font-bold text-base">Sin turno activo</h3>
+                                </div>
+                                <p className="text-amber-700 text-sm leading-snug">
+                                    Debes registrar tu <strong>Entrada general</strong> desde la pantalla principal antes de poder marcar llegadas a clientes.
+                                </p>
+                                <button
+                                    onClick={() => navigate('/dashboard')}
+                                    className="mt-1 w-full py-3 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl transition active:scale-95 text-sm"
+                                >
+                                    Ir a registrar Entrada →
+                                </button>
+                            </div>
+                        )}
+
                         {/* Título */}
                         <div className="bg-white rounded-2xl p-6 text-center shadow-lg border border-white/60">
                             <h2 className="text-gray-800 font-bold text-lg mb-2">Registro de Clientes</h2>
                             <p className="text-gray-500 text-sm">
-                                {allowedActions.entry ? 'Usa esta opción al llegar a las instalaciones del cliente.' : 'Registra tu salida al concluir la visita.'}
+                                {isLoadingShift
+                                    ? 'Verificando estado del turno...'
+                                    : !hasActiveShift
+                                        ? 'Para usar este módulo primero debes registrar tu entrada general.'
+                                        : allowedActions.entry
+                                            ? 'Usa esta opción al llegar a las instalaciones del cliente.'
+                                            : 'Registra tu salida al concluir la visita.'}
                             </p>
                         </div>
 
@@ -540,8 +688,18 @@ export default function RutaDashboard() {
                                     {cameraError.canRetry && (
                                         <button
                                             onClick={() => {
-                                                setCameraError(null);
-                                                if (pendingMode) handleStartAction(pendingMode);
+                                                if (cameraError?.type === 'busy') {
+                                                    if (pendingMode) sessionStorage.setItem('pendingRutaMode', pendingMode);
+                                                    if ('serviceWorker' in navigator) {
+                                                        navigator.serviceWorker.getRegistrations().then(registrations => {
+                                                            for (let registration of registrations) registration.unregister();
+                                                        });
+                                                    }
+                                                    window.location.reload(true);
+                                                } else {
+                                                    setCameraError(null);
+                                                    if (pendingMode) handleStartAction(pendingMode);
+                                                }
                                             }}
                                             className="flex-1 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition active:scale-95"
                                         >
@@ -558,34 +716,41 @@ export default function RutaDashboard() {
                             </div>
                         )}
 
-                        {/* Botones de acción — deshabilitados mientras carga */}
-                        <div className={`grid grid-cols-2 gap-4 ${cameraLoading ? 'opacity-40 pointer-events-none' : ''}`}>
-                            <button
-                                disabled={!allowedActions.entry || cameraLoading}
-                                onClick={() => handleStartAction('Llegada Cliente')}
-                                className={`flex flex-col items-center justify-center gap-3 p-6 rounded-2xl shadow-xl transition-all ${
-                                    allowedActions.entry && !cameraLoading
-                                        ? 'bg-gradient-to-br from-blue-500 to-indigo-600 hover:scale-105 hover:shadow-2xl border border-blue-400 cursor-pointer'
-                                        : 'bg-white/5 border border-white/10 opacity-50 cursor-not-allowed'
-                                }`}
-                            >
-                                <MapPin size={32} className={allowedActions.entry ? "text-white" : "text-gray-400"} />
-                                <span className={`font-bold ${allowedActions.entry ? "text-white" : "text-gray-400"}`}>Llegada<br/>Cliente</span>
-                            </button>
+                        {/* Botones de acción — deshabilitados mientras carga o sin turno activo */}
+                        {isLoadingShift ? (
+                            <div className="w-full bg-white/20 backdrop-blur-md rounded-2xl p-6 flex flex-col items-center gap-3 border border-white/30">
+                                <div className="animate-spin rounded-full h-8 w-8 border-t-4 border-b-4 border-white"></div>
+                                <p className="text-white font-semibold text-sm">Verificando turno...</p>
+                            </div>
+                        ) : (
+                            <div className={`grid grid-cols-2 gap-4 ${cameraLoading ? 'opacity-40 pointer-events-none' : ''}`}>
+                                <button
+                                    disabled={!allowedActions.entry || cameraLoading || !hasActiveShift}
+                                    onClick={() => handleStartAction('Llegada Cliente')}
+                                    className={`flex flex-col items-center justify-center gap-3 p-6 rounded-2xl shadow-xl transition-all ${
+                                        allowedActions.entry && !cameraLoading && hasActiveShift
+                                            ? 'bg-gradient-to-br from-blue-500 to-indigo-600 hover:scale-105 hover:shadow-2xl border border-blue-400 cursor-pointer'
+                                            : 'bg-white/5 border border-white/10 opacity-50 cursor-not-allowed'
+                                    }`}
+                                >
+                                    <MapPin size={32} className={allowedActions.entry && hasActiveShift ? "text-white" : "text-gray-400"} />
+                                    <span className={`font-bold ${allowedActions.entry && hasActiveShift ? "text-white" : "text-gray-400"}`}>Llegada<br/>Cliente</span>
+                                </button>
 
-                            <button
-                                disabled={!allowedActions.exit || cameraLoading}
-                                onClick={() => handleStartAction('Salida Cliente')}
-                                className={`flex flex-col items-center justify-center gap-3 p-6 rounded-2xl shadow-xl transition-all ${
-                                    allowedActions.exit && !cameraLoading
-                                        ? 'bg-gradient-to-br from-orange-500 to-red-600 hover:scale-105 hover:shadow-2xl border border-orange-400 cursor-pointer'
-                                        : 'bg-white/5 border border-white/10 opacity-50 cursor-not-allowed'
-                                }`}
-                            >
-                                <MapPin size={32} className={allowedActions.exit ? "text-white" : "text-gray-400"} />
-                                <span className={`font-bold ${allowedActions.exit ? "text-white" : "text-gray-400"}`}>Salida<br/>Cliente</span>
-                            </button>
-                        </div>
+                                <button
+                                    disabled={!allowedActions.exit || cameraLoading || !hasActiveShift}
+                                    onClick={() => handleStartAction('Salida Cliente')}
+                                    className={`flex flex-col items-center justify-center gap-3 p-6 rounded-2xl shadow-xl transition-all ${
+                                        allowedActions.exit && !cameraLoading && hasActiveShift
+                                            ? 'bg-gradient-to-br from-orange-500 to-red-600 hover:scale-105 hover:shadow-2xl border border-orange-400 cursor-pointer'
+                                            : 'bg-white/5 border border-white/10 opacity-50 cursor-not-allowed'
+                                    }`}
+                                >
+                                    <MapPin size={32} className={allowedActions.exit && hasActiveShift ? "text-white" : "text-gray-400"} />
+                                    <span className={`font-bold ${allowedActions.exit && hasActiveShift ? "text-white" : "text-gray-400"}`}>Salida<br/>Cliente</span>
+                                </button>
+                            </div>
+                        )}
                     </div>
                 )}
 
