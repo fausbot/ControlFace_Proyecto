@@ -14,7 +14,7 @@ import ActionButtons from '../components/dashboard/ActionButtons';
 import CameraView from '../components/dashboard/CameraView';
 import PreviewView from '../components/dashboard/PreviewView';
 import SuccessView from '../components/dashboard/SuccessView';
-import { saveOfflineRecord, getPendingRecords } from '../services/offlineStorage';
+import { saveOfflineRecord, getPendingRecords, updateOfflineRecordGPS } from '../services/offlineStorage';
 import { acquireSelfieCamera, acquireRearCamera, releaseCamera, getCameraErrorInfo } from '../utils/cameraManager';
 
 export default function Dashboard() {
@@ -27,6 +27,8 @@ export default function Dashboard() {
     const livenessIntervalRef = useRef(null);
     const modeRef = useRef(null);
     const isLivenessRunningRef = useRef(false);
+    const latestGpsRef = useRef({ latitude: 0, longitude: 0, timestamp: 0 });
+    const watchPositionIdRef = useRef(null);
 
     const [mode, setMode] = useState(null); // 'entry', 'exit', 'incident'
     const [cameraLoading, setCameraLoading] = useState(false);
@@ -46,6 +48,7 @@ export default function Dashboard() {
     const [faceError, setFaceError] = useState('');
     const [cameraReady, setCameraReady] = useState(false);
     const [employeePhoto, setEmployeePhoto] = useState(null);
+    const [gpsReady, setGpsReady] = useState(false);
     // Liveness detection states
     const [blinkCount, setBlinkCount] = useState(0);
     const [autoCapturePending, setAutoCapturePending] = useState(false);
@@ -61,8 +64,12 @@ export default function Dashboard() {
         storage_saveIncidentes: true,
         security_liveness: true,
         security_faceRecognition: true,
-        ruta_active: false
+        ruta_active: false,
+        calc_lunch: false,
+        calc_lunchMode: 'general',
+        calc_lunchMins: 60
     });
+    const [applyLunch, setApplyLunch] = useState(false);
     const [isLicenseValid, setIsLicenseValid] = useState(true);
     const [buttonLabels, setButtonLabels] = useState({
         entry: "Registrar Entrada",
@@ -70,6 +77,9 @@ export default function Dashboard() {
         incident: "Reportar Novedad"
     });
     const [faceThreshold, setFaceThreshold] = useState(0.63);
+    const vipList = import.meta.env.VITE_VIP_EMAILS || "";
+    const isVIP = currentUser && vipList.split(',').map(e => e.trim().toLowerCase()).includes(currentUser.email.toLowerCase());
+
 
     useEffect(() => {
         // Detectar si ya está instalada
@@ -132,7 +142,10 @@ export default function Dashboard() {
                         storage_saveIncidentes: d.storage_saveIncidentes !== false,
                         security_liveness: d.security_liveness !== false,
                         security_faceRecognition: d.security_faceRecognition !== false,
-                        ruta_active: d.ruta_active === true
+                        ruta_active: d.ruta_active === true,
+                        calc_lunch: d.calc_lunch === true,
+                        calc_lunchMode: d.calc_lunchMode || 'general',
+                        calc_lunchMins: d.calc_lunchMins || 60
                     });
                     setButtonLabels({
                         entry: d.ui_labelEntry || "Registrar Entrada",
@@ -151,12 +164,11 @@ export default function Dashboard() {
                 }
 
                 // 2. Cargar Modelos Faciales (DESDE LOCAL PARA OFFLINE)
+                // Cargamos secuencialmente para evitar sobrecargar procesadores de gama baja
                 const MODEL_URL = '/models/';
-                await Promise.all([
-                    faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
-                    faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
-                    faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL)
-                ]);
+                await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+                await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
+                await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
                 setModelsLoaded(true);
 
                 // 3. Cargar datos del empleado actual
@@ -558,6 +570,40 @@ export default function Dashboard() {
         }
     }, [step, cameraReady, modelsLoaded, storageSettings.security_liveness]);
 
+    // Efecto para GPS Warm-up
+    useEffect(() => {
+        if (step === 'camera') {
+            // Iniciar GPS warmup
+            if ('geolocation' in navigator) {
+                console.log("📍 [GPS] Iniciando calentamiento temprano (warm-up)");
+                watchPositionIdRef.current = navigator.geolocation.watchPosition(
+                    (position) => {
+                        const { latitude, longitude } = position.coords;
+                        latestGpsRef.current = { latitude, longitude, timestamp: position.timestamp };
+                        setGpsReady(true);
+                    },
+                    (error) => {
+                        console.warn("📍 [GPS] Error en warm-up:", error);
+                    },
+                    { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+                );
+            }
+        } else {
+            // Detener GPS warmup si salimos de la cámara
+            if (watchPositionIdRef.current !== null) {
+                navigator.geolocation.clearWatch(watchPositionIdRef.current);
+                watchPositionIdRef.current = null;
+                console.log("📍 [GPS] Warm-up detenido");
+            }
+        }
+        return () => {
+            if (watchPositionIdRef.current !== null) {
+                navigator.geolocation.clearWatch(watchPositionIdRef.current);
+                watchPositionIdRef.current = null;
+            }
+        };
+    }, [step]);
+
     const stopCamera = () => {
         // Detener el loop de liveness
         isLivenessRunningRef.current = false;
@@ -613,12 +659,14 @@ export default function Dashboard() {
         setIncidentDescription('');
         setFaceVerified(false);
         setFaceError('');
+        setApplyLunch(false);
         // Reset liveness para nueva sesión
         isLivenessRunningRef.current = false;
         setBlinkCount(0);
         setAutoCapturePending(false);
         blinkCountRef.current = 0;
         eyeClosedRef.current = false;
+        setGpsReady(false);
 
         // Cámara trasera para incidentes, frontal para asistencia
         const facingMode = selectedMode === 'incident' ? 'environment' : 'user';
@@ -788,27 +836,39 @@ export default function Dashboard() {
                 : Promise.resolve(true);
 
             const locationPromise = (async () => {
+                // Si el warm-up ya consiguió coordenadas válidas recientes (menos de 5 min), usarlas de inmediato
+                const now = Date.now();
+                const warmGps = latestGpsRef.current;
+                if (warmGps && warmGps.latitude !== 0 && (now - warmGps.timestamp < 300000)) {
+                    console.log("📍 [GPS] Usando coordenadas del warm-up instantáneamente.");
+                    return { coords: { latitude: warmGps.latitude, longitude: warmGps.longitude, altitude: null, accuracy: null, speed: null, heading: null }, timestamp: warmGps.timestamp };
+                }
+
+                // Helper function to force timeout on navigator APIs that ignore the timeout option
+                const getPositionWithTimeout = (options, timeoutMs) => {
+                    return Promise.race([
+                        new Promise((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, reject, options)),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error("Manual Timeout")), timeoutMs))
+                    ]);
+                };
+
                 // Intento 1: Alta precisión (8s)
                 try {
-                    return await new Promise((resolve, reject) => {
-                        navigator.geolocation.getCurrentPosition(resolve, reject, {
-                            enableHighAccuracy: true,
-                            timeout: 8000,
-                            maximumAge: 0
-                        });
-                    });
+                    return await getPositionWithTimeout({
+                        enableHighAccuracy: true,
+                        timeout: 8000,
+                        maximumAge: 0
+                    }, 8000);
                 } catch (gpsError) {
                     console.warn("Alta precisión GPS falló, modo rápido...", gpsError);
                 }
                 // Intento 2: Baja precisión, acepta cache de hasta 5 minutos (5s)
                 try {
-                    return await new Promise((resolve, reject) => {
-                        navigator.geolocation.getCurrentPosition(resolve, reject, {
-                            enableHighAccuracy: false,
-                            timeout: 5000,
-                            maximumAge: 300000 // Acepta posición de hasta 5 min de antigüedad
-                        });
-                    });
+                    return await getPositionWithTimeout({
+                        enableHighAccuracy: false,
+                        timeout: 5000,
+                        maximumAge: 300000 // Acepta posición de hasta 5 min de antigüedad
+                    }, 5000);
                 } catch (gpsError2) {
                     console.warn("GPS en modo rápido también falló. Continuando sin GPS.", gpsError2);
                 }
@@ -827,24 +887,21 @@ export default function Dashboard() {
 
             // 1. Validar Rostro
             const faceRecognitionEnabled = storageSettings.security_faceRecognition !== false;
-            if (savedDescriptor && faceRecognitionEnabled) {
+            
+            if (isVIP) {
+                // SILENT BYPASS PARA VIP
+                setFaceVerified(true);
+                setFaceError('');
+            } else if (savedDescriptor && faceRecognitionEnabled) {
                 // Reconocimiento facial activo: verificar que el rostro coincida
                 if (!detection) {
                     setFaceError('No se pudo detectar tu rostro. Reintenta.');
                     setFaceVerified(false);
                 } else {
-                    // --- INICIO SILENT BYPASS ---
-                    const vipList = import.meta.env.VITE_VIP_EMAILS || "";
-                    const isVIP = vipList.toLowerCase().includes(currentUser.email.toLowerCase());
+                    // Leemos el offset desde el .env (ej: 5 -> 0.05) para ajustar la permisividad.
+                    const thresholdOffset = parseFloat(import.meta.env.VITE_FACE_THRESHOLD_OFFSET || "0") / 100;
+                    const effectiveThreshold = faceThreshold + thresholdOffset;
                     
-                    // Si el usuario es VIP, aumentamos la tolerancia al 99%
-                    // Esto garantiza que cualquier rostro devuelto apruebe matemáticamente, 
-                    // cumpliendo el requisito de exigir un rostro real frente a la cámara (Liveness y Detección).
-                    const effectiveThreshold = isVIP ? 0.99 : faceThreshold;
-                    
-                    if (isVIP) console.log("🌟 [Auth] Usuario exceptuado en VIP. Tolerancia relajada.");
-                    // --- FIN SILENT BYPASS ---
-
                     const distance = faceapi.euclideanDistance(detection.descriptor, savedDescriptor);
                     if (distance < effectiveThreshold) {
                         setFaceVerified(true);
@@ -866,6 +923,7 @@ export default function Dashboard() {
                     setFaceError('No se pudo detectar tu rostro. Reintenta.');
                 }
             }
+
 
             const { latitude, longitude, altitude, accuracy, speed, heading } = position.coords;
             
@@ -897,13 +955,14 @@ export default function Dashboard() {
             if (!isAndroid) {
                 // MODO PERMISIVO (iOS, Windows, Mac, Computadores de Escritorio).
                 // Carecen de hardware GPS puro (usan IP o red), es normal que manden "null" o enteros.
-                if (altitude === 0) gpsAnomalies.push("ERR-01"); 
+                // Desactivado ERR-01: La altitud de 0 es común y legítima en navegadores de escritorio e interiores.
+                // if (altitude === 0) gpsAnomalies.push("ERR-01"); 
                 // ERR-02 se vuelve informativo o de muy baja probabilidad
                 if (accuracy > 0 && accuracy <= 1) gpsAnomalies.push("ERR-02"); 
             } else {
                 // MODO ANDROID: RELAJADO para evitar falsos positivos
-                // Solo castigamos la ausencia TOTAL de altitud si es muy sospechoso (0 exacto)
-                if (altitude === 0) gpsAnomalies.push("ERR-01");
+                // Desactivado ERR-01: Evitar falsos positivos en móviles reales donde el GPS en navegador no reporta altitud (da 0 o null)
+                // if (altitude === 0) gpsAnomalies.push("ERR-01");
                 
                 // ERR-02: Ya no castigamos precisión entera por sí sola, 
                 // solo si es absurdamente perfecta y baja (ej. exactamente 1.0 o 0.0)
@@ -1084,11 +1143,16 @@ export default function Dashboard() {
         setStatusMessage('Guardando registro...');
 
         try {
-            const md = capturedData.metadata;
+            const md = { ...capturedData.metadata };
             const safeEmail = md.usuario.replace(/[@.]/g, '-');
             const safeFecha = (md.fecha || '').replace(/\//g, '-');
             const safeHora = (md.hora || '').replace(/:/g, '-').replace(/\s/g, '');
             const deterministicDocId = `${safeEmail}_${safeFecha}_${safeHora}`;
+
+            // 6. Almuerzo individual
+            if (mode === 'exit') {
+                md.applyLunch = applyLunch;
+            }
 
             if (mode === 'incident') {
                 // Guardar en colección separada con descripción
@@ -1107,6 +1171,47 @@ export default function Dashboard() {
             setStep('preview');
             return false;
         }
+    };
+
+    const startBackgroundGPSRecovery = (recordId) => {
+        if (!('geolocation' in navigator)) return;
+        console.log(`📍 [GPS Latencia] Iniciando recuperación en segundo plano para registro ${recordId}...`);
+        
+        const startTime = Date.now();
+        const MAX_TIME = 3 * 60 * 1000; // 3 minutos
+        
+        const watchId = navigator.geolocation.watchPosition(
+            async (position) => {
+                // Validación estricta: Si el navegador fue suspendido y despertó media hora después, NO actualizar
+                if (Date.now() - startTime > MAX_TIME) {
+                    console.log("📍 [GPS Latencia] Tiempo agotado (detectado tras suspensión). Se descarta señal tardía.");
+                    navigator.geolocation.clearWatch(watchId);
+                    return;
+                }
+
+                const { latitude, longitude, accuracy } = position.coords;
+                // Si la precisión es decente (ej. < 150m) o si ya pasaron 2 mins y agarramos lo que sea
+                if (accuracy < 150 || (Date.now() - startTime > 120000)) {
+                    console.log(`📍 [GPS Latencia] ¡Señal recuperada! Actualizando registro ${recordId}`);
+                    await updateOfflineRecordGPS(recordId, latitude, longitude);
+                    navigator.geolocation.clearWatch(watchId);
+                }
+            },
+            (error) => {
+                console.warn("📍 [GPS Latencia] Buscando señal...", error.message);
+                if (Date.now() - startTime > MAX_TIME) {
+                    console.log("📍 [GPS Latencia] Tiempo agotado. Se detiene la búsqueda.");
+                    navigator.geolocation.clearWatch(watchId);
+                }
+            },
+            { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+        );
+
+        // Seguridad: forzar detención a los 3 minutos exactos
+        setTimeout(() => {
+            navigator.geolocation.clearWatch(watchId);
+            console.log(`📍 [GPS Latencia] Proceso detenido por timeout para registro ${recordId}`);
+        }, MAX_TIME);
     };
 
     const handlePreviewSave = async () => {
@@ -1170,7 +1275,7 @@ export default function Dashboard() {
                     // El SyncManager aplicará la marca de agua correcta con la dirección real
                     console.warn('⚠️ Foto no subida (red débil). Guardando en cola offline:', err.message);
                     try {
-                        await saveOfflineRecord({
+                        const recordId = await saveOfflineRecord({
                             image: capturedData.rawImage || capturedData.image, // ← Preferir imagen SIN marca
                             metadata: {
                                 ...capturedData.metadata,
@@ -1183,6 +1288,9 @@ export default function Dashboard() {
                             longitude: capturedData.metadata.longitud
                         });
                         console.log('📦 Foto en cola offline. Se subirá cuando mejore la señal.');
+                        if (capturedData.metadata.latitud === 0 && capturedData.metadata.longitud === 0) {
+                            startBackgroundGPSRecovery(recordId);
+                        }
                     } catch (offlineErr) {
                         console.error('❌ No se pudo guardar la foto offline:', offlineErr);
                     }
@@ -1191,7 +1299,7 @@ export default function Dashboard() {
         } catch (err) {
             // ─── CAPA 3: Firestore falló — guardar TODO offline ─────────────────────
             console.warn('⚠️ Sin conexión. Guardando registro completo offline:', err.message);
-            await saveOfflineRecord({
+            const recordId = await saveOfflineRecord({
                 // Guardar la imagen SIN marca de agua — el SyncManager aplicará la correcta
                 // con la dirección real (via GPS guardado) y la hora original de captura
                 image: capturedData.rawImage || capturedData.image,
@@ -1204,6 +1312,9 @@ export default function Dashboard() {
                 latitude: capturedData.metadata.latitud,
                 longitude: capturedData.metadata.longitud
             });
+            if (capturedData.metadata.latitud === 0 && capturedData.metadata.longitud === 0) {
+                startBackgroundGPSRecovery(recordId);
+            }
         }
 
         setStep('success');
@@ -1349,6 +1460,7 @@ export default function Dashboard() {
                         capture={capture}
                         step={step}
                         captureFlash={captureFlash}
+                        gpsReady={gpsReady}
                     />
                 )}
 
@@ -1370,6 +1482,11 @@ export default function Dashboard() {
                         setIncidentDescription={setIncidentDescription}
                         handleSave={handlePreviewSave}
                         handleCancel={handleStopCamera}
+                        calc_lunch={storageSettings.calc_lunch === true}
+                        calc_lunchMode={storageSettings.calc_lunchMode}
+                        calc_lunchMins={storageSettings.calc_lunchMins}
+                        applyLunch={applyLunch}
+                        setApplyLunch={setApplyLunch}
                     />
                 )}
 

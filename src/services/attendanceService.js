@@ -27,14 +27,38 @@ const getMillis = (ts) => {
 };
 
 // ─────────────────────────────────────────────
-// Helper para convertir fecha/hora a milisegundos
+// Helper para convertir fecha/hora a milisegundos sin riesgo de NaN
 // ─────────────────────────────────────────────
 export const getMillisFromDateTime = (fecha, hora) => {
     if (!fecha || !hora) return 0;
     try {
-        const [d, m, y] = fecha.split('/');
-        const [h, min, s] = hora.split(':');
-        return new Date(y, m - 1, d, h, min, s).getTime();
+        // 1. Detectar separador de fecha (/ o -)
+        const separator = fecha.includes('/') ? '/' : '-';
+        const parts = fecha.split(separator);
+        if (parts.length !== 3) return 0;
+
+        let d, m, y;
+        if (parts[0].length === 4) {
+            // Formato YYYY-MM-DD
+            [y, m, d] = parts;
+        } else {
+            // Formato DD/MM/YYYY o DD-MM-YYYY
+            [d, m, y] = parts;
+        }
+
+        // 2. Limpiar la hora de caracteres no numéricos (como a. m., p. m., espacios)
+        const cleanHora = hora.replace(/[^0-9:]/g, '');
+        const timeParts = cleanHora.split(':');
+        if (timeParts.length < 2) return 0;
+
+        const h = timeParts[0];
+        const min = timeParts[1];
+        const s = timeParts[2] || '00';
+
+        const dateObj = new Date(parseInt(y), parseInt(m) - 1, parseInt(d), parseInt(h), parseInt(min), parseInt(s));
+        const millis = dateObj.getTime();
+
+        return isNaN(millis) ? 0 : millis;
     } catch {
         return 0;
     }
@@ -53,15 +77,14 @@ export const subscribeToAttendanceLogs = (callback) => {
         // Ordenamos por fecha/hora DESC (más reciente primero)
         allData.sort((a, b) => {
             // 1. Usar fecha + hora como fuente principal de verdad
-            const timeA = getMillisFromDateTime(a.fecha, a.hora);
-            const timeB = getMillisFromDateTime(b.fecha, b.hora);
+            let timeA = getMillisFromDateTime(a.fecha, a.hora);
+            let timeB = getMillisFromDateTime(b.fecha, b.hora);
+
+            // Fallback inmediato al timestamp nativo de Firestore si falla el parseo
+            if (timeA === 0) timeA = getMillis(a.timestamp);
+            if (timeB === 0) timeB = getMillis(b.timestamp);
+
             if (timeA !== timeB) return timeB - timeA;
-
-            // 2. Fallback: usar timestamp de Firestore
-            const tsA = getMillis(a.timestamp);
-            const tsB = getMillis(b.timestamp);
-            if (tsA !== tsB) return tsB - tsA;
-
             return 0;
         });
 
@@ -96,16 +119,15 @@ export const getAllAttendanceLogs = async () => {
 
     // Ordenar por fecha/hora DESC (más reciente primero)
     allData.sort((a, b) => {
-        // 1. Usar fecha + hora como fuente principal
-        const timeA = getMillisFromDateTime(a.fecha, a.hora);
-        const timeB = getMillisFromDateTime(b.fecha, b.hora);
+        // 1. Usar fecha + hora como fuente principal de verdad
+        let timeA = getMillisFromDateTime(a.fecha, a.hora);
+        let timeB = getMillisFromDateTime(b.fecha, b.hora);
+
+        // Fallback inmediato al timestamp nativo de Firestore si falla el parseo
+        if (timeA === 0) timeA = getMillis(a.timestamp);
+        if (timeB === 0) timeB = getMillis(b.timestamp);
+
         if (timeA !== timeB) return timeB - timeA;
-
-        // 2. Fallback: usar timestamp de Firestore
-        const tsA = getMillis(a.timestamp);
-        const tsB = getMillis(b.timestamp);
-        if (tsA !== tsB) return tsB - tsA;
-
         return 0;
     });
 
@@ -172,12 +194,18 @@ export const bulkDeleteByDateRange = async (startDate, endDate) => {
 // (útil para el export CSV sin ir a Firestore otra vez)
 // ─────────────────────────────────────────────
 export const filterLogsByDateRange = (logs, startDate, endDate) => {
+    const parseISOToLocal = (isoStr) => {
+        if (!isoStr) return null;
+        const [y, m, d] = isoStr.split('-').map(Number);
+        return new Date(y, m - 1, d);
+    };
+
+    const start = startDate ? parseISOToLocal(startDate) : null;
+    const end = endDate ? parseISOToLocal(endDate) : null;
+
     return logs.filter(log => {
         const logDate = parseSpanishDate(log.fecha);
         if (!logDate) return false;
-
-        const start = startDate ? new Date(startDate) : null;
-        const end = endDate ? new Date(endDate) : null;
 
         if (start && logDate < start) return false;
         if (end && logDate > end) return false;
