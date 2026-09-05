@@ -1,8 +1,8 @@
 ---
-description: Build and deploy the application to Firebase Hosting
+description: Build and deploy the application to Firebase Hosting (USO EXCLUSIVO DEL USUARIO)
 ---
 
-Este workflow automatiza la construcción y el despliegue del proyecto.
+> **IMPORTANTE**: Este workflow y los comandos de despliegue (`firebase deploy`) son ejecutados **únicamente por el usuario** de forma manual. El asistente no debe ejecutarlos de forma autónoma.
 
 1. Construir la aplicación
 // turbo
