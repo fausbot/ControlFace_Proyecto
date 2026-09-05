@@ -1,32 +1,94 @@
-# Logs
-logs
+# Logs & depuración
+logs/
 *.log
 npm-debug.log*
 yarn-debug.log*
-yarn-error.log*
 pnpm-debug.log*
-lerna-debug.log*
+debug.txt
+deploy.txt
+firebaselog.txt
+deploy_error.log
+estructura.txt
+lint*.txt
+lint*.json
+reporte_*.txt
+alestrofecor9@.txt
 
-node_modules
-dist
-dist-ssr
+# Dependencias y compilados
+node_modules/
+dist/
+dist-ssr/
+
+# Variables de entorno y credenciales (Seguridad estricta)
 .env
 .env*
 .env.backup
+.env.local
+*.local
+.firebase/
 
-# Editor directories and files
+# Archivos multimedia pesados (Videos y audios)
+videos tutoriales/
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.wmv
+*.flv
+*.webm
+*.mp3
+*.wav
+*.m4a
+
+# Python & Bases de datos locales
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.db
+*.sqlite
+*.sqlite3
+deploy-manager/**/__pycache__/
+deploy-manager/*.db
+
+# Archivos temporales de Office (locks ~$) y documentos pesados
+~$*
+docx_temp/
+*.docx
+*.pptx
+*.pdf
+
+# Editor & Sistema Operativo
 .vscode/*
 !.vscode/extensions.json
-.idea
+.idea/
 .DS_Store
+Thumbs.db
+Desktop.ini
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw?
 
+# Herramientas de depuración, scratch y temporales
+scratch/
+scratch_clean.js
+tmp_git_commit.py
+.agents/
+.antigravitycli/
+window_dump*.xml
+
+# Scripts utilitarios personales y documentos comerciales temporales
+analizador_chat.py
+borrador_whatsapp.py
+detector_whatsapp.py
+generar_docx.py
+ejecutar_fase_*.bat
+SINCRONIZAR_*.bat
+PROPUESTA_COMERCIAL_*
+qr propiedad horizontal.png
+
 # Google Drive Sync / Temporales
 .tmp.driveupload/
 .tmp.drivedownload/
-Desktop.ini
-videos tutoriales/
