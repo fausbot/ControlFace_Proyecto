@@ -855,15 +855,15 @@ export default function TableroGerencial() {
                                                 </td>
 
                                                 {/* Horas Netas */}
-                                                <td className="p-4 text-right font-black text-gray-900 text-base">
+                                                <td className="p-4 text-right font-black text-gray-900 text-base whitespace-nowrap">
                                                     {emp.horasNetas} h
                                                 </td>
 
                                                 {/* Traslado */}
                                                 {colTraslados && (
-                                                    <td className="p-4 text-right">
+                                                    <td className="p-4 text-right whitespace-nowrap">
                                                         {emp.horasTraslado > 0 ? (
-                                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-indigo-50 text-indigo-700 font-bold text-xs">
+                                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-indigo-50 text-indigo-700 font-bold text-xs whitespace-nowrap">
                                                                 <Truck size={12} /> {emp.horasTraslado} h
                                                             </span>
                                                         ) : (
@@ -874,9 +874,9 @@ export default function TableroGerencial() {
 
                                                 {/* Visitas a Clientes */}
                                                 {colVisitas && (
-                                                    <td className="p-4 text-right">
+                                                    <td className="p-4 text-right whitespace-nowrap">
                                                         {emp.totalVisitas > 0 ? (
-                                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-emerald-50 text-emerald-700 font-bold text-xs">
+                                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-emerald-50 text-emerald-700 font-bold text-xs whitespace-nowrap">
                                                                 <Building2 size={12} /> {emp.totalVisitas} ({emp.horasServicio}h)
                                                             </span>
                                                         ) : (
@@ -888,34 +888,34 @@ export default function TableroGerencial() {
                                                 {/* Recargos */}
                                                 {colRecargos && (
                                                     <>
-                                                        <td className="p-4 text-right font-mono text-xs text-gray-600">{emp.diurnas}</td>
-                                                        <td className="p-4 text-right font-mono text-xs text-gray-600">{emp.nocturnas}</td>
-                                                        <td className="p-4 text-right font-mono text-xs text-gray-600">{emp.domDiurnas}</td>
-                                                        <td className="p-4 text-right font-mono text-xs text-gray-600">{emp.domNocturnas}</td>
+                                                        <td className="p-4 text-right font-mono text-xs text-gray-600 whitespace-nowrap">{emp.diurnas}</td>
+                                                        <td className="p-4 text-right font-mono text-xs text-gray-600 whitespace-nowrap">{emp.nocturnas}</td>
+                                                        <td className="p-4 text-right font-mono text-xs text-gray-600 whitespace-nowrap">{emp.domDiurnas}</td>
+                                                        <td className="p-4 text-right font-mono text-xs text-gray-600 whitespace-nowrap">{emp.domNocturnas}</td>
                                                     </>
                                                 )}
 
                                                 {/* Bruto y Almuerzo */}
                                                 {colAlmuerzoBruto && (
                                                     <>
-                                                        <td className="p-4 text-right font-mono text-xs text-gray-500">{emp.horasBrutas}</td>
-                                                        <td className="p-4 text-right font-mono text-xs text-amber-600">{emp.horasAlmuerzo}</td>
+                                                        <td className="p-4 text-right font-mono text-xs text-gray-500 whitespace-nowrap">{emp.horasBrutas}</td>
+                                                        <td className="p-4 text-right font-mono text-xs text-amber-600 whitespace-nowrap">{emp.horasAlmuerzo}</td>
                                                     </>
                                                 )}
 
                                                 {/* Base y Balance */}
                                                 {colBaseBalance && (
                                                     <>
-                                                        <td className="p-4 text-right font-mono text-xs text-gray-500">{emp.baseMes} h</td>
-                                                        <td className="p-4 text-right">
-                                                            <span className={`inline-block px-2.5 py-1 rounded-lg font-bold text-xs ${
+                                                        <td className="p-4 text-right font-mono text-xs text-gray-500 whitespace-nowrap">{emp.baseMes} h</td>
+                                                        <td className="p-4 text-right whitespace-nowrap">
+                                                            <span className={`inline-flex items-center justify-center px-2.5 py-1 rounded-lg font-bold text-xs whitespace-nowrap ${
                                                                 emp.balance > 0
                                                                     ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                                                                     : (emp.balance < 0
                                                                         ? 'bg-rose-50 text-rose-700 border border-rose-200'
                                                                         : 'bg-gray-50 text-gray-600')
                                                             }`}>
-                                                                {emp.balance > 0 ? `+${emp.balance}` : emp.balance} h
+                                                                {emp.balance > 0 ? `+${emp.balance}` : emp.balance}&nbsp;h
                                                             </span>
                                                         </td>
                                                     </>
