@@ -1,10 +1,13 @@
 import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { Settings, Lock, Save, CheckSquare, Square, Loader2, LogIn, LogOut, TriangleAlert, KeyRound, Eye, EyeOff, ArrowLeft } from 'lucide-react';
+import { Settings, Lock, Save, CheckSquare, Square, Loader2, LogIn, LogOut, TriangleAlert, KeyRound, Eye, EyeOff, ArrowLeft, FileText, Printer } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
+import CryptoJS from 'crypto-js';
 import { fetchLicenseStatus, applyNewLicenseToken } from '../services/licenseService';
+
 import { syncDatabaseWithStorage } from '../services/storageService';
 
 // Helper: SHA-256 hash de la contraseña usando Web Crypto API
@@ -69,6 +72,16 @@ const DEFAULT_CONFIG = {
     calc_roundingMins: 15,
     calc_lunch: false,
     calc_lunchMins: 60,
+    calc_lunchMode: 'general',
+    calc_dailyWorkdayConfig: {
+        '1': { hours: 8, mins: 0 }, // Lunes
+        '2': { hours: 8, mins: 0 }, // Martes
+        '3': { hours: 8, mins: 0 }, // Miércoles
+        '4': { hours: 8, mins: 0 }, // Jueves
+        '5': { hours: 8, mins: 0 }, // Viernes
+        '6': { hours: 0, mins: 0 }, // Sábado
+        '7': { hours: 0, mins: 0 }, // Domingo
+    },
     // defaults etiquetas botones
     ui_labelEntry: "Registrar Entrada",
     ui_labelExit: "Registrar Salida",
@@ -98,6 +111,14 @@ export default function Configuracion() {
     const [rutaToken, setRutaToken] = useState(null); // hash almacenado en Firestore
     const [rutaPasswordVisible, setRutaPasswordVisible] = useState(false);
     const [savingRuta, setSavingRuta] = useState(false);
+
+    // Estados para la generación de Certificados de Habeas Data
+    const [certificateEmail, setCertificateEmail] = useState('');
+    const [generateAllEmployees, setGenerateAllEmployees] = useState(false);
+    const [generatingPDF, setGeneratingPDF] = useState(false);
+    const [pdfError, setPdfError] = useState('');
+    const [printEmployees, setPrintEmployees] = useState([]);
+
     const navigate = useNavigate();
     const { adminAccess } = useAuth();
 
@@ -150,6 +171,24 @@ export default function Configuracion() {
     const handleFloatChange = (key, value, maxVal = 1.0, minVal = 0.0) => {
         const val = parseFloat(value);
         setConfig(prev => ({ ...prev, [key]: isNaN(val) ? minVal : val > maxVal ? maxVal : val < minVal ? minVal : val }));
+        setSavedOk(false);
+    };
+
+    const handleDailyWorkdayChange = (day, field, value) => {
+        const val = parseInt(value, 10);
+        const maxVal = field === 'hours' ? 24 : 59;
+        const finalVal = isNaN(val) ? 0 : val > maxVal ? maxVal : val < 0 ? 0 : val;
+        
+        setConfig(prev => ({
+            ...prev,
+            calc_dailyWorkdayConfig: {
+                ...(prev.calc_dailyWorkdayConfig || DEFAULT_CONFIG.calc_dailyWorkdayConfig),
+                [day]: {
+                    ...(prev.calc_dailyWorkdayConfig?.[day] || { hours: 0, mins: 0 }),
+                    [field]: finalVal
+                }
+            }
+        }));
         setSavedOk(false);
     };
 
@@ -246,6 +285,93 @@ export default function Configuracion() {
             setSyncProgress(null);
         }
     };
+
+    // Generar firma digital inalterable
+    const generateVerificationHash = (email, dateStr) => {
+        const secret = "ControlFaceSecureAcceptanceSalt";
+        return CryptoJS.SHA256(`${email}-${dateStr || ''}-${secret}`).toString(CryptoJS.enc.Hex).toUpperCase();
+    };
+
+    const handleGenerateCertificatePDF = async () => {
+        setPdfError('');
+        setGeneratingPDF(true);
+        setPrintEmployees([]);
+
+        try {
+            if (generateAllEmployees) {
+                // Generar para todos los empleados registrados que hayan aceptado
+                const snapshot = await getDocs(collection(db, 'employees'));
+
+                const emps = [];
+                snapshot.forEach(d => {
+                    const data = d.data();
+                    const acepta = data.aceptaPoliticaDatos || data.extraFields?.aceptaPoliticaDatos;
+                    if (acepta === true) {
+                        emps.push({ id: d.id, ...data });
+                    }
+                });
+
+                if (emps.length === 0) {
+                    throw new Error("No se encontraron empleados que hayan aceptado la política de tratamiento de datos.");
+                }
+                
+                // Ordenar por nombres
+                emps.sort((a, b) => {
+                    const nameA = `${a.firstName || a.extraFields?.firstName || ''} ${a.lastName || a.extraFields?.lastName || ''}`.toLowerCase();
+                    const nameB = `${b.firstName || b.extraFields?.firstName || ''} ${b.lastName || b.extraFields?.lastName || ''}`.toLowerCase();
+                    return nameA.localeCompare(nameB);
+                });
+
+                setPrintEmployees(emps);
+            } else {
+                // Generar para un empleado específico
+                if (!certificateEmail.trim()) {
+                    throw new Error("Por favor, ingresa el correo o ID del empleado.");
+                }
+
+                let emailToUse = certificateEmail.trim();
+                if (!emailToUse.includes('@')) {
+                    emailToUse = `${emailToUse}@usuario.com`;
+                }
+                emailToUse = emailToUse.toLowerCase().trim();
+
+                const q = query(
+                    collection(db, 'employees'),
+                    where('email', '==', emailToUse)
+                );
+                const snapshot = await getDocs(q);
+
+                if (snapshot.empty) {
+                    throw new Error(`No se encontró ningún empleado registrado con el correo "${emailToUse}".`);
+                }
+
+                const docData = snapshot.docs[0].data();
+                const id = snapshot.docs[0].id;
+                
+                const acepta = docData.aceptaPoliticaDatos || docData.extraFields?.aceptaPoliticaDatos;
+                if (!acepta) {
+                    throw new Error(`El empleado "${emailToUse}" aún no ha aceptado la política de tratamiento de datos.`);
+                }
+
+                setPrintEmployees([{ id, ...docData }]);
+            }
+        } catch (err) {
+            console.error("Error al generar soporte PDF:", err);
+            setPdfError(err.message || "Error al buscar datos de empleados.");
+            setGeneratingPDF(false);
+        }
+    };
+
+    useEffect(() => {
+        if (printEmployees.length > 0 && generatingPDF) {
+            const timer = setTimeout(() => {
+                window.print();
+                setGeneratingPDF(false);
+                setPrintEmployees([]);
+            }, 800);
+            return () => clearTimeout(timer);
+        }
+    }, [printEmployees, generatingPDF]);
 
     if (loading) {
         return (
@@ -556,40 +682,52 @@ export default function Configuracion() {
                     </p>
 
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        {/* JORNADA LABORAL */}
-                        <div className="space-y-3 bg-fuchsia-50 p-4 rounded-xl border border-fuchsia-100">
-                            <h3 className="font-bold text-fuchsia-700">Jornada Laboral Diaria</h3>
-                            <button
-                                disabled
-                                className="w-full flex items-center justify-between px-4 py-3 rounded-lg border-2 border-fuchsia-500 bg-white text-fuchsia-800 text-left font-medium text-sm cursor-default"
-                            >
-                                <span className="flex items-center gap-2">
-                                    <CheckSquare size={20} className="text-fuchsia-600" />
-                                    Configurar duración
-                                </span>
-                            </button>
-                            <p className="text-xs text-fuchsia-700 opacity-80 leading-tight">Define la duración del turno oficial antes de aplicar descuentos o reglas extra.</p>
-                            <div className="grid grid-cols-2 gap-2 mt-1">
-                                <div className="flex flex-col gap-1">
-                                    <label className="text-xs font-bold text-fuchsia-800 opacity-80">Horas</label>
-                                    <input
-                                        type="number"
-                                        min="1" max="24"
-                                        value={config.calc_workdayHours ?? 8}
-                                        onChange={(e) => handleNumberChange('calc_workdayHours', e.target.value, 24)}
-                                        className="px-3 py-2 border border-fuchsia-200 rounded-lg focus:ring-2 focus:ring-fuchsia-500"
-                                    />
-                                </div>
-                                <div className="flex flex-col gap-1">
-                                    <label className="text-xs font-bold text-fuchsia-800 opacity-80">Minutos</label>
-                                    <input
-                                        type="number"
-                                        min="0" max="59"
-                                        value={config.calc_workdayMins ?? 0}
-                                        onChange={(e) => handleNumberChange('calc_workdayMins', e.target.value, 59, 0)}
-                                        className="px-3 py-2 border border-fuchsia-200 rounded-lg focus:ring-2 focus:ring-fuchsia-500"
-                                    />
-                                </div>
+                        {/* JORNADA LABORAL FLEXIBLE */}
+                        <div className="col-span-1 md:col-span-3 space-y-3 bg-fuchsia-50 p-4 rounded-xl border border-fuchsia-100">
+                            <h3 className="font-bold text-fuchsia-700 flex items-center gap-2">
+                                <CheckSquare size={20} className="text-fuchsia-600" />
+                                Jornada Laboral por Día de la Semana
+                            </h3>
+                            <p className="text-xs text-fuchsia-700 opacity-80 leading-tight mb-4">
+                                Define cuántas horas y minutos debe trabajar el empleado cada día. Los turnos nocturnos se dividirán automáticamente a la medianoche y se compararán contra estos valores.
+                            </p>
+                            
+                            <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-4">
+                                {[
+                                    { id: '1', label: 'Lunes' },
+                                    { id: '2', label: 'Martes' },
+                                    { id: '3', label: 'Miércoles' },
+                                    { id: '4', label: 'Jueves' },
+                                    { id: '5', label: 'Viernes' },
+                                    { id: '6', label: 'Sábado' },
+                                    { id: '7', label: 'Domingo' }
+                                ].map(day => (
+                                    <div key={day.id} className="bg-white p-3 rounded-lg border border-fuchsia-200 shadow-sm">
+                                        <label className="block text-[10px] font-black text-fuchsia-800 uppercase mb-2 text-center">{day.label}</label>
+                                        <div className="flex flex-col gap-2">
+                                            <div className="flex items-center gap-1">
+                                                <input
+                                                    type="number"
+                                                    min="0" max="24"
+                                                    value={config.calc_dailyWorkdayConfig?.[day.id]?.hours ?? 0}
+                                                    onChange={(e) => handleDailyWorkdayChange(day.id, 'hours', e.target.value)}
+                                                    className="w-full px-1 py-1 text-center border border-fuchsia-100 rounded bg-fuchsia-50/30 text-sm font-bold focus:ring-1 focus:ring-fuchsia-400"
+                                                />
+                                                <span className="text-[10px] text-fuchsia-400">h</span>
+                                            </div>
+                                            <div className="flex items-center gap-1">
+                                                <input
+                                                    type="number"
+                                                    min="0" max="59"
+                                                    value={config.calc_dailyWorkdayConfig?.[day.id]?.mins ?? 0}
+                                                    onChange={(e) => handleDailyWorkdayChange(day.id, 'mins', e.target.value)}
+                                                    className="w-full px-1 py-1 text-center border border-fuchsia-100 rounded bg-fuchsia-50/30 text-sm font-bold focus:ring-1 focus:ring-fuchsia-400"
+                                                />
+                                                <span className="text-[10px] text-fuchsia-400">m</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
                             </div>
                         </div>
 
@@ -625,25 +763,98 @@ export default function Configuracion() {
                         {/* ALMUERZO */}
                         <div className="space-y-3 bg-indigo-50 p-4 rounded-xl border border-indigo-100">
                             <h3 className="font-bold text-indigo-700">Descuento de Almuerzo</h3>
-                            <button
-                                onClick={() => toggle('calc_lunch')}
-                                className={`w-full flex items-center justify-between px-4 py-3 rounded-lg border-2 text-left transition font-medium text-sm
-                                    ${config.calc_lunch !== false
-                                        ? 'border-indigo-500 bg-white text-indigo-800'
-                                        : 'border-gray-300 bg-gray-100 text-gray-400 opacity-60'}`}
-                            >
-                                <span className="flex items-center gap-2">
-                                    {config.calc_lunch !== false ? <CheckSquare size={20} className="text-indigo-600" /> : <Square size={20} />}
-                                    Descontar automáticamente
-                                </span>
-                            </button>
-                            <p className="text-xs text-indigo-700 opacity-80 leading-tight">Solo aplicará si el empleado registra un tiempo laborado que iguale o supere la Jornada Laboral configurada.</p>
+                            
+                            <div className="grid grid-cols-1 gap-2">
+                                <button
+                                    onClick={() => {
+                                        setConfig(prev => ({
+                                            ...prev,
+                                            calc_lunch: true,
+                                            calc_lunchMode: 'general'
+                                        }));
+                                    }}
+                                    className={`w-full flex items-center justify-between px-4 py-3 rounded-lg border-2 text-left transition font-medium text-sm
+                                        ${config.calc_lunch && config.calc_lunchMode !== 'individual' && config.calc_lunchMode !== 'empresa'
+                                            ? 'border-indigo-500 bg-white text-indigo-800'
+                                            : 'border-gray-300 bg-gray-100 text-gray-400 opacity-60'}`}
+                                >
+                                    <span className="flex items-center gap-2">
+                                        {config.calc_lunch && config.calc_lunchMode !== 'individual' && config.calc_lunchMode !== 'empresa' ? <CheckSquare size={20} className="text-indigo-600" /> : <Square size={20} />}
+                                        Descuento Generalizado (Automático)
+                                    </span>
+                                </button>
+
+                                <button
+                                    onClick={() => {
+                                        setConfig(prev => ({
+                                            ...prev,
+                                            calc_lunch: true,
+                                            calc_lunchMode: 'individual'
+                                        }));
+                                    }}
+                                    className={`w-full flex items-center justify-between px-4 py-3 rounded-lg border-2 text-left transition font-medium text-sm
+                                        ${config.calc_lunch && config.calc_lunchMode === 'individual'
+                                            ? 'border-indigo-500 bg-white text-indigo-800'
+                                            : 'border-gray-300 bg-gray-100 text-gray-400 opacity-60'}`}
+                                >
+                                    <span className="flex items-center gap-2">
+                                        {config.calc_lunch && config.calc_lunchMode === 'individual' ? <CheckSquare size={20} className="text-indigo-600" /> : <Square size={20} />}
+                                        Descuento Individual (El empleado elige)
+                                    </span>
+                                </button>
+
+                                <button
+                                    onClick={() => {
+                                        setConfig(prev => ({
+                                            ...prev,
+                                            calc_lunch: true,
+                                            calc_lunchMode: 'empresa'
+                                        }));
+                                    }}
+                                    className={`w-full flex items-center justify-between px-4 py-3 rounded-lg border-2 text-left transition font-medium text-sm
+                                        ${config.calc_lunch && config.calc_lunchMode === 'empresa'
+                                            ? 'border-indigo-500 bg-white text-indigo-800'
+                                            : 'border-gray-300 bg-gray-100 text-gray-400 opacity-60'}`}
+                                >
+                                    <span className="flex items-center gap-2">
+                                        {config.calc_lunch && config.calc_lunchMode === 'empresa' ? <CheckSquare size={20} className="text-indigo-600" /> : <Square size={20} />}
+                                        Control Empresa (Solo el admin marca)
+                                    </span>
+                                </button>
+
+                                <button
+                                    onClick={() => {
+                                        setConfig(prev => ({
+                                            ...prev,
+                                            calc_lunch: false
+                                        }));
+                                    }}
+                                    className={`w-full flex items-center justify-between px-4 py-3 rounded-lg border-2 text-left transition font-medium text-sm
+                                        ${!config.calc_lunch
+                                            ? 'border-red-400 bg-white text-red-800'
+                                            : 'border-gray-300 bg-gray-100 text-gray-400 opacity-60'}`}
+                                >
+                                    <span className="flex items-center gap-2">
+                                        {!config.calc_lunch ? <CheckSquare size={20} className="text-red-600" /> : <Square size={20} />}
+                                        Desactivar Descuento
+                                    </span>
+                                </button>
+                            </div>
+
+                            <p className="text-xs text-indigo-700 opacity-80 leading-tight">
+                                {config.calc_lunchMode === 'individual'
+                                    ? 'El empleado verá una opción al salir para decidir si se descuenta el tiempo.'
+                                    : config.calc_lunchMode === 'empresa'
+                                        ? 'El admin marca el descuento desde la vista En Vivo con contraseña. El empleado no ve ninguna opción.'
+                                        : 'Solo aplicará si el empleado registra un tiempo laborado que iguale o supere la Jornada Laboral configurada.'}
+                            </p>
+                            
                             <div className="flex flex-col gap-1">
                                 <label className="text-xs font-bold text-indigo-800 opacity-80">Tiempo a descontar (Minutos)</label>
                                 <input
                                     type="number"
                                     min="1" max="180"
-                                    disabled={config.calc_lunch === false}
+                                    disabled={!config.calc_lunch}
                                     value={config.calc_lunchMins ?? 60}
                                     onChange={(e) => handleNumberChange('calc_lunchMins', e.target.value, 180)}
                                     className="px-3 py-2 border border-indigo-200 rounded-lg focus:ring-2 focus:ring-indigo-500 disabled:bg-gray-200 disabled:opacity-50"
@@ -787,6 +998,76 @@ export default function Configuracion() {
                     </div>
                 </div>
 
+                {/* ─── CERTIFICADOS DE HABEAS DATA ─── */}
+                <div className="bg-white rounded-xl shadow-2xl p-6 mb-6 border-l-4 border-teal-600 overflow-hidden relative">
+                    <div className="absolute top-0 right-0 w-32 h-32 bg-teal-50 rounded-full -mr-16 -mt-16 opacity-50"></div>
+                    <h2 className="text-xl font-bold text-teal-800 mb-2 relative flex items-center gap-2">
+                        <FileText size={22} className="text-teal-600" />
+                        Certificados de Consentimiento (Habeas Data)
+                    </h2>
+                    <p className="text-sm text-gray-600 mb-4 relative">
+                        Genera y descarga el soporte legal del consentimiento de tratamiento de datos personales y biométricos de los empleados.
+                    </p>
+
+                    <div className="space-y-4 relative bg-teal-50/50 p-4 rounded-xl border border-teal-100/80">
+                        <div className="flex flex-col sm:flex-row items-end gap-4">
+                            {/* Campo Usuario */}
+                            <div className="flex-1 space-y-1">
+                                <label className="text-xs font-bold text-teal-700">
+                                    Usuario / Email del Empleado
+                                </label>
+                                <input
+                                    type="text"
+                                    disabled={generateAllEmployees}
+                                    placeholder="ejemplo@usuario.com"
+                                    value={certificateEmail}
+                                    onChange={(e) => {
+                                        setCertificateEmail(e.target.value);
+                                        setPdfError('');
+                                    }}
+                                    className="w-full px-3 py-2 border border-teal-200 rounded-lg focus:ring-2 focus:ring-teal-500 shadow-sm text-sm disabled:bg-gray-100 disabled:text-gray-400"
+                                />
+                            </div>
+
+                            {/* Checkbox Todos al Tiempo */}
+                            <div className="flex items-center h-10 mb-1">
+                                <label className="flex items-center gap-2 cursor-pointer group">
+                                    <input
+                                        type="checkbox"
+                                        checked={generateAllEmployees}
+                                        onChange={(e) => {
+                                            setGenerateAllEmployees(e.target.checked);
+                                            setPdfError('');
+                                            if (e.target.checked) setCertificateEmail('');
+                                        }}
+                                        className="w-4 h-4 text-teal-600 rounded border-teal-300 focus:ring-teal-500"
+                                    />
+                                    <span className="text-xs font-bold text-teal-850 group-hover:text-teal-900 transition-colors">
+                                        Todos los empleados
+                                    </span>
+                                </label>
+                            </div>
+
+                            {/* Botón de Generar */}
+                            <button
+                                onClick={handleGenerateCertificatePDF}
+                                disabled={generatingPDF || (!generateAllEmployees && !certificateEmail.trim())}
+                                className="px-6 py-2 bg-teal-600 text-white font-bold rounded-lg hover:bg-teal-700 disabled:opacity-50 disabled:bg-gray-400 transition flex items-center justify-center gap-2 text-sm shadow-md h-10 whitespace-nowrap min-w-[140px]"
+                            >
+                                {generatingPDF ? (
+                                    <Loader2 size={16} className="animate-spin" />
+                                ) : (
+                                    <Printer size={16} />
+                                )}
+                                {generatingPDF ? 'Generando...' : 'Generar PDF'}
+                            </button>
+                        </div>
+                        
+                        {/* Mensaje de estado/error */}
+                        {pdfError && <p className="text-red-650 text-xs font-bold">{pdfError}</p>}
+                    </div>
+                </div>
+
                 {/* ─── GESTIÓN DE ETIQUETAS DE BOTONES ─── */}
                 <div className="bg-white rounded-xl shadow-2xl p-6 mb-6 border-l-4 border-purple-600 overflow-hidden relative">
                     <div className="absolute top-0 right-0 w-32 h-32 bg-purple-50 rounded-full -mr-16 -mt-16 opacity-50"></div>
@@ -883,6 +1164,277 @@ export default function Configuracion() {
                     </button>
                 </div>
             </div>
+
+            {/* Contenedor de Impresión (Solo visible durante la impresión) */}
+            {printEmployees.length > 0 && createPortal(
+                <div id="print-certificates-area">
+                    <style>{`
+                      @media print {
+                        html, body {
+                          background-color: white !important;
+                          color: #000000 !important;
+                          margin: 0;
+                          padding: 0;
+                        }
+                        #root {
+                          display: none !important;
+                        }
+                        #print-certificates-area {
+                          display: block !important;
+                          position: absolute;
+                          left: 0;
+                          top: 0;
+                          width: 100%;
+                          background: white;
+                          color: #1e293b;
+                          font-family: 'Inter', sans-serif;
+                          margin: 0;
+                          padding: 0;
+                        }
+                        .certificate-page {
+                          width: 100%;
+                          padding: 12mm 15mm;
+                          box-sizing: border-box;
+                          background: white;
+                          position: relative;
+                          page-break-after: always;
+                          page-break-inside: avoid;
+                          display: flex;
+                          flex-direction: column;
+                          gap: 15px;
+                          border: 1px solid #cbd5e1;
+                        }
+                        .certificate-header {
+                          border-bottom: 3px solid #3c7da6;
+                          padding-bottom: 8px;
+                          margin-bottom: 12px;
+                        }
+                        .certificate-title {
+                          font-size: 14pt;
+                          font-weight: bold;
+                          color: #1e3a8a;
+                          text-align: center;
+                          margin-top: 10px;
+                          line-height: 1.3;
+                        }
+                        .certificate-subtitle {
+                          font-size: 10pt;
+                          color: #64748b;
+                          text-align: center;
+                          margin-top: 4px;
+                          font-weight: bold;
+                        }
+                        .certificate-body {
+                          font-size: 10pt;
+                          line-height: 1.45;
+                          color: #334155;
+                          text-align: justify;
+                        }
+                        .info-table {
+                          width: 100%;
+                          border-collapse: collapse;
+                          margin: 12px 0;
+                          background-color: #f8fafc;
+                          border: 1px solid #e2e8f0;
+                        }
+                        .info-table td {
+                          padding: 6px 12px;
+                          border-bottom: 1px solid #e2e8f0;
+                          font-size: 9pt;
+                        }
+                        .info-table tr:last-child td {
+                          border-bottom: none;
+                        }
+                        .info-table td.label {
+                          font-weight: bold;
+                          color: #475569;
+                          width: 35%;
+                        }
+                        .info-table td.value {
+                          color: #0f172a;
+                        }
+                        .clause-box {
+                          border-left: 3px solid #6faf6b;
+                          padding-left: 10px;
+                          margin: 8px 0;
+                          background-color: #f0fdf4;
+                          padding-top: 5px;
+                          padding-bottom: 5px;
+                        }
+                        .clause-title {
+                          font-weight: bold;
+                          color: #166534;
+                          font-size: 9.5pt;
+                          margin-bottom: 4px;
+                        }
+                        .clause-text {
+                          font-size: 8.5pt;
+                          color: #3f6212;
+                          line-height: 1.4;
+                        }
+                        .verification-box {
+                          border: 1.5px dashed #cbd5e1;
+                          border-radius: 8px;
+                          padding: 10px 14px;
+                          margin-top: 15px;
+                          background-color: #fafafa;
+                        }
+                        .verification-title {
+                          font-size: 9.5pt;
+                          font-weight: bold;
+                          color: #475569;
+                          text-transform: uppercase;
+                          margin-bottom: 6px;
+                          letter-spacing: 0.5px;
+                        }
+                        .verification-row {
+                          display: flex;
+                          justify-content: space-between;
+                          font-size: 9pt;
+                          margin-bottom: 4px;
+                        }
+                        .verification-hash {
+                          font-family: monospace;
+                          background-color: #f1f5f9;
+                          padding: 6px 10px;
+                          border-radius: 4px;
+                          font-size: 9pt;
+                          word-break: break-all;
+                          border: 1px solid #cbd5e1;
+                          color: #1e293b;
+                        }
+                        .certificate-footer {
+                          border-top: 1px solid #e2e8f0;
+                          padding-top: 10px;
+                          margin-top: 15px;
+                          text-align: center;
+                          font-size: 8pt;
+                          color: #94a3b8;
+                        }
+                      }
+                      @media screen {
+                        #print-certificates-area {
+                          display: none !important;
+                        }
+                      }
+                    `}</style>
+                    {printEmployees.map((emp) => {
+                        const extra = { ...emp, ...(emp.extraFields || {}) };
+                        const fechaAcep = extra.fechaAceptacionPolitica 
+                            ? new Date(extra.fechaAceptacionPolitica).toLocaleString('es-ES', {
+                                day: '2-digit',
+                                month: 'long',
+                                year: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                                second: '2-digit',
+                                hour12: true
+                              })
+                            : 'No registrada';
+
+                        const signatureHash = generateVerificationHash(emp.email, extra.fechaAceptacionPolitica);
+
+                        return (
+                            <div key={emp.id || emp.email} className="certificate-page">
+                                <div>
+                                    {/* Cabecera */}
+                                    <div className="certificate-header">
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                            <span style={{ fontSize: '13pt', fontWeight: '900', color: '#3c7da6', letterSpacing: '0.5px' }}>FACECONTROL</span>
+                                            <span style={{ fontSize: '8pt', color: '#94a3b8', fontFamily: 'monospace' }}>DOC-REF: FC-{signatureHash.substring(0, 8)}</span>
+                                        </div>
+                                        <div className="certificate-title">
+                                            CERTIFICADO DE CONSENTIMIENTO Y AUTORIZACIÓN PARA TRATAMIENTO DE DATOS PERSONALES Y BIOMÉTRICOS
+                                        </div>
+                                        <div className="certificate-subtitle">
+                                            Registro Electrónico de Habeas Data
+                                        </div>
+                                    </div>
+
+                                    {/* Cuerpo */}
+                                    <div className="certificate-body">
+                                        <p>
+                                            Por medio de la presente y en cumplimiento de la regulación nacional sobre Protección de Datos Personales (Habeas Data) e Información Sensible, se expide el presente soporte que certifica que el empleado detallado a continuación ha manifestado de manera expresa, libre, voluntaria y con conocimiento de causa, su aceptación y consentimiento para el tratamiento de su información y datos biométricos.
+                                        </p>
+
+                                        <table className="info-table">
+                                           <tbody>
+                                             <tr>
+                                                 <td className="label">Nombres completos:</td>
+                                                 <td className="value">{extra.firstName || emp.firstName || 'N/A'}</td>
+                                             </tr>
+                                             <tr>
+                                                 <td className="label">Apellidos completos:</td>
+                                                 <td className="value">{extra.lastName || emp.lastName || 'N/A'}</td>
+                                             </tr>
+                                             <tr>
+                                                 <td className="label">Usuario / Correo de Acceso:</td>
+                                                 <td className="value">{emp.email || 'N/A'}</td>
+                                             </tr>
+                                             {extra.documentoIdentidad && (
+                                                 <tr>
+                                                     <td className="label">Documento de Identidad:</td>
+                                                     <td className="value">{extra.documentoIdentidad}</td>
+                                                 </tr>
+                                             )}
+                                             <tr>
+                                                 <td className="label">Fecha y Hora de Aceptación:</td>
+                                                 <td className="value">{fechaAcep}</td>
+                                             </tr>
+                                             <tr>
+                                                 <td className="label">Canal de Aceptación:</td>
+                                                 <td className="value">Portal Web de Autenticación FaceControl (Doble Marcación Electrónica)</td>
+                                             </tr>
+                                           </tbody>
+                                        </table>
+
+                                        <p style={{ marginTop: '6px', fontSize: '8.5pt', color: '#475569', textAlign: 'justify' }}>
+                                            El empleado declaró bajo la gravedad del juramento haber leído en su totalidad y comprender los términos descritos en la política, autorizando de manera expresa a la Empresa para realizar la recolección, almacenamiento, procesamiento y cotejo de su vector facial (biometría) con el fin único y exclusivo de registrar el control de asistencia laboral y seguridad dentro de las instalaciones autorizadas.
+                                        </p>
+
+                                        {/* Caja de Cláusulas Aceptadas */}
+                                        <div className="clause-box">
+                                            <div className="clause-title">✓ Declaraciones de Aceptación del Empleado:</div>
+                                            <div className="clause-text" style={{ marginBottom: '4px' }}>
+                                                <strong>1.</strong> "Declaro haber leído la Política de Tratamiento de Datos e Información Sensible."
+                                            </div>
+                                            <div className="clause-text">
+                                                <strong>2.</strong> "Acepto libre y expresamente la recolección y tratamiento de los datos personales y biometría para el cumplimiento de los fines establecidos por la Empresa."
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Sello Digital */}
+                                <div>
+                                    <div className="verification-box">
+                                        <div className="verification-title">Firma Digital y Evidencia de Cumplimiento</div>
+                                        <div className="verification-row">
+                                            <span><strong>Emisor del Certificado:</strong> FaceControl Platform</span>
+                                            <span><strong>Criptografía:</strong> SHA-256</span>
+                                        </div>
+                                        <div className="verification-row">
+                                            <span><strong>ID Registro de Auditoría:</strong> {emp.id || 'N/A'}</span>
+                                            <span><strong>Firma Electrónica Autorizada:</strong></span>
+                                        </div>
+                                        <div className="verification-hash" style={{ marginTop: '5px' }}>
+                                            {signatureHash}
+                                        </div>
+                                        <p style={{ fontSize: '7pt', color: '#94a3b8', marginTop: '6px', lineHeight: '1.2' }}>
+                                            Este certificado digital sirve como prueba electrónica de la autorización de Habeas Data para los efectos contemplados en las normativas legales de protección de datos personales. Su integridad técnica es validada por medio del hash criptográfico superior.
+                                        </p>
+                                    </div>
+
+                                    <div className="certificate-footer">
+                                        FaceControl &copy; {new Date().getFullYear()} - Documento Informativo Confidencial y de Uso Exclusivo de Recursos Humanos.
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>,
+                document.body
+            )}
         </div>
     );
 }

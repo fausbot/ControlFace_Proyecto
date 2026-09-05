@@ -1,7 +1,5 @@
 const functionsV1 = require("firebase-functions/v1");
 const admin = require("firebase-admin");
-const bcrypt = require("bcrypt");
-const CryptoJS = require("crypto-js");
 
 admin.initializeApp();
 
@@ -97,6 +95,7 @@ exports.verifyAdminPassword = functionsV1.https.onCall(async (data, context) => 
     }
 
     try {
+        const bcrypt = require("bcrypt");
         const db = admin.firestore();
         const configRef = db.collection('settings').doc('config');
         const docSnap = await configRef.get();
@@ -115,9 +114,13 @@ exports.verifyAdminPassword = functionsV1.https.onCall(async (data, context) => 
             if (target === '/informes') specificField = 'adminPassword_informes';
             if (target === '/configuracion') specificField = 'adminPassword_configuracion';
 
-            if (specificField && configData[specificField]) {
-                storedPassword = configData[specificField];
+            if (specificField) {
+                // Si el target tiene un campo específico, usarlo SOLO si existe.
+                // Si fue borrado en Firebase Console, storedPassword queda en null
+                // y se activa el modo bootstrap (CF1234), sin hacer fallback al campo general.
+                storedPassword = configData[specificField] || null;
             } else if (configData.adminPassword) {
+                // Sin target específico, usar la contraseña general
                 storedPassword = configData.adminPassword;
             }
         }
@@ -173,6 +176,7 @@ exports.changeAdminPassword = functionsV1.https.onCall(async (data, context) => 
     }
 
     try {
+        const bcrypt = require("bcrypt");
         const db = admin.firestore();
         const configRef = db.collection('settings').doc('config');
         const docSnap = await configRef.get();
@@ -189,8 +193,11 @@ exports.changeAdminPassword = functionsV1.https.onCall(async (data, context) => 
 
         // Determinar qué contraseña se debe verificar como "Actual"
         let storedPasswordToVerify = null;
-        if (specificFieldValidation && configData[specificFieldValidation]) {
-            storedPasswordToVerify = configData[specificFieldValidation];
+        if (specificFieldValidation) {
+            // Si el target tiene un campo específico, usarlo SOLO si existe.
+            // Si fue borrado en Firebase Console, storedPasswordToVerify queda en null
+            // y se activa el modo bootstrap (CF1234), sin hacer fallback al campo general.
+            storedPasswordToVerify = configData[specificFieldValidation] || null;
         } else if (configData.adminPassword) {
             storedPasswordToVerify = configData.adminPassword;
         }
@@ -267,6 +274,7 @@ exports.createEmployeeSecure = functionsV1.https.onCall(async (data, context) =>
     }
 
     try {
+        const CryptoJS = require("crypto-js");
         const db = admin.firestore();
 
         // Leer la licencia actual
@@ -472,13 +480,18 @@ exports.checkEmployeeExists = functionsV1.https.onCall(async (data, context) => 
  * Función protegida para actualizar un empleado existente verificando la clave de configuración.
  */
 exports.updateEmployeeSecure = functionsV1.https.onCall(async (data, context) => {
-    const { docId, email, firstName, lastName, faceDescriptor, extraFields, configPassword } = data;
+    const { docId, email, firstName, lastName, faceDescriptor, extraFields, configPassword, newPassword } = data;
 
     if (!docId || !email || !configPassword) {
         throw new functionsV1.https.HttpsError("invalid-argument", "Faltan datos obligatorios para actualizar.");
     }
 
+    if (newPassword && (typeof newPassword !== 'string' || newPassword.trim().length < 6)) {
+        throw new functionsV1.https.HttpsError("invalid-argument", "La nueva contraseña debe tener al menos 6 caracteres.");
+    }
+
     try {
+        const bcrypt = require("bcrypt");
         const db = admin.firestore();
 
         // 1. Verificar Master Password de Configuración
@@ -505,12 +518,21 @@ exports.updateEmployeeSecure = functionsV1.https.onCall(async (data, context) =>
 
         // 2. Actualizar Auth (Google)
         try {
-            const userRecord = await admin.auth().getUserByEmail(email.toLowerCase().trim());
-            await admin.auth().updateUser(userRecord.uid, {
+            const normalizedEmail = email.toLowerCase().trim();
+            const userRecord = await admin.auth().getUserByEmail(normalizedEmail);
+            const authUpdates = {
                 displayName: `${firstName} ${lastName}`.trim()
-            });
+            };
+            if (newPassword && typeof newPassword === 'string' && newPassword.trim().length >= 6) {
+                authUpdates.password = newPassword.trim();
+            }
+            await admin.auth().updateUser(userRecord.uid, authUpdates);
+            console.log(`✅ [updateEmployeeSecure] Usuario ${normalizedEmail} actualizado en Auth (clave actualizada: ${!!(newPassword && newPassword.trim().length >= 6)})`);
         } catch (authErr) {
-            console.error("Error actualizando Auth (puede que no exista en Auth, ignorando):", authErr);
+            console.error("Error actualizando Auth:", authErr);
+            if (newPassword && newPassword.trim().length >= 6) {
+                throw new functionsV1.https.HttpsError("internal", "No se pudo cambiar la contraseña en Authentication: " + (authErr.message || "Usuario no encontrado en Auth."));
+            }
         }
 
         // 3. Actualizar Firestore

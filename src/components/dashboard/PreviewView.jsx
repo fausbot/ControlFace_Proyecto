@@ -9,16 +9,22 @@ export default function PreviewView({
     incidentDescription,
     setIncidentDescription,
     handleSave,
-    handleCancel
+    handleCancel,
+    // Nuevas props para almuerzo individual
+    calc_lunch,
+    calc_lunchMode,
+    calc_lunchMins,
+    applyLunch,
+    setApplyLunch
 }) {
     if (!capturedData) return null;
 
     return (
         <div className="w-full flex flex-col items-center animate-fade-in">
-            <h2 className="text-xl font-bold mb-2 text-gray-800">
+            <h2 className="text-xl font-bold mb-2 text-white text-center">
                 {mode === 'incident' ? '⚠️ Vista Previa de la Novedad' : 'Vista Previa'}
             </h2>
-            <p className="text-sm text-gray-500 mb-4 text-center">
+            <p className="text-sm text-white/90 mb-4 text-center font-medium max-w-xs px-2">
                 {mode === 'incident'
                     ? 'Describe la novedad antes de guardar.'
                     : faceVerified
@@ -65,6 +71,28 @@ export default function PreviewView({
                         rows={4}
                         className="w-full border-2 border-orange-300 rounded-xl p-3 text-sm focus:outline-none focus:border-orange-500 resize-none"
                     />
+                </div>
+            )}
+
+            {/* Control de Almuerzo Individual: solo si calc_lunch está activo Y el modo es 'individual' */}
+            {mode === 'exit' && calc_lunch === true && calc_lunchMode === 'individual' && (
+                <div className="w-full max-w-xs mb-6 bg-white/10 backdrop-blur-sm p-4 rounded-2xl border border-white/20">
+                    <div 
+                        onClick={() => setApplyLunch(!applyLunch)}
+                        className="flex items-center gap-3 cursor-pointer select-none group"
+                    >
+                        <div className={`w-7 h-7 rounded-lg border-2 flex items-center justify-center transition-all ${
+                            applyLunch ? 'bg-green-500 border-green-500 shadow-[0_0_10px_rgba(34,197,94,0.5)]' : 'bg-white/10 border-white/30'
+                        }`}>
+                            {applyLunch && <CheckCircle size={20} className="text-white" />}
+                        </div>
+                        <div className="flex flex-col">
+                            <span className="text-white font-bold text-sm">¿Descontar almuerzo hoy?</span>
+                            <span className="text-white/60 text-[10px] leading-tight">
+                                Marca la casilla si tomaste tu descanso ({calc_lunchMins || 60} minutos)
+                            </span>
+                        </div>
+                    </div>
                 </div>
             )}
 

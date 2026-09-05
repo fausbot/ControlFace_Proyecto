@@ -10,11 +10,15 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@esbuild/win32-x64": "^0.28.0",
     "@vladmandic/face-api": "^1.7.15",
     "crypto-js": "^4.2.0",
+    "esbuild": "^0.28.0",
     "firebase": "^12.7.0",
     "idb": "^8.0.3",
     "jszip": "^3.10.1",
+    "lightningcss": "^1.32.0",
+    "lightningcss-win32-x64-msvc": "^1.32.0",
     "lucide-react": "^0.562.0",
     "react": "19.2.1",
     "react-dom": "19.2.1",

@@ -13,6 +13,7 @@ import {
     query,
     orderBy
 } from 'firebase/firestore';
+import { getMillisFromDateTime } from '../utils/timezone';
 
 const COLLECTION = 'attendance';
 
@@ -26,43 +27,10 @@ const getMillis = (ts) => {
     return Date.now();
 };
 
-// ─────────────────────────────────────────────
-// Helper para convertir fecha/hora a milisegundos sin riesgo de NaN
-// ─────────────────────────────────────────────
-export const getMillisFromDateTime = (fecha, hora) => {
-    if (!fecha || !hora) return 0;
-    try {
-        // 1. Detectar separador de fecha (/ o -)
-        const separator = fecha.includes('/') ? '/' : '-';
-        const parts = fecha.split(separator);
-        if (parts.length !== 3) return 0;
+// getMillisFromDateTime → importada desde '../utils/timezone' (fuente única de verdad)
+// Re-exportada aquí para compatibilidad con Informes.jsx y otros consumidores existentes
+export { getMillisFromDateTime } from '../utils/timezone';
 
-        let d, m, y;
-        if (parts[0].length === 4) {
-            // Formato YYYY-MM-DD
-            [y, m, d] = parts;
-        } else {
-            // Formato DD/MM/YYYY o DD-MM-YYYY
-            [d, m, y] = parts;
-        }
-
-        // 2. Limpiar la hora de caracteres no numéricos (como a. m., p. m., espacios)
-        const cleanHora = hora.replace(/[^0-9:]/g, '');
-        const timeParts = cleanHora.split(':');
-        if (timeParts.length < 2) return 0;
-
-        const h = timeParts[0];
-        const min = timeParts[1];
-        const s = timeParts[2] || '00';
-
-        const dateObj = new Date(parseInt(y), parseInt(m) - 1, parseInt(d), parseInt(h), parseInt(min), parseInt(s));
-        const millis = dateObj.getTime();
-
-        return isNaN(millis) ? 0 : millis;
-    } catch {
-        return 0;
-    }
-};
 
 // ─────────────────────────────────────────────
 // Escucha cambios en TIEMPO REAL de la colección attendance
@@ -99,12 +67,44 @@ export const subscribeToAttendanceLogs = (callback) => {
 // ─────────────────────────────────────────────
 export const parseSpanishDate = (dateStr) => {
     if (!dateStr) return null;
-    const parts = dateStr.split('/');
-    if (parts.length !== 3) return null;
-    const day = parseInt(parts[0]);
-    const month = parseInt(parts[1]) - 1; // JS: meses 0-indexed
-    const year = parseInt(parts[2]);
-    return new Date(year, month, day);
+    if (dateStr instanceof Date) return dateStr;
+    if (typeof dateStr.toDate === 'function') return dateStr.toDate();
+    
+    const str = String(dateStr).trim();
+    
+    // Probar formato ISO YYYY-MM-DD
+    if (/^\d{4}-\d{2}-\d{2}/.test(str)) {
+        const parts = str.split('T')[0].split('-');
+        const year = parseInt(parts[0], 10);
+        const month = parseInt(parts[1], 10) - 1;
+        const day = parseInt(parts[2], 10);
+        const d = new Date(year, month, day);
+        return isNaN(d.getTime()) ? null : d;
+    }
+    
+    // Probar formato DD/MM/YYYY o DD-MM-YYYY
+    const parts = str.split(/[\/-]/);
+    if (parts.length === 3) {
+        let day, month, year;
+        if (parts[0].length === 4) {
+            // YYYY/MM/DD
+            year = parseInt(parts[0], 10);
+            month = parseInt(parts[1], 10) - 1;
+            day = parseInt(parts[2], 10);
+        } else {
+            // DD/MM/YYYY o DD-MM-YYYY
+            day = parseInt(parts[0], 10);
+            month = parseInt(parts[1], 10) - 1;
+            year = parseInt(parts[2], 10);
+        }
+        
+        const d = new Date(year, month, day);
+        return isNaN(d.getTime()) ? null : d;
+    }
+    
+    // Fallback final
+    const parsed = new Date(str);
+    return isNaN(parsed.getTime()) ? null : parsed;
 };
 
 // ─────────────────────────────────────────────

@@ -1,14 +1,18 @@
 // src/pages/Informes.jsx
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Download, Calendar, Trash2, AlertTriangle, TriangleAlert, Image, Loader2, UserMinus, FileText, Printer, Image as ImageIcon, Navigation, ArrowLeft } from 'lucide-react';
+import { Download, Calendar, Trash2, AlertTriangle, TriangleAlert, Image, Loader2, UserMinus, FileText, Printer, Image as ImageIcon, Navigation, ArrowLeft, TrendingUp } from 'lucide-react';
 import DeleteEmployeeModal from '../components/DeleteEmployeeModal';
+import TableroGerencial from '../components/informes/TableroGerencial';
 import { listPhotosByFilter, downloadPhotosAsZip, cleanOldPhotos } from '../services/storageService';
 import { httpsCallable } from 'firebase/functions';
 import { functions, db } from '../firebaseConfig';
 import { exportToExcelHTML } from '../utils/exportUtils';
-import { calculateLaborHours, parseStringDate } from '../utils/timeCalculator';
+import { calculateLaborHours, parseStringDate, processDetailedDailyReport } from '../utils/timeCalculator';
+import { handleExportDetailedDaily } from '../utils/detailedReportExporter';
+import { handleExportConsolidated } from '../utils/consolidatedReportExporter';
 import { useAuth } from '../contexts/AuthContext';
+
 import { collection, getDocs, query, orderBy, getDoc, doc, where } from 'firebase/firestore';
 
 // ✅ Importamos desde los servicios
@@ -57,6 +61,41 @@ const FIELD_DEFS = [
 ];
 
 export default function Informes() {
+    // 🔐 BLOQUEADOR DE ACCESO TEMPORAL (Solo para pruebas en Firebase)
+    const [modoGerencialActivo, setModoGerencialActivo] = useState(() => {
+        try {
+            const params = new URLSearchParams(window.location.search);
+            if (params.get('beta') === 'activar') {
+                localStorage.setItem('CF_MODO_GERENCIAL', 'true');
+                window.history.replaceState({}, document.title, window.location.pathname);
+                return true;
+            }
+            if (params.get('beta') === 'apagar') {
+                localStorage.removeItem('CF_MODO_GERENCIAL');
+                window.history.replaceState({}, document.title, window.location.pathname);
+                return false;
+            }
+            return localStorage.getItem('CF_MODO_GERENCIAL') === 'true';
+        } catch {
+            return false;
+        }
+    });
+
+    const [pestanaActiva, setPestanaActiva] = useState(() => {
+        try {
+            return localStorage.getItem('CF_PESTANA_INFORMES') || 'descargas';
+        } catch {
+            return 'descargas';
+        }
+    });
+
+    const cambiarPestana = (p) => {
+        setPestanaActiva(p);
+        try {
+            localStorage.setItem('CF_PESTANA_INFORMES', p);
+        } catch (_) {}
+    };
+
     const [allLogs, setAllLogs] = useState([]);
     const [loading, setLoading] = useState(true);
     const [exporting, setExporting] = useState(false);
@@ -240,13 +279,13 @@ export default function Informes() {
             const rawVisits = await getAllVisitLogs();
             const employeesMap = await getEmployeesMap();
 
-            let filtered = rawVisits;
+            let filteredUser = rawVisits;
             if (visitStartDate || visitEndDate) {
                 const start = visitStartDate ? new Date(visitStartDate) : null;
                 const end = visitEndDate ? new Date(visitEndDate) : null;
                 if (end) end.setHours(23, 59, 59, 999);
 
-                filtered = rawVisits.filter(v => {
+                filteredUser = rawVisits.filter(v => {
                     const d = parseSpanishDate(v.fecha);
                     if (!d) return false;
                     if (start && d < start) return false; // CORRECCIÓN: permitir el día de inicio
@@ -255,22 +294,28 @@ export default function Informes() {
                 });
             }
 
-            if (visitCsvUserFilter) {
-                const term = visitCsvUserFilter.toLowerCase();
-                filtered = filtered.filter(v => 
-                    v.usuario.toLowerCase().includes(term) || 
-                    (employeesMap[v.usuario]?.nombre || '').toLowerCase().includes(term)
-                );
+            if (visitCsvUserFilter && visitCsvUserFilter.trim()) {
+                const term = visitCsvUserFilter.trim().toLowerCase();
+                filteredUser = filteredUser.filter(v => {
+                    const email = (v.usuario || '').toLowerCase();
+                    const emp = employeesMap[email] || {};
+                    const fullName = `${emp.nombre || emp.firstName || ''} ${emp.apellido || emp.lastName || ''}`.toLowerCase();
+                    return email.includes(term) || fullName.includes(term);
+                });
+                //
+                    //
+                    //
+                //
             }
 
-            if (filtered.length === 0) {
+            if (filteredUser.length === 0) {
                 alert('No se encontraron registros de visitas con los filtros seleccionados.');
                 setExportingVisits(false);
                 return;
             }
 
             // Emparejar registros
-            const sortedAsc = [...filtered].sort((a,b) => {
+            const sortedAsc = [...filteredUser].sort((a,b) => {
                 const tA = getMillisFromDateTime(a.fecha, a.hora);
                 const tB = getMillisFromDateTime(b.fecha, b.hora);
                 return tA - tB;
@@ -292,7 +337,7 @@ export default function Informes() {
                         usuario: email,
                         nombre: emp.nombre || emp.firstName || '',
                         apellido: emp.apellido || emp.lastName || '',
-                        fecha: v.fecha,
+                        fecha: llegada ? llegada.fecha : v.fecha,
                         llegada: llegada ? llegada.hora : '---',
                         salida: v.hora,
                         ubicacion: v.localidad || (v.latitud ? `${v.latitud}, ${v.longitud}` : '---'),
@@ -318,9 +363,35 @@ export default function Informes() {
                 });
             });
 
+            // 3. AHORA filtrar el array 'paired' por el rango de fechas seleccionado
+            let finalPaired = paired;
+            if (visitStartDate || visitEndDate) {
+                const parseISOToLocal = (isoStr) => {
+                    if (!isoStr) return null;
+                    const [y, m, d] = isoStr.split('-').map(Number);
+                    return new Date(y, m - 1, d);
+                };
+                const start = visitStartDate ? parseISOToLocal(visitStartDate) : null;
+                const end = visitEndDate ? parseISOToLocal(visitEndDate) : null;
+
+                finalPaired = paired.filter(p => {
+                    const d = parseSpanishDate(p.fecha);
+                    if (!d) return false;
+                    if (start && d < start) return false;
+                    if (end && d > end) return false;
+                    return true;
+                });
+            }
+
+            if (finalPaired.length === 0) {
+                alert('No se encontraron registros de visitas con los filtros seleccionados.');
+                setExportingVisits(false);
+                return;
+            }
+
             if (exportFormatVisits === 'csv') {
                 const headers = ['Usuario', 'Nombre', 'Apellido', 'Fecha', 'Hora Entrada', 'Hora Salida', 'Ubicación', 'Observaciones Entrada', 'Observaciones Salida'];
-                const rows = paired.map(p => [
+                const rows = finalPaired.map(p => [
                     p.usuario, p.nombre, p.apellido, p.fecha, p.llegada, p.salida, p.ubicacion, p.obsEntrada, p.obsSalida
                 ]);
                 const csvContent = '\ufeff' + [headers.join(','), ...rows.map(r => r.join(','))].join('\n'); // Agregado BOM
@@ -332,7 +403,7 @@ export default function Informes() {
                 link.click();
             } else {
                 const headers = ['Usuario', 'Nombre', 'Apellido', 'Fecha', 'Hora Entrada', 'Hora Salida', 'Ubicación', 'Observaciones Entrada', 'Observaciones Salida'];
-                const rows = paired.map(p => [
+                const rows = finalPaired.map(p => [
                     p.usuario, p.nombre, p.apellido, p.fecha, p.llegada, p.salida, p.ubicacion, p.obsEntrada, p.obsSalida
                 ]);
                 exportToExcelHTML(`reporte_visitas_${new Date().toISOString().split('T')[0]}.xlsx`, headers, rows);
@@ -349,7 +420,9 @@ export default function Informes() {
         setExportingInc(true);
         try {
             // Recolectar asistencias y novedades
-            let combinedLogs = [...allLogs];
+            const freshLogs = await getAllAttendanceLogs();
+            setAllLogs(freshLogs);
+            let combinedLogs = [...freshLogs];
             
             // Si el bloque de visitas está activo, traer visitas
             if (storageConfig?.ruta_active) {
@@ -381,7 +454,13 @@ export default function Informes() {
             // Filtro por usuario
             if (incCsvUserFilter) {
                 const term = incCsvUserFilter.toLowerCase();
-                suspiciousLogs = suspiciousLogs.filter(log => (log.usuario || '').toLowerCase().includes(term));
+                const employeesMap = await getEmployeesMap();
+                suspiciousLogs = suspiciousLogs.filter(log => {
+                    const email = (log.usuario || '').toLowerCase();
+                    const emp = employeesMap[email] || {};
+                    const fullName = `${emp.nombre || emp.firstName || ''} ${emp.apellido || emp.lastName || ''}`.toLowerCase();
+                    return email.includes(term) || fullName.includes(term);
+                });
             }
 
             if (suspiciousLogs.length === 0) {
@@ -495,15 +574,26 @@ export default function Informes() {
                 }))
                 .map(({ key, label }) => ({ key, label }));
 
-            const headers = ['Email/ID', 'Nombres', 'Apellidos', 'Fecha de Creacion', 'Ultimo Acceso', 'UID', ...activeOptionalKeys.map(f => f.label)];
+
+
+            const headers = [
+                'Email/ID', 'Nombres', 'Apellidos', 'Fecha de Creacion', 'Ultimo Acceso', 'UID',
+                'Aceptó Política Habeas Data', 'Fecha de Aceptación',
+                ...activeOptionalKeys.map(f => f.label)
+            ];
             const rows = authUsers.map(emp => {
                 const fs = fsMap[(emp.email || '').toLowerCase()] || {};
+                const acepta = (fs.aceptaPoliticaDatos || fs.extraFields?.aceptaPoliticaDatos) ? 'SÍ' : 'NO';
+                const fecha = fs.fechaAceptacionPolitica || fs.extraFields?.fechaAceptacionPolitica;
+                const fechaStr = fecha ? new Date(fecha).toLocaleString('es-ES') : 'N/A';
                 return [
                     emp.email || '', fs.firstName || '', fs.lastName || '',
                     emp.creationTime ? new Date(emp.creationTime).toLocaleString('es-ES') : 'N/A',
                     emp.lastSignInTime ? new Date(emp.lastSignInTime).toLocaleString('es-ES') : 'N/A',
                     emp.uid || '',
-                    ...activeOptionalKeys.map(({ key }) => fs[key] || '')
+                    acepta,
+                    fechaStr,
+                    ...activeOptionalKeys.map(({ key }) => fs[key] || fs.extraFields?.[key] || '')
                 ];
             });
 
@@ -529,17 +619,28 @@ export default function Informes() {
     const exportToCSV = async () => {
         setExporting(true);
         try {
-            let filtered = (startDate || endDate) ? filterLogsByDateRange(allLogs, startDate, endDate) : allLogs;
+
+            // Recargar datos para que siempre esté actualizado antes de generar el informe
+            const freshLogs = await getAllAttendanceLogs();
+            setAllLogs(freshLogs);
+            const employeesMap = await getEmployeesMap();
+
+            let logsToProcess = freshLogs;
             if (csvUserFilter.trim()) {
                 const searchStr = csvUserFilter.trim().toLowerCase();
-                filtered = filtered.filter(log => (log.usuario || '').toLowerCase().includes(searchStr));
+                logsToProcess = logsToProcess.filter(log => {
+                    const email = (log.usuario || '').toLowerCase();
+                    const emp = employeesMap[email] || {};
+                    const fullName = `${emp.nombre || emp.firstName || ''} ${emp.apellido || emp.lastName || ''}`.toLowerCase();
+                    return email.includes(searchStr) || fullName.includes(searchStr);
+                });
             }
-            if (filtered.length === 0) { alert('No hay registros.'); return; }
 
-            const employeesMap = await getEmployeesMap();
+
+
             const dayFormatter = new Intl.DateTimeFormat('es-ES', { weekday: 'long' });
 
-            const sorted = [...filtered].sort((a, b) => {
+            const sorted = [...logsToProcess].sort((a, b) => {
                 const dateA = parseStringDate(a.fecha, a.hora) || (a.timestamp ? a.timestamp.toDate() : new Date(0));
                 const dateB = parseStringDate(b.fecha, b.hora) || (b.timestamp ? b.timestamp.toDate() : new Date(0));
                 return dateA - dateB;
@@ -552,15 +653,15 @@ export default function Informes() {
                 byUser[key].push(log);
             });
 
-            const shifts = [];
+            let allShifts = [];
             // Ordenamos las llaves de byUser (emails) alfabéticamente
             const sortedEmails = Object.keys(byUser).sort();
 
             sortedEmails.forEach(email => {
-                const records = byUser[email];
+                const chronoRecords = byUser[email];
                 // Usamos los registros en orden ASC (ya vienen así del sort de línea 262)
                 // para emparejar Entrada seguida de su Salida cronológica.
-                const chronoRecords = [...records];
+
                 
                 let pendingEntry = null;
                 const userShifts = [];
@@ -576,8 +677,74 @@ export default function Informes() {
                 if (pendingEntry) userShifts.push({ entry: pendingEntry, exit: null, email });
                 
                 // Invertimos los turnos del usuario para que el más reciente esté arriba
-                shifts.push(...userShifts.reverse());
-            });;
+                allShifts.push(...userShifts);
+            });
+
+            // 5. AHORA aplicar el filtro de fecha sobre los turnos ya emparejados
+            let shifts = allShifts;
+            
+            const parseISOToLocal = (isoStr) => {
+                if (!isoStr) return null;
+                const [y, m, d] = isoStr.split('-').map(Number);
+                return new Date(y, m - 1, d);
+            };
+            
+            const start = startDate ? parseISOToLocal(startDate) : null;
+            const end = endDate ? parseISOToLocal(endDate) : null;
+
+            if (startDate || endDate) {
+                shifts = allShifts.filter(s => {
+                    // Incluir el turno si su ENTRADA o su SALIDA caen en el rango.
+                    // Esto garantiza que turnos nocturnos (ej: entrada 11/05 23:13,
+                    // salida 12/05 06:37) aparezcan al consultar el día 12/05.
+                    const entryDateStr = s.entry?.fecha;
+                    const exitDateStr = s.exit?.fecha;
+
+                    const entryDate = parseSpanishDate(entryDateStr);
+                    const exitDate = parseSpanishDate(exitDateStr);
+
+                    // Al menos una fecha de referencia debe existir
+                    if (!entryDate && !exitDate) return false;
+
+                    // La entrada cae en el rango
+                    const entryInRange = entryDate &&
+                        (!start || entryDate >= start) &&
+                        (!end || entryDate <= end);
+
+                    // La salida cae en el rango
+                    const exitInRange = exitDate &&
+                        (!start || exitDate >= start) &&
+                        (!end || exitDate <= end);
+
+                    // El turno cruza el rango completo (entrada antes del start, salida después del end)
+                    const shiftSpansRange = entryDate && exitDate && start && end &&
+                        entryDate <= start && exitDate >= end;
+
+                    return entryInRange || exitInRange || shiftSpansRange;
+                });
+            }
+
+            // Invertimos para mostrar los más recientes arriba
+            shifts.sort((a, b) => {
+                const dateA = parseStringDate(a.entry?.fecha || a.exit?.fecha, a.entry?.hora || a.exit?.hora);
+                const dateB = parseStringDate(b.entry?.fecha || b.exit?.fecha, b.entry?.hora || b.exit?.hora);
+                return dateB - dateA;
+            });
+
+                        if (attendanceReportType === 'control_detallado_jornada') {
+                await handleExportDetailedDaily(shifts, employeesMap, csvUserFilter, timeConfig, exportFormatAttendance, start, end);
+                setExporting(false);
+                return;
+            }
+
+            if (attendanceReportType === 'control_consolidado_jornada') {
+                await handleExportConsolidated(shifts, employeesMap, csvUserFilter, timeConfig, exportFormatAttendance, start, end);
+                setExporting(false);
+                return;
+            }
+
+            if (shifts.length === 0) { alert('No hay registros en este rango.'); setExporting(false); return; }
+
 
             let headers = [];
             let rows = [];
@@ -596,7 +763,7 @@ export default function Informes() {
                 const snap = await getDocs(collection(db, 'visitas'));
                 let visitasLogs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
 
-                if (startDate || endDate) visitasLogs = filterLogsByDateRange(visitasLogs, startDate, endDate);
+
                 if (csvUserFilter.trim()) visitasLogs = visitasLogs.filter(log => (log.usuario || '').toLowerCase().includes(csvUserFilter.trim().toLowerCase()));
                 if (visitasLogs.length === 0) { alert('No hay registros de visitas en este rango.'); setExporting(false); return; }
 
@@ -631,6 +798,29 @@ export default function Informes() {
                     visitasShifts.push(...userShifts);
                 });
 
+                // Filtrar visitasShifts por fecha si es necesario
+                let filteredVisitasShifts = visitasShifts;
+                if (startDate || endDate) {
+                    const parseISOToLocal = (isoStr) => {
+                        if (!isoStr) return null;
+                        const [y, m, d] = isoStr.split('-').map(Number);
+                        return new Date(y, m - 1, d);
+                    };
+                    const start = startDate ? parseISOToLocal(startDate) : null;
+                    const end = endDate ? parseISOToLocal(endDate) : null;
+                    
+                    filteredVisitasShifts = visitasShifts.filter(vs => {
+                        const refDate = vs.entry ? vs.entry.fecha : vs.exit?.fecha;
+                        const d = parseSpanishDate(refDate);
+                        if (!d) return false;
+                        if (start && d < start) return false;
+                        if (end && d > end) return false;
+                        return true;
+                    });
+                }
+
+
+
                 // Agrupar por bloques de Turno
                 const userShiftBlocks = {};
                 shifts.forEach(shift => {
@@ -640,7 +830,7 @@ export default function Informes() {
                     userShiftBlocks[email].push({ entry, exit, email, visits: [] });
                 });
 
-                visitasShifts.forEach(visitShift => {
+                filteredVisitasShifts.forEach(visitShift => {
                     const { entry, exit, email } = visitShift;
                     if (!email || !entry) return;
                     if (!userShiftBlocks[email]) userShiftBlocks[email] = [];
@@ -689,7 +879,7 @@ export default function Informes() {
                     'Fecha Entrada (Turno)', 'Hora Entrada', 'Localidad Entrada',
                     'Fecha Salida (Turno)', 'Hora Salida', 'Localidad Salida',
                     ...visitHeaders,
-                    'Total Horas Efectivas (Suma Clientes)', 'Tiempo en Transporte (Horas)', 'Total Horas Trabajadas (Turno)'
+                    'Total Horas Efectivas (Suma Clientes)', 'Tiempo en Transporte (Horas)', 'Total Horas Trabajadas (Bruto)', 'Descuento Almuerzo', 'Total Horas Trabajadas (Neto)', 'Comentario Admin 1', 'Comentario Admin 2'
                 ];
 
                 Object.keys(userShiftBlocks).forEach(email => {
@@ -744,10 +934,33 @@ export default function Informes() {
                             }
                         }
 
+                        let totalHorasNeto = totalHorasTrabajadas;
+                        let lunchDeducted = 'No';
+                        if (block.entry && block.exit) {
+                            const lunchModeExplicit = timeConfig.calc_lunchMode === 'individual' || timeConfig.calc_lunchMode === 'empresa';
+                            const shouldDeduct = lunchModeExplicit
+                                ? block.exit?.applyLunch === true
+                                : (block.exit?.applyLunch === true 
+                                    ? true 
+                                    : (block.exit?.applyLunch === false 
+                                        ? false 
+                                        : (timeConfig.calc_lunch && (totalHorasTrabajadas * 60) >= 480)));
+                            
+                            if (shouldDeduct) {
+                                const deductionHrs = (parseInt(timeConfig.calc_lunchMins, 10) || 60) / 60;
+                                totalHorasNeto -= deductionHrs;
+                                lunchDeducted = `Sí (${timeConfig.calc_lunchMins || 60} min)`;
+                            }
+                        }
+
                         rowData.push(
                             parseFloat(sumOfVisitsHrs.toFixed(2)),
                             parseFloat(horasTransporte.toFixed(2)),
-                            parseFloat(totalHorasTrabajadas.toFixed(2))
+                            parseFloat(totalHorasTrabajadas.toFixed(2)),
+                            lunchDeducted,
+                            parseFloat(totalHorasNeto.toFixed(2)),
+                            (block.entry?.comentarioAdmin && block.exit?.comentarioAdmin) ? block.entry.comentarioAdmin : (block.entry?.comentarioAdmin || block.exit?.comentarioAdmin || '-'),
+                            (block.entry?.comentarioAdmin && block.exit?.comentarioAdmin) ? block.exit.comentarioAdmin : '-'
                         );
                         rows.push(rowData);
                     });
@@ -757,7 +970,7 @@ export default function Informes() {
                 const snap = await getDocs(collection(db, 'visitas'));
                 let visitasLogs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
 
-                if (startDate || endDate) visitasLogs = filterLogsByDateRange(visitasLogs, startDate, endDate);
+
                 if (csvUserFilter.trim()) visitasLogs = visitasLogs.filter(log => (log.usuario || '').toLowerCase().includes(csvUserFilter.trim().toLowerCase()));
                 if (visitasLogs.length === 0) { alert('No hay registros de visitas en este rango para armar el resumen.'); setExporting(false); return; }
 
@@ -792,6 +1005,20 @@ export default function Informes() {
                     let totalVisitasHrs = 0;
                     userShifts.forEach(({ entry, exit }) => {
                         if (entry && exit) {
+                            if (startDate || endDate) {
+                                const parseISOToLocal = (isoStr) => {
+                                    if (!isoStr) return null;
+                                    const [y, m, d] = isoStr.split('-').map(Number);
+                                    return new Date(y, m - 1, d);
+                                };
+                                const start = startDate ? parseISOToLocal(startDate) : null;
+                                const end = endDate ? parseISOToLocal(endDate) : null;
+                                const d = parseSpanishDate(entry.fecha);
+                                if (d) {
+                                    if (start && d < start) return;
+                                    if (end && d > end) return;
+                                }
+                            }
                             totalVisitasHrs += calcMsDiffHrs(entry.fecha, entry.hora, exit.fecha, exit.hora);
                         }
                     });
@@ -800,7 +1027,9 @@ export default function Informes() {
                         clientesVisitados: userShifts.length,
                         tiempoClientesHrs: totalVisitasHrs,
                         horasTotalesHrs: 0,
-                        tiempoRealHrs: 0
+                        horasAlmuerzoHrs: 0,
+                        tiempoRealHrs: 0,
+                        comments: []
                     };
                 });
 
@@ -808,17 +1037,30 @@ export default function Informes() {
                     if (entry && exit) {
                         const brutoHrs = calcMsDiffHrs(entry.fecha, entry.hora, exit.fecha, exit.hora);
                         let netoHrs = brutoHrs;
-                        if (timeConfig.calc_lunch && (brutoHrs * 60) >= 480) {
-                            netoHrs -= ((parseInt(timeConfig.calc_lunchMins, 10) || 60) / 60);
+                        let lunchHrs = 0;
+                        const lunchModeExplicit2 = timeConfig.calc_lunchMode === 'individual' || timeConfig.calc_lunchMode === 'empresa';
+                        const shouldDeduct = lunchModeExplicit2
+                            ? exit?.applyLunch === true
+                            : (exit?.applyLunch === true 
+                                ? true 
+                                : (exit?.applyLunch === false 
+                                    ? false 
+                                    : (timeConfig.calc_lunch && (brutoHrs * 60) >= 480)));
+                        if (shouldDeduct) {
+                            lunchHrs = ((parseInt(timeConfig.calc_lunchMins, 10) || 60) / 60);
+                            netoHrs -= lunchHrs;
                         }
                         if (summaryObj[email]) {
                             summaryObj[email].horasTotalesHrs += brutoHrs;
+                            summaryObj[email].horasAlmuerzoHrs += lunchHrs;
                             summaryObj[email].tiempoRealHrs += netoHrs;
+                            if (entry?.comentarioAdmin) summaryObj[email].comments.push(entry.comentarioAdmin);
+                            if (exit?.comentarioAdmin) summaryObj[email].comments.push(exit.comentarioAdmin);
                         }
                     }
                 });
 
-                headers = ['Usuario', 'Nombres', 'Apellidos', 'Clientes Visitados', 'Total Horas Efectivas (Suma Clientes)', 'Horas Totales Trabajadas (Bruto)', 'Tiempo en Transporte (Horas)'];
+                headers = ['Usuario', 'Nombres', 'Apellidos', 'Clientes Visitados', 'Total Horas Efectivas (Suma Clientes)', 'Horas Totales Trabajadas (Bruto)', 'Tiempo en Transporte (Horas)', 'Total Horas Almuerzo', 'Total Horas Trabajadas (Neto)', 'Comentario Admin 1', 'Comentario Admin 2'];
                 rows = Object.keys(summaryObj).map(email => {
                     const emp = employeesMap[email] || { firstName: '', lastName: '' };
                     const s = summaryObj[email];
@@ -831,7 +1073,11 @@ export default function Informes() {
                         s.clientesVisitados,
                         parseFloat(s.tiempoClientesHrs.toFixed(2)),
                         parseFloat(s.horasTotalesHrs.toFixed(2)),
-                        parseFloat(horasTransporte.toFixed(2))
+                        parseFloat(horasTransporte.toFixed(2)),
+                        parseFloat(s.horasAlmuerzoHrs.toFixed(2)),
+                        parseFloat(s.tiempoRealHrs.toFixed(2)),
+                        ([...new Set(s.comments)].filter(Boolean)[0] || '-'),
+                        ([...new Set(s.comments)].filter(Boolean).slice(1).join(' | ') || '-')
                     ];
                 });
 
@@ -839,7 +1085,7 @@ export default function Informes() {
                 const snap = await getDocs(collection(db, 'visitas'));
                 let visitasLogs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
 
-                if (startDate || endDate) visitasLogs = filterLogsByDateRange(visitasLogs, startDate, endDate);
+
                 if (csvUserFilter.trim()) visitasLogs = visitasLogs.filter(log => (log.usuario || '').toLowerCase().includes(csvUserFilter.trim().toLowerCase()));
                 if (visitasLogs.length === 0) { alert('No hay registros de visitas en este rango para armar el reporte.'); setExporting(false); return; }
 
@@ -875,6 +1121,27 @@ export default function Informes() {
                 });
 
                 // Agrupar por bloques de Turno
+                // Filtrar visitasShifts por fecha si es necesario
+                let filteredVisitasShifts = visitasShifts;
+                if (startDate || endDate) {
+                    const parseISOToLocal = (isoStr) => {
+                        if (!isoStr) return null;
+                        const [y, m, d] = isoStr.split('-').map(Number);
+                        return new Date(y, m - 1, d);
+                    };
+                    const start = startDate ? parseISOToLocal(startDate) : null;
+                    const end = endDate ? parseISOToLocal(endDate) : null;
+                    
+                    filteredVisitasShifts = visitasShifts.filter(vs => {
+                        const refDate = vs.entry ? vs.entry.fecha : vs.exit?.fecha;
+                        const d = parseSpanishDate(refDate);
+                        if (!d) return false;
+                        if (start && d < start) return false;
+                        if (end && d > end) return false;
+                        return true;
+                    });
+                }
+
                 const userShiftBlocks = {};
                 shifts.forEach(shift => {
                     const { entry, exit, email } = shift;
@@ -883,7 +1150,7 @@ export default function Informes() {
                     userShiftBlocks[email].push({ entry, exit, email, visits: [] });
                 });
 
-                visitasShifts.forEach(visitShift => {
+                filteredVisitasShifts.forEach(visitShift => {
                     const { entry, exit, email } = visitShift;
                     if (!email || !entry) return;
                     if (!userShiftBlocks[email]) userShiftBlocks[email] = [];
@@ -908,7 +1175,7 @@ export default function Informes() {
                     }
                 });
 
-                headers = ['Usuario', 'Nombres', 'Apellidos', 'Día', 'Fecha Entrada (Turno)', 'Clientes Visitados', 'Total Horas Efectivas (Suma Clientes)', 'Horas Totales Trabajadas (Bruto)', 'Tiempo en Transporte (Horas)'];
+                headers = ['Usuario', 'Nombres', 'Apellidos', 'Día', 'Fecha Entrada (Turno)', 'Clientes Visitados', 'Total Horas Efectivas (Suma Clientes)', 'Horas Totales Trabajadas (Bruto)', 'Tiempo en Transporte (Horas)', 'Descuento Almuerzo', 'Horas Totales Trabajadas (Neto)', 'Comentario Admin 1', 'Comentario Admin 2'];
 
                 Object.keys(userShiftBlocks).forEach(email => {
                     const emp = employeesMap[email] || { firstName: '', lastName: '' };
@@ -935,7 +1202,15 @@ export default function Informes() {
                         if (block.entry && block.exit) {
                             horasTotalesBruto = calcMsDiffHrs(block.entry.fecha, block.entry.hora, block.exit.fecha, block.exit.hora);
                             horasNeto = horasTotalesBruto;
-                            if (timeConfig.calc_lunch && (horasTotalesBruto * 60) >= 480) {
+                            const lunchModeExplicit3 = timeConfig.calc_lunchMode === 'individual' || timeConfig.calc_lunchMode === 'empresa';
+                            const shouldDeduct = lunchModeExplicit3
+                                ? block.exit?.applyLunch === true
+                                : (block.exit?.applyLunch === true 
+                                    ? true 
+                                    : (block.exit?.applyLunch === false 
+                                        ? false 
+                                        : (timeConfig.calc_lunch && (horasTotalesBruto * 60) >= 480)));
+                            if (shouldDeduct) {
                                 horasNeto -= ((parseInt(timeConfig.calc_lunchMins, 10) || 60) / 60);
                             }
                         }
@@ -951,13 +1226,17 @@ export default function Informes() {
                             block.visits.length,
                             parseFloat(totalVisitasHrs.toFixed(2)),
                             parseFloat(horasTotalesBruto.toFixed(2)),
-                            parseFloat(horasTransporte.toFixed(2))
+                            parseFloat(horasTransporte.toFixed(2)),
+                            horasNeto !== horasTotalesBruto ? `Sí (${timeConfig.calc_lunchMins || 60} min)` : 'No',
+                            parseFloat(horasNeto.toFixed(2)),
+                            (block.entry?.comentarioAdmin && block.exit?.comentarioAdmin) ? block.entry.comentarioAdmin : (block.entry?.comentarioAdmin || block.exit?.comentarioAdmin || '-'),
+                            (block.entry?.comentarioAdmin && block.exit?.comentarioAdmin) ? block.exit.comentarioAdmin : '-'
                         ]);
                     });
                 });
 
             } else if (attendanceReportType === 'estandar') {
-                headers = ['Usuario', 'Nombres', 'Apellidos', 'Dia Entrada', 'Fecha Entrada', 'Hora Entrada', 'Localidad Entrada', 'Fecha Salida', 'Hora Salida', 'Localidad Salida', 'Almuerzo', 'Horas', 'Observación'];
+                headers = ['Usuario', 'Nombres', 'Apellidos', 'Dia Entrada', 'Fecha Entrada', 'Hora Entrada', 'Localidad Entrada', 'Fecha Salida', 'Hora Salida', 'Localidad Salida', 'Almuerzo', 'Horas (sin descontar almuerzo)', 'Horas (descontando almuerzo)', 'Observación', 'Comentario Admin 1', 'Comentario Admin 2'];
                 rows = shifts.map(({ entry, exit, email }) => {
                     const emp = employeesMap[email] || { firstName: '', lastName: '' };
                     let dia = '-';
@@ -965,15 +1244,21 @@ export default function Informes() {
                         const d = parseSpanishDate(entry.fecha);
                         dia = (d && !isNaN(d.getTime())) ? dayFormatter.format(d) : '-';
                     }
-                    let horasStr = '0';
+                    let horasSinDescontar = 0;
+                    let horasDescontando = 0;
                     let lunch = 'No';
                     if (entry && exit) {
                         const start = parseStringDate(entry.fecha, entry.hora);
                         const end = parseStringDate(exit.fecha, exit.hora);
-                        const calc = calculateLaborHours(start, end, timeConfig);
+                        const calc = calculateLaborHours(start, end, { ...timeConfig, applyLunchOverride: exit?.applyLunch });
                         if (!calc.error) {
-                            horasStr = parseFloat((calc.raw.totalMins / 60).toFixed(2));
-                            if (calc.appliedLunchDeduction) lunch = `Sí (${(timeConfig.calc_lunchMins || 60) / 60} Hora${(timeConfig.calc_lunchMins || 60) / 60 > 1 ? 's' : ''})`;
+                            const lunchMins = parseInt(timeConfig.calc_lunchMins, 10) || 60;
+                            const minsSinDescontar = calc.raw.totalMins + (calc.appliedLunchDeduction ? lunchMins : 0);
+                            horasSinDescontar = parseFloat((minsSinDescontar / 60).toFixed(2));
+                            horasDescontando = parseFloat((calc.raw.totalMins / 60).toFixed(2));
+                            if (calc.appliedLunchDeduction) {
+                                lunch = `Sí (${lunchMins} min)`;
+                            }
                         }
                     }
                     const obsEnv = [entry?.observacion, exit?.observacion].filter(Boolean).join(' | ') || '-';
@@ -981,11 +1266,13 @@ export default function Informes() {
                         email, emp.firstName, emp.lastName, dia,
                         entry?.fecha || '-', entry?.hora || '-', (entry?.localidad || entry?.ubicacion) || '-',
                         exit?.fecha || '-', exit?.hora || '-', (exit?.localidad || exit?.ubicacion) || '-',
-                        lunch, horasStr, obsEnv
+                        lunch, horasSinDescontar, horasDescontando, obsEnv,
+                        (entry?.comentarioAdmin && exit?.comentarioAdmin) ? entry.comentarioAdmin : (entry?.comentarioAdmin || exit?.comentarioAdmin || '-'),
+                        (entry?.comentarioAdmin && exit?.comentarioAdmin) ? exit.comentarioAdmin : '-'
                     ];
                 });
             } else if (attendanceReportType === 'detallado_horas') {
-                headers = ['Usuario', 'Nombres', 'Apellidos', 'Dia', 'F. Ingreso', 'H. Ingreso', 'F. Salida', 'H. Salida', 'Almuerzo Aplicado', 'Diurnas', 'Nocturnas', 'Dom Diu', 'Dom Noc', 'Total', 'Observación'];
+                headers = ['Usuario', 'Nombres', 'Apellidos', 'Dia', 'F. Ingreso', 'H. Ingreso', 'F. Salida', 'H. Salida', 'Almuerzo Aplicado', 'Diurnas', 'Nocturnas', 'Dom Diu', 'Dom Noc', 'Total (sin descontar almuerzo)', 'Total (descontando almuerzo)', 'Observación', 'Comentario Admin 1', 'Comentario Admin 2'];
                 rows = shifts.map(({ entry, exit, email }) => {
                     const emp = employeesMap[email] || { firstName: '', lastName: '' };
                     let dia = '-';
@@ -995,33 +1282,49 @@ export default function Informes() {
                     }
                     let h = { diurnas: '-', nocturnas: '-', domDiurnas: '-', domNocturnas: '-', totalHHMM: '-' };
                     let lunchApplied = 'No';
+                    let totalSinDescontar = '-';
+                    let totalDescontando = '-';
                     if (entry && exit) {
-                        const calc = calculateLaborHours(parseStringDate(entry.fecha, entry.hora), parseStringDate(exit.fecha, exit.hora), timeConfig);
+                        const calc = calculateLaborHours(parseStringDate(entry.fecha, entry.hora), parseStringDate(exit.fecha, exit.hora), { ...timeConfig, applyLunchOverride: exit?.applyLunch });
                         if (!calc.error) {
                             h = calc.format;
-                            if (calc.appliedLunchDeduction) lunchApplied = `Sí (${(timeConfig.calc_lunchMins || 60) / 60}h)`;
+                            const lunchMins = parseInt(timeConfig.calc_lunchMins, 10) || 60;
+                            if (calc.appliedLunchDeduction) {
+                                lunchApplied = `Sí (${lunchMins} min)`;
+                            }
+                            const minsSinDescontar = calc.raw.totalMins + (calc.appliedLunchDeduction ? lunchMins : 0);
+                            totalSinDescontar = parseFloat((minsSinDescontar / 60).toFixed(2));
+                            totalDescontando = parseFloat((calc.raw.totalMins / 60).toFixed(2));
                         }
                     }
                     const obsEnv = [entry?.observacion, exit?.observacion].filter(Boolean).join(' | ') || '-';
                     return [
                         email, emp.firstName, emp.lastName, dia,
                         entry?.fecha || '-', entry?.hora || '-', exit?.fecha || '-', exit?.hora || '-',
-                        lunchApplied, h.diurnas, h.nocturnas, h.domDiurnas, h.domNocturnas, h.totalHHMM, obsEnv
+                        lunchApplied, h.diurnas, h.nocturnas, h.domDiurnas, h.domNocturnas, totalSinDescontar, totalDescontando, obsEnv,
+                        (entry?.comentarioAdmin && exit?.comentarioAdmin) ? entry.comentarioAdmin : (entry?.comentarioAdmin || exit?.comentarioAdmin || '-'),
+                        (entry?.comentarioAdmin && exit?.comentarioAdmin) ? exit.comentarioAdmin : '-'
                     ];
                 });
             } else {
                 // Resumen
-                headers = ['Usuario', 'Nombres', 'Apellidos', 'Diu', 'Noc', 'Dom Diu', 'Dom Noc', 'Total'];
+                headers = ['Usuario', 'Nombres', 'Apellidos', 'Diu', 'Noc', 'Dom Diu', 'Dom Noc', 'Total Horas Almuerzo', 'Total (sin descontar almuerzo)', 'Total (descontando almuerzo)', 'Comentario Admin 1', 'Comentario Admin 2'];
                 const summary = {};
                 shifts.forEach(({ entry, exit, email }) => {
-                    if (!summary[email]) summary[email] = { u: email, fn: employeesMap[email]?.firstName || '', ln: employeesMap[email]?.lastName || '', d: 0, n: 0, dd: 0, dn: 0 };
+                    if (!summary[email]) summary[email] = { u: email, fn: employeesMap[email]?.firstName || '', ln: employeesMap[email]?.lastName || '', d: 0, n: 0, dd: 0, dn: 0, lunchMinsTotal: 0, totalSinDescontarMins: 0, comments: [] };
                     if (entry && exit) {
-                        const calc = calculateLaborHours(parseStringDate(entry.fecha, entry.hora), parseStringDate(exit.fecha, exit.hora), timeConfig);
+                        const calc = calculateLaborHours(parseStringDate(entry.fecha, entry.hora), parseStringDate(exit.fecha, exit.hora), { ...timeConfig, applyLunchOverride: exit?.applyLunch });
                         if (!calc.error) {
                             summary[email].d += calc.raw.diurnas;
                             summary[email].n += calc.raw.nocturnas;
                             summary[email].dd += calc.raw.domDiurnas;
                             summary[email].dn += calc.raw.domNocturnas;
+                            const lunchMins = parseInt(timeConfig.calc_lunchMins, 10) || 60;
+                            const minsDescontados = calc.appliedLunchDeduction ? lunchMins : 0;
+                            summary[email].lunchMinsTotal += minsDescontados;
+                            summary[email].totalSinDescontarMins += (calc.raw.totalMins + minsDescontados);
+                            if (entry?.comentarioAdmin) summary[email].comments.push(entry.comentarioAdmin);
+                            if (exit?.comentarioAdmin) summary[email].comments.push(exit.comentarioAdmin);
                         }
                     }
                 });
@@ -1031,8 +1334,36 @@ export default function Informes() {
                     parseFloat((s.n / 60).toFixed(2)),
                     parseFloat((s.dd / 60).toFixed(2)),
                     parseFloat((s.dn / 60).toFixed(2)),
-                    parseFloat(((s.d + s.n + s.dd + s.dn) / 60).toFixed(2))
+                    parseFloat((s.lunchMinsTotal / 60).toFixed(2)),
+                    parseFloat((s.totalSinDescontarMins / 60).toFixed(2)),
+                    parseFloat(((s.d + s.n + s.dd + s.dn) / 60).toFixed(2)),
+                    ([...new Set(s.comments)].filter(Boolean)[0] || '-'),
+                    ([...new Set(s.comments)].filter(Boolean).slice(1).join(' | ') || '-')
                 ]);
+            }
+
+            // Post-procesar comentarios: Cambiar títulos a "Comentario 1" y "Comentario 2"
+            // y remover columna 2 si en ningún día se registró un segundo comentario.
+            if (headers && headers.length >= 2) {
+                const h1 = headers[headers.length - 2];
+                const h2 = headers[headers.length - 1];
+                if (h1 === 'Comentario Admin 1' && h2 === 'Comentario Admin 2') {
+                    const hasComment2 = rows.some(row => {
+                        const val = row[row.length - 1];
+                        return val && val !== '-';
+                    });
+
+                    if (hasComment2) {
+                        headers[headers.length - 2] = 'Comentario 1';
+                        headers[headers.length - 1] = 'Comentario 2';
+                    } else {
+                        headers.pop();
+                        headers[headers.length - 1] = 'Comentario 1';
+                        rows.forEach(row => {
+                            row.pop();
+                        });
+                    }
+                }
             }
 
             const ts = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
@@ -1117,7 +1448,13 @@ export default function Informes() {
             }
             if (incidentCsvUserFilter.trim()) {
                 const needle = incidentCsvUserFilter.trim().toLowerCase();
-                incidents = incidents.filter(inc => (inc.usuario || '').toLowerCase().includes(needle));
+                const employeesMap = await getEmployeesMap();
+                incidents = incidents.filter(inc => {
+                    const email = (inc.usuario || '').toLowerCase();
+                    const emp = employeesMap[email] || {};
+                    const fullName = `${emp.nombre || emp.firstName || ''} ${emp.apellido || emp.lastName || ''}`.toLowerCase();
+                    return email.includes(needle) || fullName.includes(needle);
+                });
             }
             if (incidents.length === 0) { alert('No hay novedades.'); return; }
 
@@ -1148,229 +1485,265 @@ export default function Informes() {
 
     return (
         <div className="min-h-screen bg-gradient-to-b from-[#3C7DA6] to-[#6FAF6B] p-6">
-            <div className="max-w-6xl mx-auto">
-                <div className="flex justify-between items-center mb-8">
+            <div className={modoGerencialActivo && pestanaActiva === 'gerencial' ? "max-w-7xl mx-auto transition-all" : "max-w-6xl mx-auto transition-all"}>
+                <div className="flex flex-wrap justify-between items-center mb-8 gap-4">
                     <h1 className="text-3xl font-bold text-gray-800 flex items-center gap-2">
                         <FileText size={30} className="text-blue-600" />
                         Centro de Informes y Reportes
                         <span className="text-[10px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-mono ml-2 border border-gray-200">v{import.meta.env.VITE_APP_VERSION}</span>
                     </h1>
+
+                    {/* 🔐 PESTAÑAS CONDICIONALES: Solo visibles si modoGerencialActivo está encendido */}
+                    {modoGerencialActivo && (
+                        <div className="flex items-center bg-white/90 backdrop-blur p-1 rounded-2xl shadow-lg border border-white/60 gap-1 animate-in fade-in duration-300">
+                            <button
+                                onClick={() => cambiarPestana('descargas')}
+                                className={`px-4 py-2 rounded-xl font-bold text-xs sm:text-sm flex items-center gap-2 transition ${
+                                    pestanaActiva === 'descargas'
+                                        ? 'bg-blue-600 text-white shadow-md'
+                                        : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100/70'
+                                }`}
+                            >
+                                <FileText size={16} /> Descargas y Archivos
+                            </button>
+                            <button
+                                onClick={() => cambiarPestana('gerencial')}
+                                className={`px-4 py-2 rounded-xl font-bold text-xs sm:text-sm flex items-center gap-2 transition ${
+                                    pestanaActiva === 'gerencial'
+                                        ? 'bg-blue-600 text-white shadow-md'
+                                        : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100/70'
+                                }`}
+                            >
+                                <TrendingUp size={16} /> Tablero Gerencial
+                            </button>
+                        </div>
+                    )}
+
                     <button onClick={() => navigate('/login')} className="px-6 py-2.5 bg-white text-gray-800 font-bold flex items-center gap-2 rounded-xl border border-gray-100 shadow-lg hover:bg-gray-50 transition whitespace-nowrap">
                         <ArrowLeft size={20} /> Volver
                     </button>
                 </div>
 
-                {/* 1. EXPORTAR FOTOS / EVIDENCIAS */}
-                <div className="bg-white rounded-xl shadow-2xl p-6 mb-6 border-l-4 border-blue-500">
-                    <div className="flex justify-between items-start mb-4">
-                        <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                            <Image size={24} className="text-blue-600" /> Evidencias Fotográficas
-                        </h2>
-                        {storageConfig && (storageConfig.saveAsistencia || storageConfig.saveIncidentes) && (
-                            <button onClick={handleManualCleanup} disabled={cleaningStorage} className="text-xs bg-red-50 text-red-600 px-3 py-1.5 rounded-lg border border-red-200 hover:bg-red-100 font-bold flex items-center gap-1">
-                                {cleaningStorage ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />} Limpiar Fotos Antiguas
-                            </button>
+                {/* CONTENIDO: Alterna entre el nuevo Tablero Gerencial o el centro actual de descargas */}
+                {modoGerencialActivo && pestanaActiva === 'gerencial' ? (
+                    <TableroGerencial />
+                ) : (
+                    <>
+                        {/* 1. EXPORTAR FOTOS / EVIDENCIAS */}
+                        <div className="bg-white rounded-xl shadow-2xl p-6 mb-6 border-l-4 border-blue-500">
+                            <div className="flex justify-between items-start mb-4">
+                                <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                                    <Image size={24} className="text-blue-600" /> Evidencias Fotográficas
+                                </h2>
+                                {storageConfig && (storageConfig.saveAsistencia || storageConfig.saveIncidentes) && (
+                                    <button onClick={handleManualCleanup} disabled={cleaningStorage} className="text-xs bg-red-50 text-red-600 px-3 py-1.5 rounded-lg border border-red-200 hover:bg-red-100 font-bold flex items-center gap-1">
+                                        {cleaningStorage ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />} Limpiar Fotos Antiguas
+                                    </button>
+                                )}
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4 items-end">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Fecha Inicio</label>
+                                    <input type="date" value={photoDesde} onChange={e => setPhotoDesde(e.target.value)} className="w-full px-4 py-2 border rounded-lg" />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Fecha Fin</label>
+                                    <input type="date" value={photoHasta} onChange={e => setPhotoHasta(e.target.value)} className="w-full px-4 py-2 border rounded-lg" />
+                                </div>
+                                <button
+                                    disabled={photoSearching || !photoDesde || !photoHasta}
+                                    onClick={async () => {
+                                        setPhotoSearching(true); setPhotoMsg('Buscando...'); setPhotoProgress({ current: 0, total: 0 });
+                                        try {
+                                            const lista = await listPhotosByFilter({ tipo: photoTipo, desde: new Date(photoDesde + 'T00:00:00'), hasta: new Date(photoHasta + 'T23:59:59'), filtroUsuario: photoFiltroUser });
+                                            if (lista.length === 0) { setPhotoMsg('No se encontraron fotos.'); return; }
+                                            setPhotoMsg(`Descargando ${lista.length} fotos...`);
+                                            const { zipBlob, addedCount } = await downloadPhotosAsZip(lista, (c, t) => setPhotoProgress({ current: c, total: t }));
+                                            const link = document.createElement('a'); link.href = URL.createObjectURL(zipBlob); link.download = `fotos_${photoDesde}_${photoHasta}.zip`; link.click();
+                                            setPhotoMsg(`✅ Descargadas ${addedCount} fotos.`);
+                                        } catch (e) { setPhotoMsg('❌ Error: ' + e.message); console.error('Error en descarga de fotos:', e); } finally { setPhotoSearching(false); }
+                                    }}
+                                    className="w-full py-2 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2"
+                                >
+                                    {photoSearching ? <Loader2 size={20} className="animate-spin" /> : <Download size={20} />} Descargar Fotos
+                                </button>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <select value={photoTipo} onChange={e => setPhotoTipo(e.target.value)} className="w-full px-4 py-2 border rounded-lg">
+                                    <option value="ambos">Todo (Asistencia + Novedades)</option>
+                                    <option value="asistencia">Solo Asistencia</option>
+                                    <option value="incidentes">Solo Novedades</option>
+                                    {storageConfig?.ruta_active && (
+                                        <option value="visitas">Solo Visitas en Clientes (Ruta)</option>
+                                    )}
+                                </select>
+                                <input type="text" placeholder="Correo o dominio (opcional)" value={photoFiltroUser} onChange={e => setPhotoFiltroUser(e.target.value)} className="w-full px-4 py-2 border rounded-lg" />
+                            </div>
+                            {photoSearching && photoProgress.total > 0 && (
+                                <div className="mt-4"><div className="w-full bg-gray-100 h-2 rounded-full overflow-hidden"><div className="bg-blue-600 h-full transition-all" style={{ width: `${(photoProgress.current / photoProgress.total) * 100}%` }}></div></div><p className="text-xs text-gray-500 mt-1">Progreso: {photoProgress.current} / {photoProgress.total}</p></div>
+                            )}
+                            <p className="text-sm text-gray-500 mt-2">{photoMsg}</p>
+                        </div>
+
+                        {/* 2. EXPORTAR ASISTENCIA */}
+                        <div className="bg-white rounded-xl shadow-2xl p-6 mb-6 border-l-4 border-green-500">
+                            <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2"><Download size={24} className="text-green-600" /> Reportes de Asistencia</h2>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                                <div><label className="text-sm">Desde</label><input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-full px-4 py-2 border rounded-lg" /></div>
+                                <div><label className="text-sm">Hasta</label><input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="w-full px-4 py-2 border rounded-lg" /></div>
+                                <div><label className="text-sm">Filtro Usuario</label><input type="text" value={csvUserFilter} onChange={e => setCsvUserFilter(e.target.value)} className="w-full px-4 py-2 border rounded-lg" /></div>
+                            </div>
+                            <div className="flex gap-4 flex-wrap">
+                                <select value={attendanceReportType} onChange={e => setAttendanceReportType(e.target.value)} className="flex-1 px-4 py-2 border rounded-lg min-w-[200px]">
+                                    <option value="estandar">Detallado Estándar</option>
+                                    <option value="detallado_horas">Discriminado por tipos de horas (Colombia)</option>
+                                    <option value="resumen">Resumen General por Empleado</option>
+                                    {storageConfig?.ruta_active && (
+                                        <>
+                                            <option value="tiempo_efectivo_cliente">Tiempo Efectivo en Cliente (Modo Ruta) - Detallado</option>
+                                            <option value="tiempo_efectivo_cliente_resumen">Tiempo Efectivo en Cliente (Modo Ruta) - Resumido</option>
+                                            <option value="tiempo_efectivo_cliente_dias">Tiempo Efectivo en Cliente (Modo Ruta) - Por Días</option>
+                                            <option value="control_detallado_jornada">Control Detallado de Jornada y Ruta (Por Días)</option>
+                                            <option value="control_consolidado_jornada">Control Consolidado por Jornada y Ruta (Por Empleado)</option>
+                                        </>
+                                    )}
+                                </select>
+                                <select value={exportFormatAttendance} onChange={e => setExportFormatAttendance(e.target.value)} className="px-4 py-2 border rounded-lg">
+                                    <option value="csv">CSV</option>
+                                    <option value="xlsx">Excel</option>
+                                </select>
+                                <button onClick={exportToCSV} disabled={exporting} className="px-8 py-2 bg-green-600 text-white font-bold rounded-lg hover:bg-green-700 flex items-center gap-2 shadow-md">
+                                    {exporting ? <Loader2 size={20} className="animate-spin" /> : <FileText size={20} />} Generar Reporte
+                                </button>
+                            </div>
+
+                            <div className="mt-8 pt-6 border-t border-red-50 flex items-center justify-between">
+                                <div><h3 className="text-red-700 font-bold text-sm">Limpieza de Historial</h3><p className="text-xs text-gray-500">Borra definitivamente los registros en el rango de fechas seleccionado.</p></div>
+                                <button onClick={handleBulkDelete} disabled={deleting || !startDate || !endDate} className="px-4 py-2 bg-red-100 text-red-700 rounded-lg font-bold hover:bg-red-200 transition">
+                                    {deleting ? 'Borrando...' : 'Borrar Rango'}
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* 3. EXPORTAR NOVEDADES */}
+                        <div className="bg-white rounded-xl shadow-2xl p-6 mb-6 border-l-4 border-orange-400">
+                            <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2"><TriangleAlert size={24} className="text-orange-500" /> Reporte de Novedades</h2>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                                <div><label className="text-sm">Desde</label><input type="date" value={incidentStartDate} onChange={e => setIncidentStartDate(e.target.value)} className="w-full px-4 py-2 border rounded-lg" /></div>
+                                <div><label className="text-sm">Hasta</label><input type="date" value={incidentEndDate} onChange={e => setIncidentEndDate(e.target.value)} className="w-full px-4 py-2 border rounded-lg" /></div>
+                                <div><label className="text-sm">Usuario</label><input type="text" value={incidentCsvUserFilter} onChange={e => setIncidentCsvUserFilter(e.target.value)} className="w-full px-4 py-2 border rounded-lg" /></div>
+                            </div>
+                            <div className="flex gap-4 flex-wrap justify-end">
+                                <select value={exportFormatIncidents} onChange={e => setExportFormatIncidents(e.target.value)} className="px-4 py-2 border rounded-lg">
+                                    <option value="csv">CSV</option>
+                                    <option value="xlsx">XLSX</option>
+                                </select>
+                                <button onClick={exportIncidentsToCSV} disabled={exportingIncidents} className="px-8 py-2 bg-orange-600 text-white font-bold rounded-lg hover:bg-orange-700 flex items-center gap-2 shadow-md">
+                                    {exportingIncidents ? <Loader2 size={20} className="animate-spin" /> : <Download size={20} />} Exportar
+                                </button>
+                            </div>
+                            <div className="mt-4 pt-4 border-t border-red-50 flex items-center justify-between">
+                                <p className="text-xs text-gray-500">Borrar novedades permanentemente en el rango de fechas.</p>
+                                <button onClick={handleBulkDeleteIncidents} disabled={deletingIncidents || !incidentStartDate || !incidentEndDate} className="px-4 py-2 bg-red-100 text-red-700 rounded-lg font-bold hover:bg-red-200 transition">Borrar Rango</button>
+                            </div>
+                        </div>
+                        
+                        {/* 3.1. EXPORTAR VISITAS (MODO RUTA) */}
+                        {storageConfig?.ruta_active && (
+                            <div className="bg-white rounded-xl shadow-2xl p-6 mb-6 border-l-4 border-blue-400">
+                                <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2"><Navigation size={24} className="text-blue-500" /> Reporte de Visitas a Clientes</h2>
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                                    <div><label className="text-sm">Desde</label><input type="date" value={visitStartDate} onChange={e => setVisitStartDate(e.target.value)} className="w-full px-4 py-2 border rounded-lg" /></div>
+                                    <div><label className="text-sm">Hasta</label><input type="date" value={visitEndDate} onChange={e => setVisitEndDate(e.target.value)} className="w-full px-4 py-2 border rounded-lg" /></div>
+                                    <div><label className="text-sm">Usuario</label><input type="text" value={visitCsvUserFilter} onChange={e => setVisitCsvUserFilter(e.target.value)} className="w-full px-4 py-2 border rounded-lg" /></div>
+                                </div>
+                                <div className="flex gap-4 flex-wrap justify-end">
+                                    <select value={exportFormatVisits} onChange={e => setExportFormatVisits(e.target.value)} className="px-4 py-2 border rounded-lg">
+                                        <option value="csv">CSV</option>
+                                        <option value="xlsx">XLSX</option>
+                                    </select>
+                                    <button onClick={handleExportVisitas} disabled={exportingVisits} className="px-8 py-2 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 flex items-center gap-2 shadow-md">
+                                        {exportingVisits ? <Loader2 size={20} className="animate-spin" /> : <Download size={20} />} Exportar
+                                    </button>
+                                </div>
+                                <div className="mt-4 pt-4 border-t border-red-50 flex items-center justify-between">
+                                    <p className="text-xs text-gray-500">Borrar visitas permanentemente en el rango de fechas.</p>
+                                    <button onClick={handleBulkDeleteVisitas} disabled={deletingVisits || !visitStartDate || !visitEndDate} className="px-4 py-2 bg-red-100 text-red-700 rounded-lg font-bold hover:bg-red-200 transition">
+                                        {deletingVisits ? 'Borrando...' : 'Borrar Rango'}
+                                    </button>
+                                </div>
+                            </div>
                         )}
-                    </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4 items-end">
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Fecha Inicio</label>
-                            <input type="date" value={photoDesde} onChange={e => setPhotoDesde(e.target.value)} className="w-full px-4 py-2 border rounded-lg" />
+                        {/* 3.2 REPORTE DE INCONSISTENCIAS (SEGURIDAD GPS) */}
+                        <div className="bg-white rounded-xl shadow-2xl p-6 mb-6 border-l-4 border-red-600">
+                            <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2"><AlertTriangle size={24} className="text-red-600" /> Reporte de Inconsistencias (Seguridad)</h2>
+                            <p className="text-xs text-gray-500 mb-4">Muestra únicamente los registros donde el sistema detectó alertas de seguridad como probabilidad de interceptación satelital o engaños en la fotografía.</p>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                                <div><label className="text-sm">Desde</label><input type="date" value={incStartDate} onChange={e => setIncStartDate(e.target.value)} className="w-full px-4 py-2 border border-red-300 rounded-lg focus:ring-red-500" /></div>
+                                <div><label className="text-sm">Hasta</label><input type="date" value={incEndDate} onChange={e => setIncEndDate(e.target.value)} className="w-full px-4 py-2 border border-red-300 rounded-lg focus:ring-red-500" /></div>
+                                <div><label className="text-sm">Usuario</label><input type="text" value={incCsvUserFilter} onChange={e => setIncCsvUserFilter(e.target.value)} className="w-full px-4 py-2 border border-red-300 rounded-lg focus:ring-red-500" placeholder="Opcional..." /></div>
+                            </div>
+                            <div className="flex gap-4 flex-wrap justify-end">
+                                <select value={exportFormatInc} onChange={e => setExportFormatInc(e.target.value)} className="px-4 py-2 border border-red-300 rounded-lg">
+                                    <option value="csv">CSV</option>
+                                    <option value="xlsx">Excel</option>
+                                </select>
+                                <button onClick={handleExportInconsistencias} disabled={exportingInc} className="px-8 py-2 bg-red-600 text-white font-bold rounded-lg hover:bg-red-700 flex items-center gap-2 shadow-md">
+                                    {exportingInc ? <Loader2 size={20} className="animate-spin" /> : <Download size={20} />} Exportar
+                                </button>
+                            </div>
+                            {/* Botón Descargar Diccionario */}
+                            <div className="mt-4 pt-4 border-t border-red-100 flex flex-col md:flex-row items-center justify-between gap-4">
+                                <p className="text-sm text-gray-600 font-medium whitespace-pre-wrap">Diccionario de errores de seguridad.</p>
+                                <button onClick={() => {
+                                    let content = "GLOSARIO DE ALERTAS DE INTEGRIDAD GPS\n========================================\n\n";
+                                    Object.keys(GPS_ERROR_DICTIONARY).forEach(errCode => {
+                                        const dict = GPS_ERROR_DICTIONARY[errCode];
+                                        content += `[${errCode}] - ${dict.title}\n`;
+                                        content += `${dict.description}\n\n`;
+                                        content += "----------------------------------------\n\n";
+                                    });
+                                    const blob = new Blob([content], { type: 'text/plain;charset=utf-8;' });
+                                    const url = URL.createObjectURL(blob);
+                                    const link = document.createElement('a');
+                                    link.href = url;
+                                    link.download = `Diccionario_Inconsistencias.txt`;
+                                    link.click();
+                                }} className="px-6 py-2 bg-red-50 text-red-700 border border-red-200 rounded-lg font-bold hover:bg-red-100 transition whitespace-nowrap flex items-center gap-2">
+                                    <FileText size={18} /> Descargar Diccionario
+                                </button>
+                            </div>
                         </div>
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Fecha Fin</label>
-                            <input type="date" value={photoHasta} onChange={e => setPhotoHasta(e.target.value)} className="w-full px-4 py-2 border rounded-lg" />
-                        </div>
-                        <button
-                            disabled={photoSearching || !photoDesde || !photoHasta}
-                            onClick={async () => {
-                                setPhotoSearching(true); setPhotoMsg('Buscando...'); setPhotoProgress({ current: 0, total: 0 });
-                                try {
-                                    const lista = await listPhotosByFilter({ tipo: photoTipo, desde: new Date(photoDesde + 'T00:00:00'), hasta: new Date(photoHasta + 'T23:59:59'), filtroUsuario: photoFiltroUser });
-                                    if (lista.length === 0) { setPhotoMsg('No se encontraron fotos.'); return; }
-                                    setPhotoMsg(`Descargando ${lista.length} fotos...`);
-                                    const { zipBlob, addedCount } = await downloadPhotosAsZip(lista, (c, t) => setPhotoProgress({ current: c, total: t }));
-                                    const link = document.createElement('a'); link.href = URL.createObjectURL(zipBlob); link.download = `fotos_${photoDesde}_${photoHasta}.zip`; link.click();
-                                    setPhotoMsg(`✅ Descargadas ${addedCount} fotos.`);
-                                } catch (e) { setPhotoMsg('❌ Error: ' + e.message); console.error('Error en descarga de fotos:', e); } finally { setPhotoSearching(false); }
-                            }}
-                            className="w-full py-2 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2"
-                        >
-                            {photoSearching ? <Loader2 size={20} className="animate-spin" /> : <Download size={20} />} Descargar Fotos
-                        </button>
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <select value={photoTipo} onChange={e => setPhotoTipo(e.target.value)} className="w-full px-4 py-2 border rounded-lg">
-                            <option value="ambos">Todo (Asistencia + Novedades)</option>
-                            <option value="asistencia">Solo Asistencia</option>
-                            <option value="incidentes">Solo Novedades</option>
-                            {storageConfig?.ruta_active && (
-                                <option value="visitas">Solo Visitas en Clientes (Ruta)</option>
-                            )}
-                        </select>
-                        <input type="text" placeholder="Correo o dominio (opcional)" value={photoFiltroUser} onChange={e => setPhotoFiltroUser(e.target.value)} className="w-full px-4 py-2 border rounded-lg" />
-                    </div>
-                    {photoSearching && photoProgress.total > 0 && (
-                        <div className="mt-4"><div className="w-full bg-gray-100 h-2 rounded-full overflow-hidden"><div className="bg-blue-600 h-full transition-all" style={{ width: `${(photoProgress.current / photoProgress.total) * 100}%` }}></div></div><p className="text-xs text-gray-500 mt-1">Progreso: {photoProgress.current} / {photoProgress.total}</p></div>
-                    )}
-                    <p className="text-sm text-gray-500 mt-2">{photoMsg}</p>
-                </div>
 
-                {/* 2. EXPORTAR ASISTENCIA */}
-                <div className="bg-white rounded-xl shadow-2xl p-6 mb-6 border-l-4 border-green-500">
-                    <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2"><Download size={24} className="text-green-600" /> Reportes de Asistencia</h2>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                        <div><label className="text-sm">Desde</label><input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-full px-4 py-2 border rounded-lg" /></div>
-                        <div><label className="text-sm">Hasta</label><input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="w-full px-4 py-2 border rounded-lg" /></div>
-                        <div><label className="text-sm">Filtro Usuario</label><input type="text" value={csvUserFilter} onChange={e => setCsvUserFilter(e.target.value)} className="w-full px-4 py-2 border rounded-lg" /></div>
-                    </div>
-                    <div className="flex gap-4 flex-wrap">
-                        <select value={attendanceReportType} onChange={e => setAttendanceReportType(e.target.value)} className="flex-1 px-4 py-2 border rounded-lg min-w-[200px]">
-                            <option value="estandar">Detallado Estándar</option>
-                            <option value="detallado_horas">Discriminado por tipos de horas (Colombia)</option>
-                            <option value="resumen">Resumen General por Empleado</option>
-                            {storageConfig?.ruta_active && (
-                                <>
-                                    <option value="tiempo_efectivo_cliente">Tiempo Efectivo en Cliente (Modo Ruta) - Detallado</option>
-                                    <option value="tiempo_efectivo_cliente_resumen">Tiempo Efectivo en Cliente (Modo Ruta) - Resumido</option>
-                                    <option value="tiempo_efectivo_cliente_dias">Tiempo Efectivo en Cliente (Modo Ruta) - Por Días</option>
-                                </>
-                            )}
-                        </select>
-                        <select value={exportFormatAttendance} onChange={e => setExportFormatAttendance(e.target.value)} className="px-4 py-2 border rounded-lg">
-                            <option value="csv">CSV</option>
-                            <option value="xlsx">Excel</option>
-                        </select>
-                        <button onClick={exportToCSV} disabled={exporting} className="px-8 py-2 bg-green-600 text-white font-bold rounded-lg hover:bg-green-700 flex items-center gap-2 shadow-md">
-                            {exporting ? <Loader2 size={20} className="animate-spin" /> : <FileText size={20} />} Generar Reporte
-                        </button>
-                    </div>
-
-                    <div className="mt-8 pt-6 border-t border-red-50 flex items-center justify-between">
-                        <div><h3 className="text-red-700 font-bold text-sm">Limpieza de Historial</h3><p className="text-xs text-gray-500">Borra definitivamente los registros en el rango de fechas seleccionado.</p></div>
-                        <button onClick={handleBulkDelete} disabled={deleting || !startDate || !endDate} className="px-4 py-2 bg-red-100 text-red-700 rounded-lg font-bold hover:bg-red-200 transition">
-                            {deleting ? 'Borrando...' : 'Borrar Rango'}
-                        </button>
-                    </div>
-                </div>
-
-                {/* 3. EXPORTAR NOVEDADES */}
-                <div className="bg-white rounded-xl shadow-2xl p-6 mb-6 border-l-4 border-orange-400">
-                    <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2"><TriangleAlert size={24} className="text-orange-500" /> Reporte de Novedades</h2>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                        <div><label className="text-sm">Desde</label><input type="date" value={incidentStartDate} onChange={e => setIncidentStartDate(e.target.value)} className="w-full px-4 py-2 border rounded-lg" /></div>
-                        <div><label className="text-sm">Hasta</label><input type="date" value={incidentEndDate} onChange={e => setIncidentEndDate(e.target.value)} className="w-full px-4 py-2 border rounded-lg" /></div>
-                        <div><label className="text-sm">Usuario</label><input type="text" value={incidentCsvUserFilter} onChange={e => setIncidentCsvUserFilter(e.target.value)} className="w-full px-4 py-2 border rounded-lg" /></div>
-                    </div>
-                    <div className="flex gap-4 flex-wrap justify-end">
-                        <select value={exportFormatIncidents} onChange={e => setExportFormatIncidents(e.target.value)} className="px-4 py-2 border rounded-lg">
-                            <option value="csv">CSV</option>
-                            <option value="xlsx">XLSX</option>
-                        </select>
-                        <button onClick={exportIncidentsToCSV} disabled={exportingIncidents} className="px-8 py-2 bg-orange-600 text-white font-bold rounded-lg hover:bg-orange-700 flex items-center gap-2 shadow-md">
-                            {exportingIncidents ? <Loader2 size={20} className="animate-spin" /> : <Download size={20} />} Exportar
-                        </button>
-                    </div>
-                    <div className="mt-4 pt-4 border-t border-red-50 flex items-center justify-between">
-                        <p className="text-xs text-gray-500">Borrar novedades permanentemente en el rango de fechas.</p>
-                        <button onClick={handleBulkDeleteIncidents} disabled={deletingIncidents || !incidentStartDate || !incidentEndDate} className="px-4 py-2 bg-red-100 text-red-700 rounded-lg font-bold hover:bg-red-200 transition">Borrar Rango</button>
-                    </div>
-                </div>
-                
-                {/* 3.1. EXPORTAR VISITAS (MODO RUTA) */}
-                {storageConfig?.ruta_active && (
-                    <div className="bg-white rounded-xl shadow-2xl p-6 mb-6 border-l-4 border-blue-400">
-                        <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2"><Navigation size={24} className="text-blue-500" /> Reporte de Visitas a Clientes</h2>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                            <div><label className="text-sm">Desde</label><input type="date" value={visitStartDate} onChange={e => setVisitStartDate(e.target.value)} className="w-full px-4 py-2 border rounded-lg" /></div>
-                            <div><label className="text-sm">Hasta</label><input type="date" value={visitEndDate} onChange={e => setVisitEndDate(e.target.value)} className="w-full px-4 py-2 border rounded-lg" /></div>
-                            <div><label className="text-sm">Usuario</label><input type="text" value={visitCsvUserFilter} onChange={e => setVisitCsvUserFilter(e.target.value)} className="w-full px-4 py-2 border rounded-lg" /></div>
+                        {/* 4. GESTIÓN DE EMPLEADOS */}
+                        <div className="bg-white rounded-xl shadow-2xl p-6 mb-12 border-l-4 border-emerald-500">
+                            <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2"><UserMinus size={24} className="text-emerald-600" /> Personal y Empleados</h2>
+                            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end mb-4">
+                                <div className="md:col-span-2">
+                                    <label className="text-sm">Usuario</label>
+                                    <input type="text" placeholder="Filtrar por email..." value={filterEmail} onChange={e => setFilterEmail(e.target.value)} className="w-full px-4 py-2 border rounded-lg" />
+                                </div>
+                                <div className="md:col-span-2 flex gap-2">
+                                    <select value={exportFormatEmployees} onChange={e => setExportFormatEmployees(e.target.value)} className="border rounded-lg px-2">
+                                        <option value="csv">CSV</option>
+                                        <option value="xlsx">XLSX</option>
+                                    </select>
+                                    <button onClick={exportEmployeesToCSV} disabled={exportingEmployees} className="flex-1 bg-blue-600 text-white py-2 rounded-lg font-bold hover:bg-blue-700 flex justify-center gap-2">
+                                        {exportingEmployees ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />} Exportar
+                                    </button>
+                                </div>
+                            </div>
+                            <div className="mt-4 pt-4 border-t border-red-50 flex items-center justify-between">
+                                <p className="text-xs text-gray-500">Eliminar permanentemente a un empleado del sistema.</p>
+                                <button onClick={() => setShowDeleteModal(true)} className="px-4 py-2 bg-red-100 text-red-700 rounded-lg font-bold hover:bg-red-200 transition flex items-center gap-2">
+                                    <Trash2 size={16} /> Borrar Empleado
+                                </button>
+                            </div>
                         </div>
-                        <div className="flex gap-4 flex-wrap justify-end">
-                            <select value={exportFormatVisits} onChange={e => setExportFormatVisits(e.target.value)} className="px-4 py-2 border rounded-lg">
-                                <option value="csv">CSV</option>
-                                <option value="xlsx">XLSX</option>
-                            </select>
-                            <button onClick={handleExportVisitas} disabled={exportingVisits} className="px-8 py-2 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 flex items-center gap-2 shadow-md">
-                                {exportingVisits ? <Loader2 size={20} className="animate-spin" /> : <Download size={20} />} Exportar
-                            </button>
-                        </div>
-                        <div className="mt-4 pt-4 border-t border-red-50 flex items-center justify-between">
-                            <p className="text-xs text-gray-500">Borrar visitas permanentemente en el rango de fechas.</p>
-                            <button onClick={handleBulkDeleteVisitas} disabled={deletingVisits || !visitStartDate || !visitEndDate} className="px-4 py-2 bg-red-100 text-red-700 rounded-lg font-bold hover:bg-red-200 transition">
-                                {deletingVisits ? 'Borrando...' : 'Borrar Rango'}
-                            </button>
-                        </div>
-                    </div>
+                    </>
                 )}
-
-                {/* 3.2 REPORTE DE INCONSISTENCIAS (SEGURIDAD GPS) */}
-                <div className="bg-white rounded-xl shadow-2xl p-6 mb-6 border-l-4 border-red-600">
-                    <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2"><AlertTriangle size={24} className="text-red-600" /> Reporte de Inconsistencias (Seguridad)</h2>
-                    <p className="text-xs text-gray-500 mb-4">Muestra únicamente los registros donde el sistema detectó alertas de seguridad como probabilidad de interceptación satelital o engaños en la fotografía.</p>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                        <div><label className="text-sm">Desde</label><input type="date" value={incStartDate} onChange={e => setIncStartDate(e.target.value)} className="w-full px-4 py-2 border border-red-300 rounded-lg focus:ring-red-500" /></div>
-                        <div><label className="text-sm">Hasta</label><input type="date" value={incEndDate} onChange={e => setIncEndDate(e.target.value)} className="w-full px-4 py-2 border border-red-300 rounded-lg focus:ring-red-500" /></div>
-                        <div><label className="text-sm">Usuario</label><input type="text" value={incCsvUserFilter} onChange={e => setIncCsvUserFilter(e.target.value)} className="w-full px-4 py-2 border border-red-300 rounded-lg focus:ring-red-500" placeholder="Opcional..." /></div>
-                    </div>
-                    <div className="flex gap-4 flex-wrap justify-end">
-                        <select value={exportFormatInc} onChange={e => setExportFormatInc(e.target.value)} className="px-4 py-2 border border-red-300 rounded-lg">
-                            <option value="csv">CSV</option>
-                            <option value="xlsx">Excel</option>
-                        </select>
-                        <button onClick={handleExportInconsistencias} disabled={exportingInc} className="px-8 py-2 bg-red-600 text-white font-bold rounded-lg hover:bg-red-700 flex items-center gap-2 shadow-md">
-                            {exportingInc ? <Loader2 size={20} className="animate-spin" /> : <Download size={20} />} Exportar
-                        </button>
-                    </div>
-                    {/* Botón Descargar Diccionario */}
-                    <div className="mt-4 pt-4 border-t border-red-100 flex flex-col md:flex-row items-center justify-between gap-4">
-                        <p className="text-sm text-gray-600 font-medium whitespace-pre-wrap">Diccionario de errores de seguridad.</p>
-                        <button onClick={() => {
-                            let content = "GLOSARIO DE ALERTAS DE INTEGRIDAD GPS\n========================================\n\n";
-                            Object.keys(GPS_ERROR_DICTIONARY).forEach(errCode => {
-                                const dict = GPS_ERROR_DICTIONARY[errCode];
-                                content += `[${errCode}] - ${dict.title}\n`;
-                                content += `${dict.description}\n\n`;
-                                content += "----------------------------------------\n\n";
-                            });
-                            const blob = new Blob([content], { type: 'text/plain;charset=utf-8;' });
-                            const url = URL.createObjectURL(blob);
-                            const link = document.createElement('a');
-                            link.href = url;
-                            link.download = `Diccionario_Inconsistencias.txt`;
-                            link.click();
-                        }} className="px-6 py-2 bg-red-50 text-red-700 border border-red-200 rounded-lg font-bold hover:bg-red-100 transition whitespace-nowrap flex items-center gap-2">
-                            <FileText size={18} /> Descargar Diccionario
-                        </button>
-                    </div>
-                </div>
-
-                {/* 4. GESTIÓN DE EMPLEADOS */}
-                <div className="bg-white rounded-xl shadow-2xl p-6 mb-12 border-l-4 border-emerald-500">
-                    <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2"><UserMinus size={24} className="text-emerald-600" /> Personal y Empleados</h2>
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end mb-4">
-                        <div className="md:col-span-2">
-                            <label className="text-sm">Usuario</label>
-                            <input type="text" placeholder="Filtrar por email..." value={filterEmail} onChange={e => setFilterEmail(e.target.value)} className="w-full px-4 py-2 border rounded-lg" />
-                        </div>
-                        <div className="md:col-span-2 flex gap-2">
-                            <select value={exportFormatEmployees} onChange={e => setExportFormatEmployees(e.target.value)} className="border rounded-lg px-2">
-                                <option value="csv">CSV</option>
-                                <option value="xlsx">XLSX</option>
-                            </select>
-                            <button onClick={exportEmployeesToCSV} disabled={exportingEmployees} className="flex-1 bg-blue-600 text-white py-2 rounded-lg font-bold hover:bg-blue-700 flex justify-center gap-2">
-                                {exportingEmployees ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />} Exportar
-                            </button>
-                        </div>
-                    </div>
-                    <div className="mt-4 pt-4 border-t border-red-50 flex items-center justify-between">
-                        <p className="text-xs text-gray-500">Eliminar permanentemente a un empleado del sistema.</p>
-                        <button onClick={() => setShowDeleteModal(true)} className="px-4 py-2 bg-red-100 text-red-700 rounded-lg font-bold hover:bg-red-200 transition flex items-center gap-2">
-                            <Trash2 size={16} /> Borrar Empleado
-                        </button>
-                    </div>
-                </div>
             </div>
 
             <DeleteEmployeeModal isOpen={showDeleteModal} onClose={() => setShowDeleteModal(false)} />

@@ -5,10 +5,11 @@ import { collection, addDoc, serverTimestamp, doc, getDoc, setDoc, query, where,
 import { Camera, MapPin, ArrowLeft, Send, CheckCircle, Navigation } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { uploadPhoto } from '../services/storageService';
-import { addWatermarkToImage, fetchServerTime, fetchLocationName } from '../utils/watermark';
-import { getColombiaDateTime } from '../utils/timezone';
-import { saveOfflineRecord } from '../services/offlineStorage';
+import { addWatermarkToImage, fetchServerTime, fetchServerDate, fetchLocationName } from '../utils/watermark';
+import { getColombiaDateTime, getMillisFromDateTime, getTimeZoneFromCoords } from '../utils/timezone';
+import { saveOfflineRecord, updateOfflineRecordGPS, getPendingRecords } from '../services/offlineStorage';
 import { acquireVariableCamera, releaseCamera, getCameraErrorInfo } from '../utils/cameraManager';
+import UpdateBadge from '../components/common/UpdateBadge';
 
 export default function RutaDashboard() {
     const { currentUser } = useAuth();
@@ -17,6 +18,8 @@ export default function RutaDashboard() {
     const canvasRef = useRef(null);
     const streamRef = useRef(null);
     const rutaCameraFacingRef = useRef('environment'); // ref para que startCamera siempre lea el valor actualizado
+    const latestGpsRef = useRef({ latitude: 0, longitude: 0, timestamp: 0 });
+    const watchPositionIdRef = useRef(null);
 
     const [allowedActions, setAllowedActions] = useState({ entry: true, exit: false });
     const [hasActiveShift, setHasActiveShift] = useState(false); // DEFAULT FALSE para evitar turnos huerfanos (loophole)
@@ -34,6 +37,29 @@ export default function RutaDashboard() {
     const [pendingMode, setPendingMode] = useState(null); // modo a usar cuando se reintenta
 
     useEffect(() => {
+        // 📍 GPS Warm-Up en segundo plano para eliminar demoras en la primera captura en Ruta
+        if (navigator.geolocation) {
+            try {
+                const watchId = navigator.geolocation.watchPosition(
+                    (pos) => {
+                        if (pos && pos.coords) {
+                            latestGpsRef.current = {
+                                latitude: pos.coords.latitude,
+                                longitude: pos.coords.longitude,
+                                timestamp: Date.now()
+                            };
+                            console.log("📍 [GPS Warm-Up Ruta] Coordenadas precargadas:", pos.coords.latitude, pos.coords.longitude);
+                        }
+                    },
+                    (err) => console.warn("📍 [GPS Warm-Up Ruta] Esperando fijación...", err.message),
+                    { enableHighAccuracy: false, maximumAge: 60000, timeout: 10000 }
+                );
+                watchPositionIdRef.current = watchId;
+            } catch (e) {
+                console.warn("📍 [GPS Warm-Up Ruta] Error iniciando rastreador:", e);
+            }
+        }
+
         const checkVisitStatus = async () => {
             if (!currentUser) return;
             setIsLoadingShift(true);
@@ -51,8 +77,11 @@ export default function RutaDashboard() {
                 console.warn("Error obteniendo configuracion cámara:", err);
             }
 
+            const rawEmail = currentUser.email || '';
+            const userEmail = rawEmail.trim().toLowerCase();
+
             // 1. Cargar estado inicial desde localStorage para evitar parpadeos
-            const lastTypeLS = localStorage.getItem(`lastRutaType_${currentUser.email}`);
+            const lastTypeLS = localStorage.getItem(`lastRutaType_${userEmail}`) || localStorage.getItem(`lastRutaType_${rawEmail}`);
             if (lastTypeLS === 'Llegada Cliente') {
                 setAllowedActions({ entry: false, exit: true });
             } else {
@@ -60,158 +89,217 @@ export default function RutaDashboard() {
             }
 
             // 2. Revisar si hay salida de turno registrada en este dispositivo (vía Dashboard)
-            const attType = localStorage.getItem(`lastAttendanceType_${currentUser.email}`);
+            const attType = localStorage.getItem(`lastAttendanceType_${userEmail}`) || localStorage.getItem(`lastAttendanceType_${rawEmail}`);
             if (attType === 'Salida') {
                 setAllowedActions({ entry: true, exit: false });
                 setHasActiveShift(false); // Salida general → no hay turno activo
-                localStorage.removeItem(`lastRutaType_${currentUser.email}`);
+                localStorage.removeItem(`lastRutaType_${userEmail}`);
+                if (rawEmail && rawEmail !== userEmail) localStorage.removeItem(`lastRutaType_${rawEmail}`);
+                setIsLoadingShift(false);
                 return; // Cortamos aquí porque la salida de turno manda (inicio nuevo)
             }
 
             // Helper de timeout para no bloquear la UI si hay internet lento/offline
-            const fetchWithTimeout = (promise, ms = 3000) => {
+            const fetchWithTimeout = (promise, ms = 2000) => {
                 return Promise.race([
                     promise,
                     new Promise((_, reject) => setTimeout(() => reject(new Error('Firebase Timeout')), ms))
                 ]);
             };
 
-            // 2.5. Verificar en Firestore si el empleado tiene una Entrada activa en asistencia general
-            // REGLA CRÍTICA: No se puede registrar Llegada Cliente sin haber marcado Entrada primero.
-            try {
-                const qAtt = query(
-                    collection(db, 'attendance'),
-                    where('usuario', '==', currentUser.email)
-                );
-                const snapAtt = await fetchWithTimeout(getDocs(qAtt));
-
-                const getMillisAtt = (ts) => {
-                    if (!ts) return 0;
+            const getMillisAtt = (r) => {
+                if (!r) return 0;
+                const ts = r.timestamp;
+                if (ts) {
                     if (typeof ts.toMillis === 'function') return ts.toMillis();
                     if (ts instanceof Date) return ts.getTime();
                     if (typeof ts === 'number') return ts;
-                    if (typeof ts === 'string') return new Date(ts).getTime();
-                    return 0;
-                };
-                const getMillisFromDT = (fecha, hora) => {
-                    if (!fecha || !hora) return 0;
-                    try {
-                        const [d, m, y] = fecha.split('/');
-                        const [h, min, s] = hora.split(':');
-                        return new Date(y, m - 1, d, h, min, s || 0).getTime();
-                    } catch { return 0; }
-                };
+                    if (typeof ts === 'string') {
+                        const parsed = new Date(ts).getTime();
+                        if (!isNaN(parsed)) return parsed;
+                    }
+                }
+                return getMillisFromDateTime(r.fecha, r.hora);
+            };
 
-                if (!snapAtt.empty) {
-                    const attRecords = snapAtt.docs.map(d => d.data());
-                    // Filtrar solo registros de asistencia general (Entrada/Salida), excluir visitas
-                    const generalRecords = attRecords.filter(r => {
-                        const t = (r.tipo || '').toLowerCase();
+            // Intentar verificar el turno activo desde Firestore e IndexedDB
+            let currentShiftStartTime = 0;
+            try {
+                let candidateAtt = [];
+
+                // IndexedDB offline queue
+                try {
+                    const pendingOff = await getPendingRecords();
+                    if (Array.isArray(pendingOff)) {
+                        const userOff = pendingOff.filter(r => {
+                            const u = (r.metadata?.usuario || '').trim().toLowerCase();
+                            return u === userEmail;
+                        }).map(r => ({
+                            tipo: r.metadata?.tipo || (r.mode === 'entry' ? 'Entrada' : 'Salida'),
+                            fecha: r.metadata?.fecha,
+                            hora: r.metadata?.hora,
+                            timestamp: r.capturedAt || r.metadata?.timestamp
+                        }));
+                        candidateAtt.push(...userOff);
+                    }
+                } catch (e) {}
+
+                // Firestore attendance
+                const qAttLower = query(
+                    collection(db, "attendance"),
+                    where("usuario", "==", userEmail)
+                );
+                const snapAttLower = await fetchWithTimeout(getDocs(qAttLower));
+                if (!snapAttLower.empty) {
+                    candidateAtt.push(...snapAttLower.docs.map(d => d.data()));
+                }
+
+                if (rawEmail && rawEmail !== userEmail) {
+                    const qAttRaw = query(
+                        collection(db, "attendance"),
+                        where("usuario", "==", rawEmail)
+                    );
+                    const snapAttRaw = await fetchWithTimeout(getDocs(qAttRaw));
+                    if (!snapAttRaw.empty) {
+                        candidateAtt.push(...snapAttRaw.docs.map(d => d.data()));
+                    }
+                }
+
+                if (candidateAtt.length > 0) {
+                    // Filtrar SOLO registros de asistencia general ('Entrada' y 'Salida')
+                    const generalRecords = candidateAtt.filter(r => {
+                        const t = (r.tipo || '').toLowerCase().trim();
                         return t === 'entrada' || t === 'salida';
                     });
 
+                    // Revisar evidencia local previa como salvaguarda
+                    const lastAttTypeLS = localStorage.getItem(`lastAttendanceType_${userEmail}`) || localStorage.getItem(`lastAttendanceType_${rawEmail}`);
+                    const lastAttTimeLS = parseInt(localStorage.getItem(`lastAttendanceTime_${userEmail}`) || localStorage.getItem(`lastAttendanceTime_${rawEmail}`) || '0', 10);
+                    const diffHoursLS = lastAttTimeLS > 0 ? (Date.now() - lastAttTimeLS) / (1000 * 60 * 60) : 999;
+                    const isLSActive = lastAttTypeLS === 'Entrada' && diffHoursLS <= 20;
+
                     if (generalRecords.length > 0) {
-                        generalRecords.sort((a, b) => {
-                            const tA = getMillisAtt(a.timestamp) || getMillisFromDT(a.fecha, a.hora) || 0;
-                            const tB = getMillisAtt(b.timestamp) || getMillisFromDT(b.fecha, b.hora) || 0;
-                            return tB - tA;
-                        });
+                        generalRecords.sort((a, b) => getMillisAtt(b) - getMillisAtt(a));
                         const lastGeneral = generalRecords[0];
-                        const lastGeneralMs = getMillisAtt(lastGeneral.timestamp) || getMillisFromDT(lastGeneral.fecha, lastGeneral.hora) || 0;
+                        const lastGeneralMs = getMillisAtt(lastGeneral);
                         const diffHoursGeneral = lastGeneralMs > 0 ? (Date.now() - lastGeneralMs) / (1000 * 60 * 60) : 999;
 
-                        const lastTipoGeneral = (lastGeneral.tipo || '').toLowerCase();
-                        // Turno activo = último registro es Entrada y no pasaron más de 20h
-                        const isActive = lastTipoGeneral === 'entrada' && diffHoursGeneral <= 20;
+                        const lastTipoGeneral = (lastGeneral.tipo || '').toLowerCase().trim();
+                        const isActive = (lastTipoGeneral === 'entrada' && diffHoursGeneral <= 20) || isLSActive;
                         setHasActiveShift(isActive);
 
                         if (!isActive) {
-                            // No hay turno activo: resetear visitas también
                             setAllowedActions({ entry: true, exit: false });
-                            localStorage.removeItem(`lastRutaType_${currentUser.email}`);
-                            return; // No continuar cargando estado de visitas
+                            localStorage.removeItem(`lastRutaType_${userEmail}`);
+                            if (rawEmail && rawEmail !== userEmail) localStorage.removeItem(`lastRutaType_${rawEmail}`);
+                            setIsLoadingShift(false);
+                            return;
+                        } else {
+                            currentShiftStartTime = lastGeneralMs || lastAttTimeLS;
                         }
+                    } else if (isLSActive) {
+                        setHasActiveShift(true);
+                        currentShiftStartTime = lastAttTimeLS;
                     } else {
-                        // Sin registros generales → nunca marcó Entrada
                         setHasActiveShift(false);
                         setAllowedActions({ entry: true, exit: false });
-                        localStorage.removeItem(`lastRutaType_${currentUser.email}`);
+                        localStorage.removeItem(`lastRutaType_${userEmail}`);
+                        if (rawEmail && rawEmail !== userEmail) localStorage.removeItem(`lastRutaType_${rawEmail}`);
+                        setIsLoadingShift(false);
                         return;
                     }
                 } else {
-                    // Sin ningún registro de attendance → primer uso, sin turno activo
-                    setHasActiveShift(false);
-                    setAllowedActions({ entry: true, exit: false });
-                    localStorage.removeItem(`lastRutaType_${currentUser.email}`);
-                    return;
+                    const lastAttTypeLS = localStorage.getItem(`lastAttendanceType_${userEmail}`) || localStorage.getItem(`lastAttendanceType_${rawEmail}`);
+                    const lastAttTimeLS = parseInt(localStorage.getItem(`lastAttendanceTime_${userEmail}`) || localStorage.getItem(`lastAttendanceTime_${rawEmail}`) || '0', 10);
+                    const diffHoursLS = lastAttTimeLS > 0 ? (Date.now() - lastAttTimeLS) / (1000 * 60 * 60) : 999;
+                    const isLSActive = lastAttTypeLS === 'Entrada' && diffHoursLS <= 20;
+
+                    if (isLSActive) {
+                        setHasActiveShift(true);
+                        currentShiftStartTime = lastAttTimeLS;
+                    } else {
+                        setHasActiveShift(false);
+                        setAllowedActions({ entry: true, exit: false });
+                        localStorage.removeItem(`lastRutaType_${userEmail}`);
+                        if (rawEmail && rawEmail !== userEmail) localStorage.removeItem(`lastRutaType_${rawEmail}`);
+                        setIsLoadingShift(false);
+                        return;
+                    }
                 }
             } catch (attErr) {
-                // Sin conexión: usar localStorage como fallback
-                console.warn('⚠️ Sin conexión para verificar turno activo. Usando caché local:', attErr.message);
-                // Si el localStorage dice Entrada, asumir que hay turno activo (beneficio de la duda offline)
-                const fallbackActive = attType === 'Entrada';
-                setHasActiveShift(fallbackActive);
-                if (!fallbackActive) {
+                console.warn("⚠️ Sin conexión a Firestore para verificar turno activo:", attErr);
+                const lastAttTypeLS = localStorage.getItem(`lastAttendanceType_${userEmail}`) || localStorage.getItem(`lastAttendanceType_${rawEmail}`);
+                const lastAttTimeLS = parseInt(localStorage.getItem(`lastAttendanceTime_${userEmail}`) || localStorage.getItem(`lastAttendanceTime_${rawEmail}`) || '0', 10);
+                const diffHoursLS = lastAttTimeLS > 0 ? (Date.now() - lastAttTimeLS) / (1000 * 60 * 60) : 999;
+                
+                const isStrictlyActive = (lastAttTypeLS === 'Entrada' && diffHoursLS <= 20) || lastTypeLS === 'Llegada Cliente';
+                setHasActiveShift(isStrictlyActive);
+                if (!isStrictlyActive) {
                     setAllowedActions({ entry: true, exit: false });
-                    localStorage.removeItem(`lastRutaType_${currentUser.email}`);
-                    return;
+                    localStorage.removeItem(`lastRutaType_${userEmail}`);
+                    if (rawEmail && rawEmail !== userEmail) localStorage.removeItem(`lastRutaType_${rawEmail}`);
+                    setIsLoadingShift(false);
                 }
             }
 
             // 3. Consultar la base de datos para recuperar la última visita real de la nube
             try {
-                const q = query(
-                    collection(db, "visitas"),
-                    where("usuario", "==", currentUser.email)
-                );
-                const snap = await fetchWithTimeout(getDocs(q));
-                if (!snap.empty) {
-                    const records = snap.docs.map(d => d.data());
-                    
-                    const getMillisLocal = (ts) => {
-                        if (!ts) return 0;
-                        if (typeof ts.toMillis === 'function') return ts.toMillis();
-                        if (ts instanceof Date) return ts.getTime();
-                        if (typeof ts === 'number') return ts;
-                        if (typeof ts === 'string') return new Date(ts).getTime();
-                        return Date.now();
-                    };
-                    const getMillisFromDateTime = (fecha, hora) => {
-                        if (!fecha || !hora) return 0;
-                        try {
-                            const [d, m, y] = fecha.split('/');
-                            const [h, min, s] = hora.split(':');
-                            return new Date(y, m - 1, d, h, min, s).getTime();
-                        } catch { return 0; }
-                    };
+                let candidateVisitas = [];
 
-                    // Ordenar registros: el más reciente primero
-                    records.sort((a, b) => {
-                        const tA = getMillisLocal(a.timestamp) || getMillisFromDateTime(a.fecha, a.hora) || 0;
-                        const tB = getMillisLocal(b.timestamp) || getMillisFromDateTime(b.fecha, b.hora) || 0;
-                        return tB - tA; 
-                    });
+                const qLower = query(
+                    collection(db, "visitas"),
+                    where("usuario", "==", userEmail)
+                );
+                const snapLower = await fetchWithTimeout(getDocs(qLower));
+                if (!snapLower.empty) {
+                    candidateVisitas.push(...snapLower.docs.map(d => d.data()));
+                }
+
+                if (rawEmail && rawEmail !== userEmail) {
+                    const qRaw = query(
+                        collection(db, "visitas"),
+                        where("usuario", "==", rawEmail)
+                    );
+                    const snapRaw = await fetchWithTimeout(getDocs(qRaw));
+                    if (!snapRaw.empty) {
+                        candidateVisitas.push(...snapRaw.docs.map(d => d.data()));
+                    }
+                }
+
+                if (candidateVisitas.length > 0) {
+                    candidateVisitas.sort((a, b) => getMillisAtt(b) - getMillisAtt(a));
                     
-                    const lastDoc = records[0];
-                    const lastTipo = lastDoc.tipo || lastDoc.mode; // Fallback for older documents
-                    const lastTime = getMillisLocal(lastDoc.timestamp) || getMillisFromDateTime(lastDoc.fecha, lastDoc.hora) || 0;
-                    
-                    const diffHours = lastTime > 0 ? (Date.now() - lastTime) / (1000 * 60 * 60) : 0;
-                    
-                    // Condición 1: Pasaron más de 20 horas desde la última visita en ruta
-                    if (diffHours > 20) {
+                    const lastDoc = candidateVisitas[0];
+                    const lastTipo = lastDoc.tipo;
+                    const lastTime = getMillisAtt(lastDoc);
+                    const diffHours = (Date.now() - lastTime) / (1000 * 60 * 60);
+
+                    const CLOCK_SKEW_TOLERANCE_MS = 5 * 60 * 1000;
+                    const isVisitOpenInBoth = lastTipo === 'Llegada Cliente' && lastTypeLS === 'Llegada Cliente';
+                    const isDefinitelyBeforeShift = lastTime > 0
+                        && currentShiftStartTime > 0
+                        && lastTime < (currentShiftStartTime - CLOCK_SKEW_TOLERANCE_MS);
+
+                    if (!isVisitOpenInBoth && isDefinitelyBeforeShift) {
+                        console.log("⚠️ Se ignoran visitas pasadas porque se acaba de iniciar un nuevo turno.");
                         setAllowedActions({ entry: true, exit: false });
-                        localStorage.removeItem(`lastRutaType_${currentUser.email}`);
-                    } 
-                    // Condición 2: El último registro fue 'Llegada Cliente' y no han pasado 20 horas
+                        localStorage.removeItem(`lastRutaType_${userEmail}`);
+                        if (rawEmail && rawEmail !== userEmail) localStorage.removeItem(`lastRutaType_${rawEmail}`);
+                    }
+                    else if (diffHours > 20) {
+                        setAllowedActions({ entry: true, exit: false });
+                        localStorage.removeItem(`lastRutaType_${userEmail}`);
+                        if (rawEmail && rawEmail !== userEmail) localStorage.removeItem(`lastRutaType_${rawEmail}`);
+                    }
                     else if (lastTipo === 'Llegada Cliente') {
                         setAllowedActions({ entry: false, exit: true });
-                        localStorage.setItem(`lastRutaType_${currentUser.email}`, 'Llegada Cliente');
-                    } 
-                    // Condición 3: El último registro fue 'Salida Cliente'
+                        localStorage.setItem(`lastRutaType_${userEmail}`, 'Llegada Cliente');
+                        if (rawEmail && rawEmail !== userEmail) localStorage.setItem(`lastRutaType_${rawEmail}`, 'Llegada Cliente');
+                    }
                     else if (lastTipo === 'Salida Cliente') {
                         setAllowedActions({ entry: true, exit: false });
-                        localStorage.setItem(`lastRutaType_${currentUser.email}`, 'Salida Cliente');
+                        localStorage.setItem(`lastRutaType_${userEmail}`, 'Salida Cliente');
+                        if (rawEmail && rawEmail !== userEmail) localStorage.setItem(`lastRutaType_${rawEmail}`, 'Salida Cliente');
                     }
                 }
             } catch (err) {
@@ -222,6 +310,13 @@ export default function RutaDashboard() {
         };
         
         checkVisitStatus();
+
+        return () => {
+            if (watchPositionIdRef.current !== null && navigator.geolocation) {
+                try { navigator.geolocation.clearWatch(watchPositionIdRef.current); } catch (e) {}
+                watchPositionIdRef.current = null;
+            }
+        };
     }, [currentUser]);
 
     const startCamera = async (selectedMode) => {
@@ -236,23 +331,24 @@ export default function RutaDashboard() {
             if (msg) setCameraLoadingMsg(msg);
         };
 
-        // Módulo 3: Cámara variable según configuración
-        const stream = await acquireVariableCamera(videoRef, streamRef, preferredFacing, onStatus);
+        try {
+            // Módulo 3: Cámara variable según configuración
+            const stream = await acquireVariableCamera(videoRef, streamRef, preferredFacing, onStatus);
 
-        setCameraLoading(false);
+            setCameraLoading(false);
 
-        if (!stream) {
-            // Determinar el tipo de error real
-            // acquireVariableCamera retorna null si todos los intentos fallaron
-            // Usamos un error genérico recuperable para mostrar el botón Reintentar
-            const errInfo = getCameraErrorInfo({ name: 'NotReadableError', message: 'All strategies failed' }, 'variable');
+            if (!stream) {
+                throw new Error("No se pudo iniciar el flujo de la cámara");
+            }
+
+            streamRef.current = stream;
+            setStep('camera');
+        } catch (error) {
+            setCameraLoading(false);
+            const errInfo = getCameraErrorInfo(error, 'variable');
             setCameraError(errInfo);
             setPendingMode(selectedMode);
-            return; // No cambiar step, permanece en idle con el panel de error
         }
-
-        streamRef.current = stream;
-        setStep('camera');
     };
 
 
@@ -260,16 +356,49 @@ export default function RutaDashboard() {
         if (step === 'camera' && videoRef.current && streamRef.current) {
             videoRef.current.srcObject = streamRef.current;
         }
+
+        if (step === 'camera') {
+            // Iniciar GPS warmup
+            if ('geolocation' in navigator) {
+                try {
+                    console.log("📍 [GPS Ruta] Iniciando calentamiento temprano (warm-up)");
+                    watchPositionIdRef.current = navigator.geolocation.watchPosition(
+                        (position) => {
+                            const { latitude, longitude } = position.coords;
+                            latestGpsRef.current = { latitude, longitude, timestamp: position.timestamp };
+                        },
+                        (error) => {
+                            console.warn("📍 [GPS Ruta] Error en warm-up:", error);
+                        },
+                        { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+                    );
+                } catch (gpsErr) {
+                    console.error("📍 [GPS Ruta] Error síncrono iniciando warm-up:", gpsErr);
+                }
+            }
+        } else {
+            if (watchPositionIdRef.current !== null) {
+                navigator.geolocation.clearWatch(watchPositionIdRef.current);
+                watchPositionIdRef.current = null;
+                console.log("📍 [GPS Ruta] Warm-up detenido");
+            }
+        }
+        return () => {
+            if (watchPositionIdRef.current !== null) {
+                navigator.geolocation.clearWatch(watchPositionIdRef.current);
+                watchPositionIdRef.current = null;
+            }
+        };
     }, [step]);
 
     const stopCamera = useCallback(() => {
-        // Delegar liberación al cameraManager (async, no bloquea)
-        releaseCamera(videoRef, streamRef);
         if (videoRef.current) videoRef.current.srcObject = null;
         if (streamRef.current) {
             streamRef.current.getTracks().forEach(t => { try { t.stop(); } catch(e){} });
             streamRef.current = null;
         }
+        // Delegar liberación al cameraManager y retornar la Promesa de Android (800ms)
+        return releaseCamera(videoRef, streamRef);
     }, []);
 
     // Liberar cámara al mandar la app a segundo plano (soluciona cámara ocupada)
@@ -291,6 +420,9 @@ export default function RutaDashboard() {
             alert('Acción denegada: No se ha detectado un turno de entrada activo.');
             return;
         }
+        // Esperar a que la cámara anterior se cierre por completo
+        await stopCamera();
+
         setMode(selectedMode);
         setPendingMode(selectedMode);
         setObservacion('');
@@ -338,35 +470,57 @@ export default function RutaDashboard() {
             setStep('processing');
 
             const locationPromise = (async () => {
-                // Intento 1: Alta precisión (8s)
                 try {
-                    return await new Promise((resolve, reject) => {
-                        navigator.geolocation.getCurrentPosition(resolve, reject, {
-                            enableHighAccuracy: true,
-                            timeout: 8000,
-                            maximumAge: 0
+                    // Si el warm-up ya consiguió coordenadas válidas recientes (menos de 5 min), usarlas de inmediato
+                    const now = Date.now();
+                    const warmGps = latestGpsRef.current;
+                    if (warmGps && warmGps.latitude !== 0 && (now - warmGps.timestamp < 300000)) {
+                        console.log("📍 [GPS Ruta] Usando coordenadas del warm-up instantáneamente.");
+                        // ⚠️ IMPORTANTE: fromCache:true indica que este timestamp GPS es intencionalmente
+                        // antiguo (hasta 5 min), NO debe usarse para validar si el reloj fue alterado.
+                        return { coords: { latitude: warmGps.latitude, longitude: warmGps.longitude, altitude: null, accuracy: null, speed: null, heading: null }, timestamp: warmGps.timestamp, fromCache: true };
+                    }
+
+                    // Intento 1: Alta precisión (8s)
+                    try {
+                        return await new Promise((resolve, reject) => {
+                            try {
+                                navigator.geolocation.getCurrentPosition(resolve, reject, {
+                                    enableHighAccuracy: true,
+                                    timeout: 8000,
+                                    maximumAge: 0
+                                });
+                            } catch (e) {
+                                reject(e);
+                            }
                         });
-                    });
-                } catch {}
-                // Intento 2: Baja precisión, acepta cache de hasta 5 minutos
-                try {
-                    return await new Promise((resolve, reject) => {
-                        navigator.geolocation.getCurrentPosition(resolve, reject, {
-                            enableHighAccuracy: false,
-                            timeout: 5000,
-                            maximumAge: 300000
+                    } catch {}
+                    // Intento 2: Baja precisión, acepta cache de hasta 5 minutos
+                    try {
+                        return await new Promise((resolve, reject) => {
+                            try {
+                                navigator.geolocation.getCurrentPosition(resolve, reject, {
+                                    enableHighAccuracy: false,
+                                    timeout: 5000,
+                                    maximumAge: 300000
+                                });
+                            } catch (e) {
+                                reject(e);
+                            }
                         });
-                    });
-                } catch (gpsErr) {
-                    console.warn("GPS en modo rápido también falló. Continuando sin GPS.", gpsErr);
+                    } catch (gpsErr) {
+                        console.warn("GPS en modo rápido también falló. Continuando sin GPS.", gpsErr);
+                    }
+                } catch (err) {
+                    console.error("📍 [GPS Ruta] Error global en locationPromise de geolocalización:", err);
                 }
                 // Fallback: Sin GPS — el registro procede sin coordenadas
                 return { coords: { latitude: 0, longitude: 0, altitude: null, accuracy: null, speed: null, heading: null } };
             })();
 
-            const [position, serverTime] = await Promise.all([
+            const [position, serverDate] = await Promise.all([
                 locationPromise,
-                fetchServerTime()
+                fetchServerDate()
             ]);
 
             const { latitude, longitude, altitude, accuracy, speed, heading } = position.coords;
@@ -381,18 +535,42 @@ export default function RutaDashboard() {
             let isSuspiciousGPS = false;
             let gpsAnomalies = [];
             
-            // --- INICIO VERIFICACIÓN EXTERNA DE HORA (GPS) ---
-            let finalServerTime = serverTime;
-            if (position.timestamp && position.timestamp > 1600000000000 && gpsDisponible) {
-                const gpsDate = new Date(position.timestamp);
-                const localDate = new Date();
-                
-                if (Math.abs(localDate.getTime() - gpsDate.getTime()) > 3 * 60 * 1000) {
-                    console.warn("🚨 [Seguridad] Hora local alterada detectada. Usando hora satelital GPS.");
-                    finalServerTime = gpsDate.toLocaleString('es-CO', { timeZone: 'America/Bogota' });
-                    gpsAnomalies.push("ERR-08"); // Manipulación de hora
-                    isSuspiciousGPS = true;
+            // ═══════════════════════════════════════════════════════════════
+            // CONTROL DE HORA CENTRALIZADO (VISITAS A CLIENTE)
+            // ═══════════════════════════════════════════════════════════════
+            // 1. FUENTE PRINCIPAL: localDate (hora exacta de la captura en ruta).
+            // 2. PROTECCIÓN ANTI-SOBREESCRITURA: No reemplazar con timestamp de GPS
+            //    para evitar que fijaciones de ubicación en caché alteren la hora real del registro.
+            // 3. AUDITORÍA NTP: Compara con serverDate para marcar ERR-08 si hay alteración de reloj.
+            // ═══════════════════════════════════════════════════════════════
+            const targetTz = getTimeZoneFromCoords(latitude, longitude);
+            const localDate = new Date();
+            let finalServerTimeObj = localDate; // Fuente primaria: teléfono
+            let finalServerTime = localDate.toLocaleString('es-CO', { timeZone: targetTz });
+            let isTimeAltered = false;
+
+            // Auditoría de hora contra servidor NTP (si está disponible)
+            if (serverDate && serverDate instanceof Date && !isNaN(serverDate.getTime())) {
+                const ntpDiffMinutes = Math.abs(localDate.getTime() - serverDate.getTime()) / 60000;
+                if (ntpDiffMinutes > 10) {
+                    console.warn(`🚨 [NTP Ruta] Desfase de ${ntpDiffMinutes.toFixed(1)} min entre teléfono y servidor NTP. Marcando ERR-08.`);
+                    isTimeAltered = true;
+                } else {
+                    console.log(`✅ [NTP Ruta] Hora de la ruta verificada contra servidor de red (${ntpDiffMinutes.toFixed(1)} min de dif).`);
                 }
+            } else if (!position.fromCache && position.timestamp && position.timestamp > 1600000000000 && gpsDisponible) {
+                const gpsDate = new Date(position.timestamp);
+                const diffMinutes = Math.abs(localDate.getTime() - gpsDate.getTime()) / 60000;
+                if (diffMinutes <= 10) {
+                    console.log(`✅ [Hora Ruta] Teléfono y GPS concuerdan (${diffMinutes.toFixed(1)} min de diferencia).`);
+                } else {
+                    console.log(`📍 [GPS Ruta] Posición GPS en caché del dispositivo (${diffMinutes.toFixed(1)} min antigua) — hora del teléfono preservada.`);
+                }
+            }
+
+            if (isTimeAltered) {
+                gpsAnomalies.push("ERR-08"); // Manipulación de hora
+                isSuspiciousGPS = true;
             }
             // --- FIN VERIFICACIÓN EXTERNA DE HORA ---
             
@@ -401,14 +579,21 @@ export default function RutaDashboard() {
 
             if (!isAndroid) {
                 // MODO PERMISIVO (iOS, Windows, Mac, Computadores de Escritorio).
+                // Carecen de hardware GPS puro (usan IP o red), es normal que manden "null" o enteros.
                 if (altitude === 0) gpsAnomalies.push("ERR-01"); 
-                if (accuracy % 1 === 0 && accuracy > 0 && accuracy <= 3) gpsAnomalies.push("ERR-02"); 
+                // ERR-02 se vuelve informativo o de muy baja probabilidad
+                if (accuracy > 0 && accuracy <= 1) gpsAnomalies.push("ERR-02"); 
             } else {
-                // MODO ANDROID: IMPLACABLE. El 99.9% de los Fake GPS están aquí.
-                if (!hasAltitude || altitude === 0) gpsAnomalies.push("ERR-01");
-                if (accuracy % 1 === 0 && accuracy > 0) gpsAnomalies.push("ERR-02");
-                if (speed === 0) gpsAnomalies.push("ERR-05");
-                if (heading === 0) gpsAnomalies.push("ERR-06");
+                // MODO ANDROID: RELAJADO para evitar falsos positivos
+                // Solo castigamos la ausencia TOTAL de altitud si es muy sospechoso (0 exacto)
+                if (altitude === 0) gpsAnomalies.push("ERR-01");
+                
+                // ERR-02: Ya no castigamos precisión entera por sí sola, 
+                // solo si es absurdamente perfecta y baja (ej. exactamente 1.0 o 0.0)
+                if (accuracy === 1 || accuracy === 2) gpsAnomalies.push("ERR-02");
+
+                // ERR-05 y ERR-06: Eliminamos el marcado automático por estar quieto, 
+                // ya que es normal en una selfie de asistencia.
             }
             
             if (hasAltitude) {
@@ -444,9 +629,8 @@ export default function RutaDashboard() {
                 mode: mode
             });
 
-            // ✅ CORRECCIÓN TIMEZONE: Siempre usar hora de Colombia (America/Bogota)
-            // independientemente de la zona horaria configurada en el dispositivo.
-            const { fecha, hora } = getColombiaDateTime();
+            // ✅ TIMEZONE DINÁMICO: Detecta zona por GPS (ej: Europe/Madrid en España, America/Bogota en Colombia)
+            const { fecha, hora } = getColombiaDateTime(finalServerTimeObj, targetTz);
             setCapturedData({
                 image: watermarkedImage,
                 rawImage: imageSrc,
@@ -472,6 +656,47 @@ export default function RutaDashboard() {
             stopCamera();
             setStep('idle');
         }
+    };
+
+    const startBackgroundGPSRecovery = (recordId) => {
+        if (!('geolocation' in navigator)) return;
+        console.log(`📍 [GPS Ruta Latencia] Iniciando recuperación en segundo plano para registro ${recordId}...`);
+        
+        const startTime = Date.now();
+        const MAX_TIME = 3 * 60 * 1000; // 3 minutos
+        
+        const watchId = navigator.geolocation.watchPosition(
+            async (position) => {
+                // Validación estricta: Si el navegador fue suspendido y despertó media hora después, NO actualizar
+                if (Date.now() - startTime > MAX_TIME) {
+                    console.log("📍 [GPS Ruta Latencia] Tiempo agotado (detectado tras suspensión). Se descarta señal tardía.");
+                    navigator.geolocation.clearWatch(watchId);
+                    return;
+                }
+
+                const { latitude, longitude, accuracy } = position.coords;
+                // Si la precisión es decente (ej. < 150m) o si ya pasaron 2 mins y agarramos lo que sea
+                if (accuracy < 150 || (Date.now() - startTime > 120000)) {
+                    console.log(`📍 [GPS Ruta Latencia] ¡Señal recuperada! Actualizando registro ${recordId}`);
+                    await updateOfflineRecordGPS(recordId, latitude, longitude);
+                    navigator.geolocation.clearWatch(watchId);
+                }
+            },
+            (error) => {
+                console.warn("📍 [GPS Ruta Latencia] Buscando señal...", error.message);
+                if (Date.now() - startTime > MAX_TIME) {
+                    console.log("📍 [GPS Ruta Latencia] Tiempo agotado. Se detiene la búsqueda.");
+                    navigator.geolocation.clearWatch(watchId);
+                }
+            },
+            { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+        );
+
+        // Seguridad: forzar detención a los 3 minutos exactos
+        setTimeout(() => {
+            navigator.geolocation.clearWatch(watchId);
+            console.log(`📍 [GPS Ruta Latencia] Proceso detenido por timeout para registro ${recordId}`);
+        }, MAX_TIME);
     };
 
     const handleSaveAndShare = async () => {
@@ -501,10 +726,18 @@ export default function RutaDashboard() {
             // Crear fecha local basada en la captura real (Firestore lo convertirá a Timestamp automáticamente)
             let localTimestamp = serverTimestamp();
             try {
-                const [day, month, year] = (capturedData.metadata.fecha || '').split('/');
+                const fStr = capturedData.metadata.fecha || '';
+                const separator = fStr.includes('/') ? '/' : '-';
+                const parts = fStr.split(separator);
                 const [hours, minutes, seconds] = (capturedData.metadata.hora || '').split(':');
-                if (day && month && year && hours && minutes) {
-                    localTimestamp = new Date(year, month - 1, day, hours, minutes, seconds || 0);
+                if (parts.length === 3 && hours && minutes) {
+                    let d, m, y;
+                    if (parts[0].length === 4) {
+                        [y, m, d] = parts;
+                    } else {
+                        [d, m, y] = parts;
+                    }
+                    localTimestamp = new Date(parseInt(y), parseInt(m) - 1, parseInt(d), parseInt(hours), parseInt(minutes), parseInt(seconds || 0));
                 }
             } catch (e) {
                 console.error("Error creando fecha local:", e);
@@ -549,7 +782,7 @@ export default function RutaDashboard() {
             } catch (err) {
                 console.warn('⚠️ Sin conexión (Ruta). Guardando localmente:', err.message);
                 // Guardar imagen SIN marca — SyncManager la marcará con la dirección real al sincronizar
-                await saveOfflineRecord({
+                const recordId = await saveOfflineRecord({
                     image: capturedData.rawImage || capturedData.image,
                     metadata: {
                         ...capturedData.metadata,
@@ -561,17 +794,29 @@ export default function RutaDashboard() {
                     longitude: capturedData.metadata.longitud
                 });
                 setStatusMessage('Guardado localmente (Offline)');
+                
+                if (capturedData.metadata.latitud === 0 && capturedData.metadata.longitud === 0) {
+                    startBackgroundGPSRecovery(recordId);
+                }
             }
 
             setStep('success');
 
-            // Actualizar estado persistente
+            // Actualizar estado persistente (siempre con email normalizado + original si difiere)
+            const _rawRuta = currentUser.email || '';
+            const _normRuta = _rawRuta.trim().toLowerCase();
             if (mode === 'Llegada Cliente') {
                 setAllowedActions({ entry: false, exit: true });
-                localStorage.setItem(`lastRutaType_${currentUser.email}`, 'Llegada Cliente');
+                localStorage.setItem(`lastRutaType_${_normRuta}`, 'Llegada Cliente');
+                if (_rawRuta !== _normRuta) localStorage.setItem(`lastRutaType_${_rawRuta}`, 'Llegada Cliente');
+                localStorage.setItem(`lastRutaLocation_${_normRuta}`, capturedData.metadata.localidad || 'Cliente');
+                if (_rawRuta !== _normRuta) localStorage.setItem(`lastRutaLocation_${_rawRuta}`, capturedData.metadata.localidad || 'Cliente');
             } else {
                 setAllowedActions({ entry: true, exit: false });
-                localStorage.setItem(`lastRutaType_${currentUser.email}`, 'Salida Cliente');
+                localStorage.setItem(`lastRutaType_${_normRuta}`, 'Salida Cliente');
+                if (_rawRuta !== _normRuta) localStorage.setItem(`lastRutaType_${_rawRuta}`, 'Salida Cliente');
+                localStorage.removeItem(`lastRutaLocation_${_normRuta}`);
+                if (_rawRuta !== _normRuta) localStorage.removeItem(`lastRutaLocation_${_rawRuta}`);
             }
 
         } catch (error) {
@@ -635,7 +880,9 @@ export default function RutaDashboard() {
 
             <div className="flex-1 p-4 flex flex-col items-center justify-center max-w-md mx-auto w-full">
                 {step === 'idle' && (
-                    <div className="w-full flex flex-col gap-6">
+                    <div className="w-full flex flex-col gap-4">
+                        {/* Aviso discreto de nueva versión */}
+                        <UpdateBadge />
 
                         {/* Aviso: Sin turno activo */}
                         {!hasActiveShift && !isLoadingShift && (

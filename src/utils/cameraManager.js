@@ -185,11 +185,11 @@ export async function acquireSelfieCamera(videoRef, streamRef, onStatusChange = 
         strategies.push({ video: { deviceId: { exact: frontDevices[0].deviceId } }, audio: false });
     }
 
-    // Pasos 2-4: facingMode en orden de especificidad
+    // Pasos 2-4: facingMode en orden de permisividad para máxima compatibilidad con iOS Safari
     strategies.push(
-        { video: { facingMode: { exact: 'user' } }, audio: false },
         { video: { facingMode: 'user' }, audio: false },
         { video: { facingMode: { ideal: 'user' } }, audio: false },
+        { video: { facingMode: { exact: 'user' } }, audio: false },
         // Paso 5: cualquier cámara (preferible a dejar bloqueado al empleado)
         { video: true, audio: false }
     );
@@ -199,7 +199,7 @@ export async function acquireSelfieCamera(videoRef, streamRef, onStatusChange = 
     if (!stream) {
         onStatusChange('');
         handleCameraError(error, 'selfie');
-        return null;
+        throw error || new Error('No se pudo acceder a la cámara frontal');
     }
 
     onStatusChange('');
@@ -249,7 +249,7 @@ export async function acquireRearCamera(videoRef, streamRef, onStatusChange = ()
     if (!stream) {
         onStatusChange('');
         handleCameraError(error, 'rear');
-        return null;
+        throw error || new Error('No se encontró una cámara trasera en este dispositivo');
     }
 
     onStatusChange('');
@@ -330,7 +330,7 @@ export async function acquireVariableCamera(videoRef, streamRef, preferredFacing
     if (!stream) {
         onStatusChange('');
         handleCameraError(error, 'variable');
-        return null;
+        throw error || new Error('No se pudo acceder a la cámara seleccionada');
     }
 
     onStatusChange('');

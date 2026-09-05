@@ -1,11 +1,11 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import Webcam from 'react-webcam';
 import { useAuth } from '../contexts/AuthContext';
-import { addWatermarkToImage, fetchServerTime, fetchLocationName } from '../utils/watermark';
-import { getColombiaDateTime } from '../utils/timezone';
+import { addWatermarkToImage, fetchServerTime, fetchServerDate, fetchLocationName } from '../utils/watermark';
+import { getColombiaDateTime, getMillisFromDateTime, getTimeZoneFromCoords } from '../utils/timezone';
 import { db } from '../firebaseConfig';
 import { collection, addDoc, query, where, getDocs, serverTimestamp, doc, getDoc, Timestamp, setDoc } from 'firebase/firestore';
-import { Camera, MapPin, CheckCircle, LogOut, LogIn, UserCheck, ShieldAlert, TriangleAlert } from 'lucide-react';
+import { Camera, MapPin, CheckCircle, LogOut, LogIn, UserCheck, ShieldAlert, TriangleAlert, WifiOff } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import * as faceapi from '@vladmandic/face-api';
 import { uploadPhoto } from '../services/storageService';
@@ -16,9 +16,10 @@ import PreviewView from '../components/dashboard/PreviewView';
 import SuccessView from '../components/dashboard/SuccessView';
 import { saveOfflineRecord, getPendingRecords, updateOfflineRecordGPS } from '../services/offlineStorage';
 import { acquireSelfieCamera, acquireRearCamera, releaseCamera, getCameraErrorInfo } from '../utils/cameraManager';
+import UpdateBadge from '../components/common/UpdateBadge';
 
 export default function Dashboard() {
-    const { currentUser, logout } = useAuth();
+    const { currentUser, logout, isOfflineUser } = useAuth();
     const navigate = useNavigate();
     // Refs for Native Camera
     const videoRef = useRef(null);
@@ -31,6 +32,7 @@ export default function Dashboard() {
     const watchPositionIdRef = useRef(null);
 
     const [mode, setMode] = useState(null); // 'entry', 'exit', 'incident'
+    const [pendingMode, setPendingMode] = useState(null); // modo a usar cuando se reintenta
     const [cameraLoading, setCameraLoading] = useState(false);
     const [cameraLoadingMsg, setCameraLoadingMsg] = useState('');
     const [cameraError, setCameraError] = useState(null); // { type, title, message, canRetry }
@@ -40,6 +42,7 @@ export default function Dashboard() {
     const [loadingState, setLoadingState] = useState(true);
     const [incidentDescription, setIncidentDescription] = useState(''); // Descripción de la novedad
     const [step, setStep] = useState('idle'); // idle, camera, processing, success
+    const [savedOffline, setSavedOffline] = useState(false); // true si el registro quedó en cola offline
     const [statusMessage, setStatusMessage] = useState('');
     const [isCapturing, setIsCapturing] = useState(false);
     const [modelsLoaded, setModelsLoaded] = useState(false);
@@ -80,6 +83,14 @@ export default function Dashboard() {
     const vipList = import.meta.env.VITE_VIP_EMAILS || "";
     const isVIP = currentUser && vipList.split(',').map(e => e.trim().toLowerCase()).includes(currentUser.email.toLowerCase());
 
+    // Auto-resume action after a hard reload (e.g. from "Reintentar" on camera error)
+    useEffect(() => {
+        const pendingAction = sessionStorage.getItem('pendingAttendanceMode');
+        if (pendingAction) {
+            sessionStorage.removeItem('pendingAttendanceMode');
+            setTimeout(() => handleStart(pendingAction), 500);
+        }
+    }, []);
 
     useEffect(() => {
         // Detectar si ya está instalada
@@ -122,7 +133,25 @@ export default function Dashboard() {
             for (let name of names) {
                 await caches.delete(name);
             }
+            // 🔒 PRESERVAR CLAVES CRÍTICAS DE ASISTENCIA Y SESIÓN LOCAL
+            const preserveKeys = {};
+            for (let i = 0; i < localStorage.length; i++) {
+                const k = localStorage.key(i);
+                if (k && (
+                    k.startsWith('lastAttendance') || 
+                    k.startsWith('lastRuta') || 
+                    k.startsWith('offline_') || 
+                    k.startsWith('face_') || 
+                    k.startsWith('employee_')
+                )) {
+                    preserveKeys[k] = localStorage.getItem(k);
+                }
+            }
             localStorage.clear();
+            // Restaurar estado de asistencia protegido
+            Object.entries(preserveKeys).forEach(([k, v]) => {
+                if (v !== null && v !== undefined) localStorage.setItem(k, v);
+            });
             window.location.reload(true);
         }
     };
@@ -169,6 +198,26 @@ export default function Dashboard() {
                 await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
                 await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
                 await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
+
+                // ⚡ GPU / WebGL Warm-up: Pre-compilar shaders en iOS Safari para eliminar congelamientos la 1ª vez
+                try {
+                    const dummyCanvas = document.createElement('canvas');
+                    dummyCanvas.width = 112;
+                    dummyCanvas.height = 112;
+                    const ctx = dummyCanvas.getContext('2d');
+                    if (ctx) {
+                        ctx.fillStyle = '#808080';
+                        ctx.fillRect(0, 0, 112, 112);
+                        await faceapi.detectSingleFace(
+                            dummyCanvas,
+                            new faceapi.TinyFaceDetectorOptions({ inputSize: 128, scoreThreshold: 0.5 })
+                        );
+                        console.log("⚡ [face-api] WebGL Shaders precompilados exitosamente.");
+                    }
+                } catch (gpuErr) {
+                    console.warn("⚡ [face-api] Warmup de GPU omitido:", gpuErr);
+                }
+
                 setModelsLoaded(true);
 
                 // 3. Cargar datos del empleado actual
@@ -211,21 +260,47 @@ export default function Dashboard() {
         };
         loadModelsAndData();
 
+        // 📍 GPS Warm-Up en segundo plano para eliminar la demora en la primera marca (especialmente en iOS Safari)
+        if (navigator.geolocation) {
+            try {
+                const watchId = navigator.geolocation.watchPosition(
+                    (pos) => {
+                        if (pos && pos.coords) {
+                            latestGpsRef.current = {
+                                latitude: pos.coords.latitude,
+                                longitude: pos.coords.longitude,
+                                timestamp: Date.now()
+                            };
+                            setGpsReady(true);
+                            console.log("📍 [GPS Warm-Up Dashboard] Coordenadas precargadas:", pos.coords.latitude, pos.coords.longitude);
+                        }
+                    },
+                    (err) => console.warn("📍 [GPS Warm-Up Dashboard] Esperando fijación...", err.message),
+                    { enableHighAccuracy: false, maximumAge: 60000, timeout: 10000 }
+                );
+                watchPositionIdRef.current = watchId;
+            } catch (e) {
+                console.warn("📍 [GPS Warm-Up Dashboard] Error iniciando rastreador:", e);
+            }
+        }
+
         const checkAccess = async () => {
-            if (!currentUser) return;
+            if (!currentUser || isOfflineUser) return;
 
             try {
-                const q = query(collection(db, "employees"), where("email", "==", currentUser.email));
+                const userEmail = (currentUser.email || '').trim().toLowerCase();
+                const q = query(collection(db, "employees"), where("email", "==", userEmail));
                 const querySnapshot = await getDocs(q);
 
-                if (querySnapshot.empty) {
+                // Solo si la respuesta de Firestore es definitiva y el dispositivo está 100% online
+                if (querySnapshot.empty && navigator.onLine) {
                     console.warn("Acceso denegado: Usuario no encontrado en lista activa.");
                     logout();
                     navigate('/login');
                 }
             } catch (err) {
-                // OFFLINE SAFETY: Si no hay internet, permitimos seguir
-                console.warn("Error verificando acceso (probablemente offline):", err);
+                // OFFLINE SAFETY: Si no hay internet o falla la red, permitimos seguir sin cerrar sesión
+                console.warn("Error verificando acceso (modo resiliente):", err);
             }
         };
 
@@ -246,23 +321,21 @@ export default function Dashboard() {
                 return;
             }
 
-            // ── Helpers de tiempo ─────────────────────────────────────────
-            const getMillisFromDateTime = (fecha, hora) => {
-                if (!fecha || !hora) return 0;
-                try {
-                    const [d, m, y] = fecha.split('/');
-                    const [h, min, s] = hora.split(':');
-                    return new Date(y, m - 1, d, h, min, s || 0).getTime();
-                } catch { return 0; }
-            };
+            const rawEmail = currentUser.email || '';
+            const userEmail = rawEmail.trim().toLowerCase();
 
-            const getMillisFromTs = (ts) => {
-                if (!ts) return 0;
-                if (typeof ts.toMillis === 'function') return ts.toMillis(); // Firestore Timestamp
-                if (ts instanceof Date) return ts.getTime();
-                if (typeof ts === 'number') return ts;
-                if (typeof ts === 'string') return new Date(ts).getTime();
-                return 0;
+            const getRecordMillis = (r) => {
+                if (!r) return 0;
+                if (r.timestamp) {
+                    if (typeof r.timestamp.toMillis === 'function') return r.timestamp.toMillis();
+                    if (r.timestamp instanceof Date) return r.timestamp.getTime();
+                    if (typeof r.timestamp === 'number') return r.timestamp;
+                    if (typeof r.timestamp === 'string') {
+                        const parsed = new Date(r.timestamp).getTime();
+                        if (!isNaN(parsed)) return parsed;
+                    }
+                }
+                return getMillisFromDateTime(r.fecha, r.hora);
             };
 
             /**
@@ -280,10 +353,12 @@ export default function Dashboard() {
                 if (normalizedType === 'salida') {
                     setAllowedActions({ entry: true, exit: false });
                     if (saveToLS) {
-                        localStorage.setItem(`lastAttendanceType_${currentUser.email}`, 'Salida');
-                        // Guardar el timestamp REAL del registro (no Date.now())
-                        localStorage.setItem(`lastAttendanceTime_${currentUser.email}`, recordMs > 0 ? recordMs.toString() : now.toString());
-                        localStorage.removeItem(`lastRutaType_${currentUser.email}`);
+                        localStorage.setItem(`lastAttendanceType_${userEmail}`, 'Salida');
+                        if (rawEmail && rawEmail !== userEmail) localStorage.setItem(`lastAttendanceType_${rawEmail}`, 'Salida');
+                        localStorage.setItem(`lastAttendanceTime_${userEmail}`, recordMs > 0 ? recordMs.toString() : now.toString());
+                        if (rawEmail && rawEmail !== userEmail) localStorage.setItem(`lastAttendanceTime_${rawEmail}`, recordMs > 0 ? recordMs.toString() : now.toString());
+                        localStorage.removeItem(`lastRutaType_${userEmail}`);
+                        if (rawEmail && rawEmail !== userEmail) localStorage.removeItem(`lastRutaType_${rawEmail}`);
                     }
                     return;
                 }
@@ -301,78 +376,114 @@ export default function Dashboard() {
                         console.warn(`⏰ Más de ${RESET_HOURS}h desde la última ${tipo}. Reiniciando a Entrada.`);
                         setAllowedActions({ entry: true, exit: false });
                         if (saveToLS) {
-                            // Guardamos 'Salida' como estado simulado para que la próxima
-                            // carga sin internet muestre Entrada (el opuesto de Salida)
-                            localStorage.setItem(`lastAttendanceType_${currentUser.email}`, 'Salida');
-                            localStorage.setItem(`lastAttendanceTime_${currentUser.email}`, now.toString());
-                            localStorage.removeItem(`lastRutaType_${currentUser.email}`);
+                            localStorage.setItem(`lastAttendanceType_${userEmail}`, 'Salida');
+                            if (rawEmail && rawEmail !== userEmail) localStorage.setItem(`lastAttendanceType_${rawEmail}`, 'Salida');
+                            localStorage.setItem(`lastAttendanceTime_${userEmail}`, now.toString());
+                            if (rawEmail && rawEmail !== userEmail) localStorage.setItem(`lastAttendanceTime_${rawEmail}`, now.toString());
+                            localStorage.removeItem(`lastRutaType_${userEmail}`);
+                            if (rawEmail && rawEmail !== userEmail) localStorage.removeItem(`lastRutaType_${rawEmail}`);
                         }
                     } else {
                         setAllowedActions({ entry: false, exit: true });
                         if (saveToLS) {
-                            localStorage.setItem(`lastAttendanceType_${currentUser.email}`, 'Entrada');
-                            // CLAVE: guardar el timestamp REAL del registro, no Date.now()
-                            localStorage.setItem(`lastAttendanceTime_${currentUser.email}`, recordMs > 0 ? recordMs.toString() : now.toString());
+                            localStorage.setItem(`lastAttendanceType_${userEmail}`, 'Entrada');
+                            if (rawEmail && rawEmail !== userEmail) localStorage.setItem(`lastAttendanceType_${rawEmail}`, 'Entrada');
+                            localStorage.setItem(`lastAttendanceTime_${userEmail}`, recordMs > 0 ? recordMs.toString() : now.toString());
+                            if (rawEmail && rawEmail !== userEmail) localStorage.setItem(`lastAttendanceTime_${rawEmail}`, recordMs > 0 ? recordMs.toString() : now.toString());
                         }
                     }
                     return;
                 }
 
                 // ── CASO NOVEDAD u otro tipo ─────────────────────
-                // La Novedad NO cambia el estado de entrada/salida.
-                // Intentamos usar el estado previo de localStorage si existe.
-                const lastTypeLS = localStorage.getItem(`lastAttendanceType_${currentUser.email}`);
-                const lastTimeLS = parseInt(localStorage.getItem(`lastAttendanceTime_${currentUser.email}`) || '0', 10);
+                const lastTypeLS = localStorage.getItem(`lastAttendanceType_${userEmail}`) || localStorage.getItem(`lastAttendanceType_${rawEmail}`);
+                const lastTimeLS = parseInt(localStorage.getItem(`lastAttendanceTime_${userEmail}`) || localStorage.getItem(`lastAttendanceTime_${rawEmail}`) || '0', 10);
                 if (lastTypeLS) {
-                    // Reaplica el estado previo sin sobreescribir localStorage
                     applyLastState(lastTypeLS, lastTimeLS, false);
                 } else {
-                    // Primer uso / sin historial: forzar a mostrar Entrada
                     setAllowedActions({ entry: true, exit: false });
                 }
             };
 
             // ── PASO 1: Cargar localStorage de inmediato ───────────────────
-            // Respuesta instantánea al usuario mientras Firestore responde
-            const lastTypeLS = localStorage.getItem(`lastAttendanceType_${currentUser.email}`);
-            const lastTimeLS = parseInt(localStorage.getItem(`lastAttendanceTime_${currentUser.email}`) || '0', 10);
+            const lastTypeLS = localStorage.getItem(`lastAttendanceType_${userEmail}`) || localStorage.getItem(`lastAttendanceType_${rawEmail}`);
+            const lastTimeLS = parseInt(localStorage.getItem(`lastAttendanceTime_${userEmail}`) || localStorage.getItem(`lastAttendanceTime_${rawEmail}`) || '0', 10);
 
             if (lastTypeLS) {
                 applyLastState(lastTypeLS, lastTimeLS, false);
-                setIsOfflineFallback(true); // Mostrar indicador offline hasta que Firestore confirme
+                setIsOfflineFallback(true);
             } else {
                 setAllowedActions({ entry: true, exit: false });
             }
 
-            // ── PASO 2: Consultar Firestore (fuente de verdad) ───────────
+            // ── PASO 2: Consultar Cola Offline (IndexedDB) y Firestore ───────────
             try {
-                const q = query(
-                    collection(db, "attendance"),
-                    where("usuario", "==", currentUser.email)
-                );
-                const snap = await getDocs(q);
+                let candidateRecords = [];
 
-                if (!snap.empty) {
-                    // Ordenar en memoria: el más reciente primero
-                    const records = snap.docs.map(d => d.data());
-                    records.sort((a, b) => {
-                        const tA = getMillisFromTs(a.timestamp) || getMillisFromDateTime(a.fecha, a.hora) || 0;
-                        const tB = getMillisFromTs(b.timestamp) || getMillisFromDateTime(b.fecha, b.hora) || 0;
+                // 2.1 Registros pendientes en IndexedDB local
+                try {
+                    const pendingOffline = await getPendingRecords();
+                    if (Array.isArray(pendingOffline)) {
+                        const userOffline = pendingOffline.filter(r => {
+                            const rUser = (r.metadata?.usuario || '').trim().toLowerCase();
+                            return rUser === userEmail && r.mode !== 'incident';
+                        }).map(r => ({
+                            tipo: r.metadata?.tipo || (r.mode === 'entry' ? 'Entrada' : 'Salida'),
+                            fecha: r.metadata?.fecha,
+                            hora: r.metadata?.hora,
+                            timestamp: r.capturedAt || r.metadata?.timestamp
+                        }));
+                        candidateRecords.push(...userOffline);
+                    }
+                } catch (offErr) {
+                    console.warn("⚠️ No se pudo leer cola offline IndexedDB:", offErr);
+                }
+
+                // 2.2 Consultar Firestore
+                const qLower = query(
+                    collection(db, "attendance"),
+                    where("usuario", "==", userEmail)
+                );
+                const snapLower = await getDocs(qLower);
+                if (!snapLower.empty) {
+                    candidateRecords.push(...snapLower.docs.map(d => d.data()));
+                }
+
+                // Si el email original tenía mayúsculas y difiere de userEmail
+                if (rawEmail && rawEmail !== userEmail) {
+                    const qRaw = query(
+                        collection(db, "attendance"),
+                        where("usuario", "==", rawEmail)
+                    );
+                    const snapRaw = await getDocs(qRaw);
+                    if (!snapRaw.empty) {
+                        candidateRecords.push(...snapRaw.docs.map(d => d.data()));
+                    }
+                }
+
+                // 2.3 Filtrar solo registros de asistencia general ('Entrada' y 'Salida')
+                const attendanceOnly = candidateRecords.filter(r => {
+                    const t = (r.tipo || '').trim().toLowerCase();
+                    return t === 'entrada' || t === 'salida' || t === 'en cliente' || t === 'en tránsito' || t === 'llegada cliente' || t === 'salida cliente';
+                });
+
+                if (attendanceOnly.length > 0) {
+                    // Ordenar con el algoritmo robusto: el más reciente primero
+                    attendanceOnly.sort((a, b) => {
+                        const tA = getRecordMillis(a);
+                        const tB = getRecordMillis(b);
                         return tB - tA;
                     });
 
-                    const lastDoc = records[0];
+                    const lastDoc = attendanceOnly[0];
                     const lastTipo = lastDoc.tipo;
-                    const recordMs = getMillisFromTs(lastDoc.timestamp) || getMillisFromDateTime(lastDoc.fecha, lastDoc.hora) || 0;
+                    const recordMs = getRecordMillis(lastDoc);
 
-                    console.log(`📡 Firestore: último tipo='${lastTipo}' ts=${recordMs} (${new Date(recordMs).toLocaleString()})`);
+                    console.log(`📡 Estado verificado: último tipo='${lastTipo}' ts=${recordMs} (${new Date(recordMs).toLocaleString()})`);
 
-                    // Firestore siempre gana sobre localStorage — actualiza estado y cache
                     applyLastState(lastTipo, recordMs, true);
-                    setIsOfflineFallback(false); // Datos confirmados por servidor
+                    setIsOfflineFallback(false);
                 } else {
-                    // Sin registros en Firestore: puede ser primer uso o colección vacía
-                    // Dejar el estado del localStorage si hay, o Entrada si no hay nada
                     if (!lastTypeLS) {
                         setAllowedActions({ entry: true, exit: false });
                     }
@@ -380,8 +491,6 @@ export default function Dashboard() {
                 }
             } catch (err) {
                 console.warn("⚠️ Sin conexión a Firestore. Usando cache local:", err.message);
-                // El estado ya fue cargado desde localStorage en el Paso 1
-                // isOfflineFallback permanece true para mostrar el indicador
             }
 
             setLoadingState(false);
@@ -391,6 +500,10 @@ export default function Dashboard() {
         return () => {
             window.removeEventListener('online', handleOnline);
             window.removeEventListener('offline', handleOffline);
+            if (watchPositionIdRef.current !== null && navigator.geolocation) {
+                try { navigator.geolocation.clearWatch(watchPositionIdRef.current); } catch (e) {}
+                watchPositionIdRef.current = null;
+            }
             if (streamRef.current) {
                 streamRef.current.getTracks().forEach(track => {
                     track.stop();
@@ -503,37 +616,39 @@ export default function Dashboard() {
     const startCamera = async (facingMode = 'user') => {
         setCameraError(null);
         setCameraLoading(true);
+        setCameraLoadingMsg('Activando cámara...');
 
         const onStatus = (msg) => {
             setCameraLoadingMsg(msg);
             if (!msg) setCameraLoading(false);
         };
 
-        let stream;
-        if (facingMode === 'environment') {
-            // Módulo 2: Cámara trasera (Novedades/Incidentes)
-            stream = await acquireRearCamera(videoRef, streamRef, onStatus);
-        } else {
-            // Módulo 1: Cámara selfie (Entrada/Salida empleados)
-            stream = await acquireSelfieCamera(videoRef, streamRef, onStatus);
-        }
+        try {
+            let stream;
+            if (facingMode === 'environment') {
+                // Módulo 2: Cámara trasera (Novedades/Incidentes)
+                stream = await acquireRearCamera(videoRef, streamRef, onStatus);
+            } else {
+                // Módulo 1: Cámara selfie (Entrada/Salida empleados)
+                stream = await acquireSelfieCamera(videoRef, streamRef, onStatus);
+            }
 
-        setCameraLoading(false);
+            setCameraLoading(false);
 
-        if (!stream) {
-            const errInfo = getCameraErrorInfo(
-                new Error(facingMode === 'environment' ? 'NotReadableError' : 'NotReadableError'),
-                facingMode === 'environment' ? 'rear' : 'selfie'
-            );
+            if (!stream) {
+                throw new Error("No se pudo iniciar el flujo de la cámara");
+            }
+
+            streamRef.current = stream;
+            setCameraReady(true);
+        } catch (error) {
+            setCameraLoading(false);
+            const errInfo = getCameraErrorInfo(error, facingMode === 'environment' ? 'rear' : 'selfie');
             setCameraError(errInfo);
             setStatusMessage('');
             setStep('idle');
             setMode(null);
-            return;
         }
-
-        streamRef.current = stream;
-        setCameraReady(true);
     };
 
 
@@ -560,7 +675,7 @@ export default function Dashboard() {
                             if (storageSettings.security_liveness !== false) {
                                 startLivenessCheck();
                             } else {
-                                setStatusMessage('Posicione su rostro y presione Tomar Foto Ahora');
+                                setStatusMessage('Posicione su rostro y presione Verificar Identidad Ahora');
                             }
                         }
                     }, 100);
@@ -575,18 +690,22 @@ export default function Dashboard() {
         if (step === 'camera') {
             // Iniciar GPS warmup
             if ('geolocation' in navigator) {
-                console.log("📍 [GPS] Iniciando calentamiento temprano (warm-up)");
-                watchPositionIdRef.current = navigator.geolocation.watchPosition(
-                    (position) => {
-                        const { latitude, longitude } = position.coords;
-                        latestGpsRef.current = { latitude, longitude, timestamp: position.timestamp };
-                        setGpsReady(true);
-                    },
-                    (error) => {
-                        console.warn("📍 [GPS] Error en warm-up:", error);
-                    },
-                    { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
-                );
+                try {
+                    console.log("📍 [GPS] Iniciar calentamiento temprano (warm-up)");
+                    watchPositionIdRef.current = navigator.geolocation.watchPosition(
+                        (position) => {
+                            const { latitude, longitude } = position.coords;
+                            latestGpsRef.current = { latitude, longitude, timestamp: position.timestamp };
+                            setGpsReady(true);
+                        },
+                        (error) => {
+                            console.warn("📍 [GPS] Error en warm-up:", error);
+                        },
+                        { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+                    );
+                } catch (gpsErr) {
+                    console.error("📍 [GPS] Error síncrono iniciando warm-up:", gpsErr);
+                }
             }
         } else {
             // Detener GPS warmup si salimos de la cámara
@@ -611,16 +730,14 @@ export default function Dashboard() {
             cancelAnimationFrame(livenessIntervalRef.current);
             livenessIntervalRef.current = null;
         }
-        // Delegar liberación al cameraManager (no await — stopCamera es sync)
-        releaseCamera(videoRef, streamRef).then(() => {
-            streamRef.current = null;
-        });
         if (videoRef.current) videoRef.current.srcObject = null;
         if (streamRef.current) {
             streamRef.current.getTracks().forEach(t => { try { t.stop(); } catch(e){} });
             streamRef.current = null;
         }
         setCameraReady(false);
+        // Delegar liberación al cameraManager y retornar la Promesa de liberación de Android (800ms)
+        return releaseCamera(videoRef, streamRef);
     };
 
     const handleStopCamera = useCallback(() => {
@@ -648,11 +765,11 @@ export default function Dashboard() {
     }, [step, handleStopCamera]);
 
     const handleStart = async (selectedMode) => {
-        // Fix #2: limpiar sesión anterior COMPLETAMENTE antes de abrir la nueva cámara
-        // Esto evita tener dos loops de liveness corriendo en paralelo
-        stopCamera();
+        // Esperar a que la cámara anterior y sus pistas de hardware de Android se liberen por completo
+        await stopCamera();
 
         setMode(selectedMode);
+        setPendingMode(selectedMode);
         modeRef.current = selectedMode; // Ref para evitar stale closures
         setStep('camera');
         setStatusMessage('');
@@ -815,6 +932,9 @@ export default function Dashboard() {
             const imageSrc = canvas.toDataURL('image/jpeg', 0.9);
             if (!imageSrc || imageSrc === 'data:,') throw new Error("Error generando imagen");
 
+            // ⏱️ Registramos el instante EXACTO de captura ANTES de cualquier llamada asíncrona.
+            // Esto evita que la latencia de red (GPS, API de tiempo) desfase el timestamp.
+            const captureInstant = new Date();
 
             // Fix #3: Flash visual DESPUÉS de confirmar que la imagen tiene píxeles válidos
             setCaptureFlash(f => !f);
@@ -836,50 +956,63 @@ export default function Dashboard() {
                 : Promise.resolve(true);
 
             const locationPromise = (async () => {
-                // Si el warm-up ya consiguió coordenadas válidas recientes (menos de 5 min), usarlas de inmediato
-                const now = Date.now();
-                const warmGps = latestGpsRef.current;
-                if (warmGps && warmGps.latitude !== 0 && (now - warmGps.timestamp < 300000)) {
-                    console.log("📍 [GPS] Usando coordenadas del warm-up instantáneamente.");
-                    return { coords: { latitude: warmGps.latitude, longitude: warmGps.longitude, altitude: null, accuracy: null, speed: null, heading: null }, timestamp: warmGps.timestamp };
-                }
-
-                // Helper function to force timeout on navigator APIs that ignore the timeout option
-                const getPositionWithTimeout = (options, timeoutMs) => {
-                    return Promise.race([
-                        new Promise((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, reject, options)),
-                        new Promise((_, reject) => setTimeout(() => reject(new Error("Manual Timeout")), timeoutMs))
-                    ]);
-                };
-
-                // Intento 1: Alta precisión (8s)
                 try {
-                    return await getPositionWithTimeout({
-                        enableHighAccuracy: true,
-                        timeout: 8000,
-                        maximumAge: 0
-                    }, 8000);
-                } catch (gpsError) {
-                    console.warn("Alta precisión GPS falló, modo rápido...", gpsError);
+                    // Si el warm-up ya consiguió coordenadas válidas recientes (menos de 5 min), usarlas de inmediato
+                    const now = Date.now();
+                    const warmGps = latestGpsRef.current;
+                    if (warmGps && warmGps.latitude !== 0 && (now - warmGps.timestamp < 300000)) {
+                        console.log("📍 [GPS] Usando coordenadas del warm-up instantáneamente.");
+                        // ⚠️ IMPORTANTE: fromCache:true indica que este timestamp GPS es intencionalmente
+                        // antiguo (hasta 5 min), NO debe usarse para validar si el reloj del dispositivo
+                        // fue alterado, de lo contrario se sobreescribe la hora correcta del servidor.
+                        return { coords: { latitude: warmGps.latitude, longitude: warmGps.longitude, altitude: null, accuracy: null, speed: null, heading: null }, timestamp: warmGps.timestamp, fromCache: true };
+                    }
+
+                    // Helper function to force timeout on navigator APIs that ignore the timeout option
+                    const getPositionWithTimeout = (options, timeoutMs) => {
+                        return Promise.race([
+                            new Promise((resolve, reject) => {
+                                try {
+                                    navigator.geolocation.getCurrentPosition(resolve, reject, options);
+                                } catch (e) {
+                                    reject(e);
+                                }
+                            }),
+                            new Promise((_, reject) => setTimeout(() => reject(new Error("Manual Timeout")), timeoutMs))
+                        ]);
+                    };
+
+                    // Intento 1: Alta precisión (8s)
+                    try {
+                        return await getPositionWithTimeout({
+                            enableHighAccuracy: true,
+                            timeout: 8000,
+                            maximumAge: 0
+                        }, 8000);
+                    } catch (gpsError) {
+                        console.warn("Alta precisión GPS falló, modo rápido...", gpsError);
+                    }
+                    // Intento 2: Baja precisión, acepta cache de hasta 5 minutos (5s)
+                    try {
+                        return await getPositionWithTimeout({
+                            enableHighAccuracy: false,
+                            timeout: 5000,
+                            maximumAge: 300000 // Acepta posición de hasta 5 min de antigüedad
+                        }, 5000);
+                    } catch (gpsError2) {
+                        console.warn("GPS en modo rápido también falló. Continuando sin GPS.", gpsError2);
+                    }
+                } catch (err) {
+                    console.error("📍 [GPS] Error global en locationPromise de geolocalización:", err);
                 }
-                // Intento 2: Baja precisión, acepta cache de hasta 5 minutos (5s)
-                try {
-                    return await getPositionWithTimeout({
-                        enableHighAccuracy: false,
-                        timeout: 5000,
-                        maximumAge: 300000 // Acepta posición de hasta 5 min de antigüedad
-                    }, 5000);
-                } catch (gpsError2) {
-                    console.warn("GPS en modo rápido también falló. Continuando sin GPS.", gpsError2);
-                }
-                // Fallback: Devolver posición nula — el registro procede sin coordenadas
+                // Fallback absoluto e inquebrantable: Devolver posición nula
                 return { coords: { latitude: 0, longitude: 0, altitude: null, accuracy: null, speed: null, heading: null } };
             })();
 
-            const timePromise = fetchServerTime();
+            const timePromise = fetchServerDate();
 
             // Ejecutamos todo al mismo tiempo
-            const [detection, position, serverTime] = await Promise.all([
+            const [detection, position, serverDate] = await Promise.all([
                 facePromise,
                 locationPromise,
                 timePromise
@@ -931,21 +1064,48 @@ export default function Dashboard() {
             let isSuspiciousGPS = false;
             let gpsAnomalies = [];
             
-            // --- INICIO VERIFICACIÓN EXTERNA DE HORA (GPS) ---
-            // position.timestamp viene usualmente desde el satélite y no del reloj manipulable del SO
-            let finalServerTime = serverTime;
-            if (position.timestamp && position.timestamp > 1600000000000 && (latitude !== 0 || longitude !== 0)) {
-                const gpsDate = new Date(position.timestamp);
-                const localDate = new Date(); // El mismo tiempo que habría usado el fallback si fallaron las APIs de internet
-                
-                // Si la hora del sistema difiere por más de 3 minutos de la hora reportada por el satélite GPS
-                if (Math.abs(localDate.getTime() - gpsDate.getTime()) > 3 * 60 * 1000) {
-                    console.warn("🚨 [Seguridad] Hora local alterada detectada. Usando hora del satélite GPS independientemente.");
-                    // Sobreescribir el tiempo en la foto con la hora verídica dictada por el GPS
-                    finalServerTime = gpsDate.toLocaleString('es-CO', { timeZone: 'America/Bogota' });
-                    gpsAnomalies.push("ERR-08"); // Nuevo error para registrar manipulación de hora en la base de datos
-                    isSuspiciousGPS = true;
+            // ═══════════════════════════════════════════════════════════════
+            // CONTROL DE HORA CENTRALIZADO (PROTECCIÓN Y SELECCIÓN DE HORA)
+            // ═══════════════════════════════════════════════════════════════
+            // 1. FUENTE PRINCIPAL: captureInstant (hora exacta del clic en la cámara).
+            // 2. PROTECCIÓN TIMEZONE & FIX DE CACHÉ GPS:
+            //    Nunca sobreescribir finalServerTimeObj con position.timestamp de la geolocalización,
+            //    ya que Android/navegadores pueden entregar timestamps de fijación GPS antiguos en caché
+            //    (ej: lecturas de 10:52 AM reusadas a las 10:52 PM por falta de satélites), causando
+            //    que 22:52 cambie erróneamente a 10:52 AM en la marca de agua y base de datos.
+            // 3. AUDITORÍA NTP: Se compara contra el servidor de tiempo (serverDate) para marcar
+            //    ERR-08 si el reloj del dispositivo difiere > 10 min de la red, sin corromper la hora.
+            // ═══════════════════════════════════════════════════════════════
+            const targetTz = getTimeZoneFromCoords(latitude, longitude);
+            let finalServerTimeObj = captureInstant; // Fuente primaria: instante de captura
+            let finalServerTime = captureInstant.toLocaleString('es-CO', { timeZone: targetTz });
+            let isTimeAltered = false;
+
+            // Auditoría de hora contra servidor NTP (si está disponible)
+            if (serverDate && serverDate instanceof Date && !isNaN(serverDate.getTime())) {
+                const ntpDiffMinutes = Math.abs(captureInstant.getTime() - serverDate.getTime()) / 60000;
+                if (ntpDiffMinutes > 10) {
+                    console.warn(`🚨 [NTP] Desfase de ${ntpDiffMinutes.toFixed(1)} min entre teléfono y servidor NTP. Marcando ERR-08.`);
+                    isTimeAltered = true;
+                } else {
+                    console.log(`✅ [NTP] Hora del teléfono verificada contra servidor de red (${ntpDiffMinutes.toFixed(1)} min de dif).`);
                 }
+            } else if (!position.fromCache && position.timestamp && position.timestamp > 1600000000000 && (latitude !== 0 || longitude !== 0)) {
+                // Verificación secundaria por GPS solo para auditoría (nunca sobreescribe el objeto de fecha)
+                const gpsDate = new Date(position.timestamp);
+                const diffMinutes = Math.abs(captureInstant.getTime() - gpsDate.getTime()) / 60000;
+                // Si la lectura de GPS es reciente (<= 10 min), confirmamos concordancia.
+                // Si la lectura es > 10 min, se asume caché antigua de ubicación del SO.
+                if (diffMinutes <= 10) {
+                    console.log(`✅ [GPS] Teléfono y GPS concuerdan (${diffMinutes.toFixed(1)} min de diferencia).`);
+                } else {
+                    console.log(`📍 [GPS] Posición GPS en caché del dispositivo (${diffMinutes.toFixed(1)} min antigua) — hora del teléfono preservada.`);
+                }
+            }
+
+            if (isTimeAltered) {
+                gpsAnomalies.push("ERR-08"); // Registro de anomalía de seguridad en BD
+                isSuspiciousGPS = true;
             }
             // --- FIN VERIFICACIÓN EXTERNA DE HORA ---
             
@@ -1040,9 +1200,8 @@ export default function Dashboard() {
             });
 
             // STORE DATA FOR PREVIEW
-            // ✅ CORRECCIÓN TIMEZONE: Siempre usar hora de Colombia (America/Bogota)
-            // independientemente de la zona horaria configurada en el dispositivo.
-            const { fecha: dateStr, hora: timeStr } = getColombiaDateTime();
+            // ✅ TIMEZONE DINÁMICO: Detecta zona por GPS (ej: Europe/Madrid en España, America/Bogota en Colombia)
+            const { fecha: dateStr, hora: timeStr } = getColombiaDateTime(finalServerTimeObj, targetTz);
 
             let tipoLabel = 'Entrada';
             if (mode === 'exit') tipoLabel = 'Salida';
@@ -1065,6 +1224,10 @@ export default function Dashboard() {
                     gpsAnomalies: gpsAnomalies
                 }
             });
+
+            // ⚡ LIBERAR CÁMARA INMEDIATAMENTE: Apagar el sensor y tracks para liberar
+            // 50MB-100MB de RAM y evitar que Android cierre Chrome por falta de memoria
+            stopCamera();
 
             setStep('preview');
             setIsCapturing(false);
@@ -1137,6 +1300,39 @@ export default function Dashboard() {
         }
     };
 
+    const getOneSecondBefore = (fechaStr, horaStr) => {
+        try {
+            const separator = fechaStr.includes('/') ? '/' : '-';
+            const parts = fechaStr.split(separator);
+            const [hours, minutes, seconds] = (horaStr || '').split(':');
+            
+            let d, m, y;
+            if (parts[0].length === 4) {
+                [y, m, d] = parts;
+            } else {
+                [d, m, y] = parts;
+            }
+            
+            const dateObj = new Date(parseInt(y), parseInt(m) - 1, parseInt(d), parseInt(hours), parseInt(minutes), parseInt(seconds || 0));
+            const oneSecBeforeObj = new Date(dateObj.getTime() - 1000);
+            
+            const pad = (num) => String(num).padStart(2, '0');
+            const formattedHora = `${pad(oneSecBeforeObj.getHours())}:${pad(oneSecBeforeObj.getMinutes())}:${pad(oneSecBeforeObj.getSeconds())}`;
+            
+            let formattedFecha;
+            if (parts[0].length === 4) {
+                formattedFecha = `${oneSecBeforeObj.getFullYear()}${separator}${pad(oneSecBeforeObj.getMonth() + 1)}${separator}${pad(oneSecBeforeObj.getDate())}`;
+            } else {
+                formattedFecha = `${pad(oneSecBeforeObj.getDate())}${separator}${pad(oneSecBeforeObj.getMonth() + 1)}${separator}${oneSecBeforeObj.getFullYear()}`;
+            }
+            
+            return { fecha: formattedFecha, hora: formattedHora };
+        } catch (e) {
+            console.error("Error restando un segundo:", e);
+            return { fecha: fechaStr, hora: horaStr };
+        }
+    };
+
     const saveRecord = async () => {
         if (!capturedData) return false;
         setStep('processing');
@@ -1149,9 +1345,59 @@ export default function Dashboard() {
             const safeHora = (md.hora || '').replace(/:/g, '-').replace(/\s/g, '');
             const deterministicDocId = `${safeEmail}_${safeFecha}_${safeHora}`;
 
-            // 6. Almuerzo individual
-            if (mode === 'exit') {
+            // 6. Almuerzo individual (solo si está habilitado y en modo individual)
+            if (mode === 'exit' && storageSettings?.calc_lunch === true && storageSettings?.calc_lunchMode === 'individual') {
                 md.applyLunch = applyLunch;
+            }
+
+            // --- AUTO CERRAR VISITAS ABIERTAS (ONLINE) ---
+            if (mode === 'exit') {
+                const _normEm = (currentUser.email || '').trim().toLowerCase();
+                const isVisitOpen = localStorage.getItem(`lastRutaType_${_normEm}`) === 'Llegada Cliente' ||
+                    localStorage.getItem(`lastRutaType_${currentUser.email}`) === 'Llegada Cliente';
+                if (isVisitOpen) {
+                    try {
+                        const { fecha: clientExitFecha, hora: clientExitHora } = getOneSecondBefore(md.fecha, md.hora);
+                        const clientExitMetadata = {
+                            usuario: currentUser.email,
+                            tipo: 'Salida Cliente',
+                            fecha: clientExitFecha,
+                            hora: clientExitHora,
+                            localidad: localStorage.getItem(`lastRutaLocation_${currentUser.email}`) || 'Cliente',
+                            observacion: 'Salida automática por fin de turno',
+                            latitud: md.latitud,
+                            longitud: md.longitud,
+                            timestamp: serverTimestamp(),
+                            isAutoExit: true
+                        };
+
+                        const clientSafeEmail = currentUser.email.replace(/[@.]/g, '-');
+                        const clientSafeFecha = clientExitFecha.replace(/\//g, '-');
+                        const clientSafeHora = clientExitHora.replace(/:/g, '-').replace(/\s/g, '');
+                        const clientDeterministicDocId = `${clientSafeEmail}_${clientSafeFecha}_${clientSafeHora}`;
+
+                        // Guardar en 'visitas'
+                        await setDoc(doc(db, "visitas", clientDeterministicDocId), clientExitMetadata);
+
+                        // Guardar en 'attendance' con el tipo cambiado a 'En Tránsito'
+                        const clientAttendanceData = {
+                            ...clientExitMetadata,
+                            tipo: 'En Tránsito'
+                        };
+                        await setDoc(doc(db, "attendance", clientDeterministicDocId), clientAttendanceData);
+
+                        console.log(`✅ Salida de visita auto-generada online para: ${clientExitMetadata.localidad}`);
+
+                        // Limpiar localStorage de visitas (normalizado)
+                        const _normEmO = (currentUser.email || '').trim().toLowerCase();
+                        localStorage.setItem(`lastRutaType_${_normEmO}`, 'Salida Cliente');
+                        if (currentUser.email !== _normEmO) localStorage.setItem(`lastRutaType_${currentUser.email}`, 'Salida Cliente');
+                        localStorage.removeItem(`lastRutaLocation_${_normEmO}`);
+                        if (currentUser.email !== _normEmO) localStorage.removeItem(`lastRutaLocation_${currentUser.email}`);
+                    } catch (visitErr) {
+                        console.error("Error auto-cerrando visita online:", visitErr);
+                    }
+                }
             }
 
             if (mode === 'incident') {
@@ -1230,9 +1476,11 @@ export default function Dashboard() {
         // Compartir se delega ahora a interacción manual en SuccessView para evitar fallas en ZTE
 
 
+        setSavedOffline(false); // Resetear bandera offline antes de cada intento
         try {
-            // ─── CAPA 1: Intentar guardar en Firestore (timeout 5s) ─────────────────
-            const saveTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error("Firebase Timeout")), 5000));
+            // ─── CAPA 1: Intentar guardar en Firestore (timeout 15s) ─────────────────
+            // 15s da suficiente margen para redes 3G lentas en campo sin bloquear la UI indefinidamente
+            const saveTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error("Firebase Timeout")), 15000));
             const saved = await Promise.race([saveRecord(), saveTimeout]);
             
             if (!saved) throw new Error("Firestore save failed");
@@ -1275,12 +1523,17 @@ export default function Dashboard() {
                     // El SyncManager aplicará la marca de agua correcta con la dirección real
                     console.warn('⚠️ Foto no subida (red débil). Guardando en cola offline:', err.message);
                     try {
+                        const finalMetadata = {
+                            ...capturedData.metadata,
+                            descripcion: mode === 'incident' ? incidentDescription.trim() : null
+                        };
+                        if (mode === 'exit' && storageSettings?.calc_lunch === true && storageSettings?.calc_lunchMode === 'individual') {
+                            finalMetadata.applyLunch = applyLunch;
+                        }
+
                         const recordId = await saveOfflineRecord({
                             image: capturedData.rawImage || capturedData.image, // ← Preferir imagen SIN marca
-                            metadata: {
-                                ...capturedData.metadata,
-                                descripcion: mode === 'incident' ? incidentDescription.trim() : null
-                            },
+                            metadata: finalMetadata,
                             mode: mode,
                             savePhoto: true,        // Solo pendiente la foto
                             photoOnly: true,        // El registro en Firestore ya existe
@@ -1299,14 +1552,21 @@ export default function Dashboard() {
         } catch (err) {
             // ─── CAPA 3: Firestore falló — guardar TODO offline ─────────────────────
             console.warn('⚠️ Sin conexión. Guardando registro completo offline:', err.message);
+            setSavedOffline(true); // Notificar al empleado que quedó en modo offline
+            
+            const finalMetadata = {
+                ...capturedData.metadata,
+                descripcion: mode === 'incident' ? incidentDescription.trim() : null
+            };
+            if (mode === 'exit' && storageSettings?.calc_lunch === true && storageSettings?.calc_lunchMode === 'individual') {
+                finalMetadata.applyLunch = applyLunch;
+            }
+
             const recordId = await saveOfflineRecord({
                 // Guardar la imagen SIN marca de agua — el SyncManager aplicará la correcta
                 // con la dirección real (via GPS guardado) y la hora original de captura
                 image: capturedData.rawImage || capturedData.image,
-                metadata: {
-                    ...capturedData.metadata,
-                    descripcion: mode === 'incident' ? incidentDescription.trim() : null
-                },
+                metadata: finalMetadata,
                 mode: mode,
                 savePhoto: savePhoto,
                 latitude: capturedData.metadata.latitud,
@@ -1315,6 +1575,49 @@ export default function Dashboard() {
             if (capturedData.metadata.latitud === 0 && capturedData.metadata.longitud === 0) {
                 startBackgroundGPSRecovery(recordId);
             }
+
+            // --- AUTO CERRAR VISITAS ABIERTAS (OFFLINE) ---
+            if (mode === 'exit') {
+                const _normEm2 = (currentUser.email || '').trim().toLowerCase();
+                const isVisitOpen = localStorage.getItem(`lastRutaType_${_normEm2}`) === 'Llegada Cliente' ||
+                    localStorage.getItem(`lastRutaType_${currentUser.email}`) === 'Llegada Cliente';
+                if (isVisitOpen) {
+                    try {
+                        const { fecha: clientExitFecha, hora: clientExitHora } = getOneSecondBefore(capturedData.metadata.fecha, capturedData.metadata.hora);
+                        const clientExitMetadata = {
+                            usuario: currentUser.email,
+                            tipo: 'Salida Cliente',
+                            fecha: clientExitFecha,
+                            hora: clientExitHora,
+                            localidad: localStorage.getItem(`lastRutaLocation_${currentUser.email}`) || 'Cliente',
+                            observacion: 'Salida automática por fin de turno',
+                            latitud: capturedData.metadata.latitud,
+                            longitud: capturedData.metadata.longitud,
+                            isAutoExit: true
+                        };
+
+                        await saveOfflineRecord({
+                            image: "", // sin foto
+                            metadata: clientExitMetadata,
+                            mode: 'visita',
+                            savePhoto: false,
+                            latitude: capturedData.metadata.latitud,
+                            longitude: capturedData.metadata.longitud
+                        });
+
+                        console.log(`✅ Salida de visita auto-generada offline para: ${clientExitMetadata.localidad}`);
+
+                        // Limpiar localStorage de visitas (normalizado)
+                        const _normEmV = (currentUser.email || '').trim().toLowerCase();
+                        localStorage.setItem(`lastRutaType_${_normEmV}`, 'Salida Cliente');
+                        if (currentUser.email !== _normEmV) localStorage.setItem(`lastRutaType_${currentUser.email}`, 'Salida Cliente');
+                        localStorage.removeItem(`lastRutaLocation_${_normEmV}`);
+                        if (currentUser.email !== _normEmV) localStorage.removeItem(`lastRutaLocation_${currentUser.email}`);
+                    } catch (visitErr) {
+                        console.error("Error auto-cerrando visita offline:", visitErr);
+                    }
+                }
+            }
         }
 
         setStep('success');
@@ -1322,15 +1625,22 @@ export default function Dashboard() {
 
         const tipoActual = mode === 'exit' ? 'Salida' : mode === 'entry' ? 'Entrada' : null;
         if (tipoActual) {
-            setAllowedActions(tipoActual === 'Entrada' 
-                ? { entry: false, exit: true } 
+            setAllowedActions(tipoActual === 'Entrada'
+                ? { entry: false, exit: true }
                 : { entry: true, exit: false });
-            // Guardar en localStorage como backup específico por usuario
-            localStorage.setItem(`lastAttendanceType_${currentUser.email}`, tipoActual);
-            localStorage.setItem(`lastAttendanceTime_${currentUser.email}`, Date.now().toString());
-            
+            // 🔒 BLINDAJE: siempre guardar con email normalizado (minúsculas) + original si difiere
+            const rawEm = currentUser.email || '';
+            const normEm = rawEm.trim().toLowerCase();
+            const nowMs = Date.now().toString();
+            localStorage.setItem(`lastAttendanceType_${normEm}`, tipoActual);
+            localStorage.setItem(`lastAttendanceTime_${normEm}`, nowMs);
+            if (rawEm && rawEm !== normEm) {
+                localStorage.setItem(`lastAttendanceType_${rawEm}`, tipoActual);
+                localStorage.setItem(`lastAttendanceTime_${rawEm}`, nowMs);
+            }
             if (tipoActual === 'Salida') {
-                localStorage.removeItem(`lastRutaType_${currentUser.email}`);
+                localStorage.removeItem(`lastRutaType_${normEm}`);
+                if (rawEm && rawEm !== normEm) localStorage.removeItem(`lastRutaType_${rawEm}`);
             }
         }
 
@@ -1338,6 +1648,7 @@ export default function Dashboard() {
 
     const handleCloseSuccess = () => {
         setStep('idle');
+        setSavedOffline(false);
         setMode(null);
         setCapturedData(null);
         setIncidentDescription('');
@@ -1349,10 +1660,17 @@ export default function Dashboard() {
             {/* Header */}
             <div className="bg-white shadow p-4 flex justify-between items-center gap-2 overflow-x-auto">
                 <h1 className="text-lg font-bold text-gray-800 flex-1 text-left truncate">Control Asistencia</h1>
+                {isOfflineUser && (
+                    <div className="flex items-center gap-1.5 px-3 py-1.5 bg-orange-100 border border-orange-300 text-orange-700 text-xs font-semibold rounded-full whitespace-nowrap">
+                        <WifiOff size={13} />
+                        <span>Sesión offline — registros en cola local</span>
+                    </div>
+                )}
                 <button onClick={() => logout()} className="px-6 py-2.5 bg-white text-gray-800 font-bold flex items-center gap-2 rounded-xl border border-gray-100 shadow-lg hover:bg-gray-50 transition whitespace-nowrap">
                     <LogOut size={20} /> Salir
                 </button>
             </div>
+
 
             {(showInstallBtn && !isStandalone) && (
                 <div className="bg-green-500 p-2 flex justify-center animate-pulse">
@@ -1374,7 +1692,10 @@ export default function Dashboard() {
             <div className="flex-1 p-4 flex flex-col items-center justify-center max-w-md mx-auto w-full">
 
                 {step === 'idle' && (
-                    <div className="grid grid-cols-1 gap-6 w-full">
+                    <div className="grid grid-cols-1 gap-4 w-full">
+                        {/* Aviso discreto y no invasivo de nueva versión */}
+                        <UpdateBadge />
+
                         <div className="bg-white p-6 rounded-xl shadow-2xl text-center flex flex-col items-center">
                             {employeePhoto && (
                                 <img 
@@ -1408,6 +1729,52 @@ export default function Dashboard() {
 
                         {isLicenseValid ? (
                             <div className="w-full flex flex-col gap-4">
+                                {/* Panel de error de cámara */}
+                                {cameraError && (
+                                    <div className="w-full bg-red-50 border border-red-200 rounded-2xl p-5 shadow-lg flex flex-col gap-3">
+                                        <h3 className="text-red-700 font-bold text-base flex items-center gap-2">
+                                            <span className="animate-pulse">⚠️</span>
+                                            {cameraError.title}
+                                        </h3>
+                                        <p className="text-red-600 text-sm whitespace-pre-line">{cameraError.message}</p>
+                                        <div className="flex gap-3 mt-1">
+                                            {cameraError.canRetry && (
+                                                <button
+                                                    onClick={async () => {
+                                                        if (cameraError?.type === 'busy') {
+                                                            if (pendingMode) sessionStorage.setItem('pendingAttendanceMode', pendingMode);
+                                                            if ('serviceWorker' in navigator) {
+                                                                try {
+                                                                    const registrations = await navigator.serviceWorker.getRegistrations();
+                                                                    for (let registration of registrations) {
+                                                                        await registration.unregister();
+                                                                    }
+                                                                } catch (swErr) {
+                                                                    console.warn("SW Unregister error:", swErr);
+                                                                }
+                                                            }
+                                                            window.location.reload(true);
+                                                        } else {
+                                                            const retryMode = pendingMode;
+                                                            setCameraError(null);
+                                                            if (retryMode) handleStart(retryMode);
+                                                        }
+                                                    }}
+                                                    className="flex-1 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition active:scale-95 text-sm shadow-md"
+                                                >
+                                                    🔄 Reintentar
+                                                </button>
+                                            )}
+                                            <button
+                                                onClick={() => setCameraError(null)}
+                                                className="flex-1 py-3 bg-white text-gray-600 font-bold rounded-xl border border-gray-200 hover:bg-gray-50 transition text-sm shadow-sm"
+                                            >
+                                                Cancelar
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+
                                 <ActionButtons
                                     loadingState={loadingState}
                                     allowedActions={allowedActions}
@@ -1490,7 +1857,7 @@ export default function Dashboard() {
                     />
                 )}
 
-                {step === 'success' && <SuccessView onShare={shareImage} onClose={handleCloseSuccess} />}
+                {step === 'success' && <SuccessView onShare={shareImage} onClose={handleCloseSuccess} savedOffline={savedOffline} />}
             </div>
             {/* Version Indicator */}
             <div className="p-2 text-center flex flex-col items-center gap-1 opacity-50">

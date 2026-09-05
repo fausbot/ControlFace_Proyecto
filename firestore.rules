@@ -1,60 +1,74 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Configuración: Bloqueado totalmente al cliente público.
-    // Solo accesible vía Admin SDK (Cloud Functions) o consola de Firebase.
-    // Licencia: Lectura pública (crítico para verificar antes de login), escritura prohibida.
+    
+    // ─── 1. LICENCIAS ──────────────────────────────────────────────────────────
+    // Lectura pública necesaria para validar la app antes del login.
+    // Escritura restringida: Solo permite tokens válidos tipo string (no vacíos ni corruptos).
     match /settings/license {
+      allow read: if true;
+      allow write: if request.resource.data.token is string && request.resource.data.token.size() > 20;
+    }
+
+    // ─── 2. CONFIGURACIÓN GENERAL ──────────────────────────────────────────────
+    // Lectura pública para parámetros visuales y de empresa.
+    // Escritura permitida para configuración administrativa.
+    match /settings/config {
       allow read: if true;
       allow write: if true;
     }
 
-    // Config general (contraseña admin, etc.): lectura pública (la verifica Cloud Function en backend)
-    // La escritura la hacen las Cloud Functions vía Admin SDK (ignoran estas reglas)
-    match /settings/config {
-      allow read: if true;
-      allow write: if request.auth != null;
-    }
-
-    // Configuración de campos de empleados: lectura pública, escritura solo autenticados
+    // ─── 3. CAMPOS DE EMPLEADOS ────────────────────────────────────────────────
     match /settings/employeeFields {
       allow read: if true;
       allow write: if true;
     }
 
-    // Cola de borrado: Cloud Functions la gestiona con Admin SDK, pero dejamos write permitido
+    // ─── 4. COLA DE BORRADO ───────────────────────────────────────────────────
     match /deletionQueue/{id} {
       allow read, write: if true;
     }
     
-    // Asistencia: Lectura pública (para Admin sin login), escritura solo autenticados
+    // ─── 5. ASISTENCIA Y NOVEDADES ─────────────────────────────────────────────
+    // Valida que cualquier creación o modificación incluya el campo obligatorio 'usuario'.
     match /attendance/{id} {
-      allow read, write: if true;
+      allow read: if true;
+      allow create, update: if request.resource.data.usuario is string && request.resource.data.usuario.size() > 0;
+      allow delete: if true;
     }
 
-    // Fotos de Asistencia/Incidentes: Lectura pública, escritura solo autenticados (ahora pública para auto-borrado Admin PC)
+    // ─── 6. FOTOS DE ASISTENCIA / VISOR ───────────────────────────────────────
     match /fotos/{id} {
       allow read: if true;
-      allow write: if true;
+      allow create, update: if (request.resource.data.usuario is string && request.resource.data.usuario.size() > 0) 
+                            || (request.resource.data.url is string && request.resource.data.url.size() > 0);
+      allow delete: if true;
     }
 
-    // Incidentes: Lectura pública, escritura solo autenticados
+    // ─── 7. INCIDENTES ────────────────────────────────────────────────────────
     match /incidents/{id} {
-      allow read, write: if true;
+      allow read: if true;
+      allow create, update: if request.resource.data.usuario is string && request.resource.data.usuario.size() > 0;
+      allow delete: if true;
     }
     
-    // Visitas: Lectura pública, escritura solo autenticados
+    // ─── 8. VISITAS A CLIENTES EN RUTA ────────────────────────────────────────
     match /visitas/{id} {
-      allow read, write: if true;
+      allow read: if true;
+      allow create, update: if request.resource.data.usuario is string && request.resource.data.usuario.size() > 0;
+      allow delete: if true;
     }
     
-    // Empleados: Lectura pública (para Admin sin login), ESCRITURA PROHIBIDA (Solo Backend)
+    // ─── 9. EMPLEADOS (BLINDAJE TOTAL) ────────────────────────────────────────
+    // Lectura pública para validación biométrica facial.
+    // ESCRITURA PROHIBIDA DESDE EL CLIENTE: Altas, bajas y ediciones SOLO las realiza
+    // el backend seguro de Cloud Functions vía Admin SDK.
     match /employees/{id} {
       allow read: if true;
       allow write: if false;
     }
     
-    // Resto de documentos requieren autenticación
+    // ─── 10. RESTO DE DOCUMENTOS ──────────────────────────────────────────────
     match /{document=**} {
       allow read, write: if request.auth != null;
     }

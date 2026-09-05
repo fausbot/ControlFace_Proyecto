@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistema de Programación y Malla de Turnos - Vigilancia Colombia</title>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- CSS Theme -->
+    <link rel="stylesheet" href="style.css">
+
+    <!-- SheetJS CDN para exportación a Excel -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+
+    <!-- Header / Navbar -->
+    <header class="app-header">
+        <div class="brand">
+            <div class="brand-icon">🛡️</div>
+            <div>
+                <div class="brand-title">ControlVigilantes Pro</div>
+                <div class="brand-subtitle">Gestión de Turnos, Cobertura 24/7 y Recargos (Colombia)</div>
+            </div>
+        </div>
+
+        <div class="toolbar-group">
+            <button class="btn btn-primary" id="btnSwapGuards" style="background:linear-gradient(135deg, #6366f1, #4f46e5);">
+                <span>🔄</span> Intercambiar / Trasladar Vigilante
+            </button>
+            <button class="btn btn-success" id="btnExportExcel">
+                <span>📊</span> Exportar a Excel
+            </button>
+            <button class="btn btn-primary" id="btnAutoBalance" style="background:linear-gradient(135deg, #10b981, #059669);">
+                <span>🔍</span> Auditar y Validar Malla
+            </button>
+        </div>
+    </header>
+
+    <!-- App Main Container -->
+    <main class="app-container">
+
+        <!-- Top KPI Cards -->
+        <section class="kpi-grid" style="grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));">
+            <div class="kpi-card">
+                <div class="kpi-info">
+                    <h4>Total Plantilla Empresa</h4>
+                    <div class="kpi-value" id="kpiTotalGuards">31 / 31</div>
+                </div>
+                <div class="kpi-badge bg-blue-500/20 text-blue-400" id="kpiTotalBadge">Sedes + Pool Comodines</div>
+            </div>
+
+            <div class="kpi-card">
+                <div class="kpi-info">
+                    <h4>Fijos en Sedes (Clientes)</h4>
+                    <div class="kpi-value" id="kpiFijos">28 / 28</div>
+                </div>
+                <div class="kpi-badge bg-indigo-500/20 text-indigo-400">Puestos Fijos Cubiertos</div>
+            </div>
+
+            <div class="kpi-card">
+                <div class="kpi-info">
+                    <h4>Pool de Comodines</h4>
+                    <div class="kpi-value" id="kpiRelievistas">12</div>
+                    <div style="font-size:0.75rem; color:#9ca3af; margin-top:0.25rem;">
+                        Objetivo: 
+                        <select id="desiredReliefSelect" class="form-select" style="padding:0.1rem 0.3rem; font-size:0.75rem; display:inline-block; width:auto; background:rgba(0,0,0,0.4);">
+                            <option value="1">1 Comodín Libre</option>
+                            <option value="2">2 Comodines Libres</option>
+                            <option value="3">3 Comodines Libres</option>
+                            <option value="4">4 Comodines Libres</option>
+                            <option value="5">5 Comodines Libres</option>
+                            <option value="6">6 Comodines Libres</option>
+                            <option value="7">7 Comodines Libres</option>
+                            <option value="8">8 Comodines Libres</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="kpi-badge bg-emerald-500/20 text-emerald-400">Disponibles</div>
+            </div>
+
+            <div class="kpi-card">
+                <div class="kpi-info">
+                    <h4>Diagnóstico Plantilla</h4>
+                    <div class="kpi-value" id="kpiDiagnosisValue">Sobran 8</div>
+                </div>
+                <div class="kpi-badge bg-amber-500/20 text-amber-300" id="kpiDiagnosisBadge">⚠️ Sobrante de Personal</div>
+            </div>
+
+            <div class="kpi-card">
+                <div class="kpi-info">
+                    <h4>Novedades del Mes</h4>
+                    <div class="kpi-value" id="kpiNovelties">2</div>
+                </div>
+                <div class="kpi-badge bg-amber-500/20 text-amber-400">Incapacidades/Permisos</div>
+            </div>
+        </section>
+
+        <!-- Filter & Control Toolbar -->
+        <section class="toolbar-card">
+            <div class="toolbar-group">
+                <label style="font-weight:600; color:var(--text-secondary);">Periodo:</label>
+                <select id="monthSelect" class="form-select">
+                    <option value="0">Enero</option>
+                    <option value="1">Febrero</option>
+                    <option value="2">Marzo</option>
+                    <option value="3">Abril</option>
+                    <option value="4">Mayo</option>
+                    <option value="5">Junio</option>
+                    <option value="6" selected>Julio</option>
+                    <option value="7">Agosto</option>
+                    <option value="8">Septiembre</option>
+                    <option value="9">Octubre</option>
+                    <option value="10">Noviembre</option>
+                    <option value="11">Diciembre</option>
+                </select>
+
+                <select id="yearSelect" class="form-select">
+                    <option value="2026" selected>2026</option>
+                    <option value="2027">2027</option>
+                    <option value="2028">2028</option>
+                </select>
+
+                <label style="font-weight:600; color:var(--text-secondary); margin-left:1rem;">Contrato / Sede:</label>
+                <select id="contractFilter" class="form-select">
+                    <option value="ALL">Todos los Contratos y Sedes</option>
+                </select>
+            </div>
+
+            <div class="toolbar-group">
+                <button class="btn btn-primary" id="btnManageContracts" style="background:linear-gradient(135deg, #3b82f6, #6366f1); font-weight:700;">
+                    <span>⚙️</span> Editar / Gestionar Sedes
+                </button>
+                <button class="btn btn-secondary" id="btnAddContract">
+                    <span>🏢</span> Crear Nueva Sede
+                </button>
+                <button class="btn btn-secondary" id="btnAddGuard">
+                    <span>➕</span> Nuevo Vigilante
+                </button>
+                <button class="btn btn-secondary" id="btnResetDefaults" style="border:1px solid rgba(239,68,68,0.4); color:#fca5a5;" title="Restablecer todos los datos a la configuración inicial de fábrica">
+                    <span>↺</span> Restablecer Datos
+                </button>
+            </div>
+        </section>
+
+        <!-- Navigation Tabs -->
+        <nav class="nav-tabs">
+            <button class="tab-btn active" data-tab="ROSTER">🗓️ Malla de Turnos Interactiva</button>
+            <button class="tab-btn" data-tab="GUARDS">👥 Directorio de Empleados y Puestos</button>
+            <button class="tab-btn" data-tab="PAYROLL">💰 Liquidación de Horas y Recargos</button>
+            <button class="tab-btn" data-tab="COVERAGE">🛡️ Auditoría de Cobertura 24/7</button>
+        </nav>
+
+        <!-- Legend Bar -->
+        <div class="legend-bar">
+            <div class="legend-item"><span class="shift-badge shift-D">D</span> Día (06:00 - 18:00)</div>
+            <div class="legend-item"><span class="shift-badge shift-N">N</span> Noche (18:00 - 06:00 | <em>Recargo 19:00-06:00</em>)</div>
+            <div class="legend-item"><span class="shift-badge shift-X">X</span> Descanso</div>
+            <div class="legend-item"><span class="shift-badge shift-D-REL">D-REL</span> Reemplazo Día</div>
+            <div class="legend-item"><span class="shift-badge shift-N-REL">N-REL</span> Reemplazo Noche</div>
+            <div class="legend-item"><span class="shift-badge shift-NOVELTY">INC / VAC / PRM</span> Novedades (Incapacidad, Permiso, etc.)</div>
+            <div class="legend-item" style="margin-left:auto; color:#f59e0b; font-weight:600;">★ Festivo Oficial Colombia (Diurno 06-19h / Nocturno 19-06h)</div>
+        </div>
+
+        <!-- Section 1: Roster Grid -->
+        <section id="rosterSection">
+            <div class="table-wrapper">
+                <table class="roster-table" id="rosterTable">
+                    <thead id="tableHeader"></thead>
+                    <tbody id="tableBody"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Section 2: Guards Directory & Position Config -->
+        <section id="guardsSection" style="display:none;">
+            <div class="table-wrapper" id="guardsDirectoryContainer"></div>
+        </section>
+
+        <!-- Section 3: Payroll Breakdown -->
+        <section id="payrollSection" style="display:none;">
+            <div class="table-wrapper" id="payrollTableContainer"></div>
+        </section>
+
+        <!-- Section 4: Coverage Audit -->
+        <section id="coverageSection" style="display:none;">
+            <div id="coverageAuditContainer"></div>
+        </section>
+
+    </main>
+
+    <!-- Modal 1: Edición de Turno / Asignación de Novedad -->
+    <div class="modal-overlay" id="shiftEditModal">
+        <div class="modal-card">
+            <div class="modal-header">
+                <div class="modal-title">Gestión de Turno / Novedad</div>
+                <button class="close-btn close-modal-btn">&times;</button>
+            </div>
+
+            <div style="margin-bottom:1.25rem;">
+                <p style="font-size:0.9rem; color:var(--text-secondary);" id="modalGuardName">Vigilante</p>
+                <p style="font-size:0.85rem; color:var(--accent-blue);" id="modalDate">Fecha</p>
+            </div>
+
+            <div style="margin-bottom:1.5rem;">
+                <label style="display:block; font-weight:600; margin-bottom:0.5rem; color:#fff;">Seleccionar Turno o Novedad:</label>
+                <select id="modalShiftSelect" class="form-select" style="width:100%;">
+                    <optgroup label="Turnos Estándar">
+                        <option value="D">D - Turno Día (06:00 - 18:00)</option>
+                        <option value="N">N - Turno Noche (18:00 - 06:00)</option>
+                        <option value="X">X - Descanso Programado</option>
+                    </optgroup>
+                    <optgroup label="Reemplazos Comodín">
+                        <option value="D-REL">D-REL - Reemplazo Día</option>
+                        <option value="N-REL">N-REL - Reemplazo Noche</option>
+                    </optgroup>
+                    <optgroup label="Catálogo de Novedades (Genera Hueco)">
+                        <option value="INC">INC - Incapacidad Médica</option>
+                        <option value="VAC">VAC - Vacaciones</option>
+                        <option value="PRM">PRM - Permiso Remunerado</option>
+                        <option value="PNR">PNR - Permiso No Remunerado</option>
+                        <option value="FAL">FAL - Ausencia Injustificada (Falta)</option>
+                        <option value="CAL">CAL - Calamidad Doméstica</option>
+                        <option value="MAT">MAT - Licencia Maternidad/Paternidad</option>
+                        <option value="SUS">SUS - Suspensión Disciplinaria</option>
+                    </optgroup>
+                </select>
+            </div>
+
+            <div style="display:flex; justify-content:flex-end; gap:0.75rem;">
+                <button class="btn btn-secondary close-modal-btn">Cancelar</button>
+                <button class="btn btn-primary" id="btnSaveShiftChange">Guardar Cambios</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal 2: Sugerencia Inteligente de Vigilantes Relievistas (Comodines) -->
+    <div class="modal-overlay" id="substituteFinderModal">
+        <div class="modal-card" style="max-width:750px;">
+            <div class="modal-header">
+                <div>
+                    <div class="modal-title" id="subsituteModalTitle">Sugerencia Automática de Relievistas</div>
+                    <div style="font-size:0.8rem; color:var(--text-secondary);" id="substituteModalDate">Fecha</div>
+                </div>
+                <button class="close-btn close-modal-btn">&times;</button>
+            </div>
+
+            <p style="font-size:0.85rem; color:#9ca3af; margin-bottom:1rem;">
+                El motor analiza la disponibilidad de vigilantes <strong>Comodines/Relievistas</strong> descartando automáticamente quienes violen el descanso obligatorio de 48h post-noche y priorizando al de menor carga de horas semanales:
+            </p>
+
+            <div id="substitutesListContainer" style="max-height:350px; overflow-y:auto; margin-bottom:1.5rem;"></div>
+
+            <div style="display:flex; justify-content:flex-end;">
+                <button class="btn btn-secondary close-modal-btn">Cerrar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal 3: Agregar Nuevo Vigilante -->
+    <div class="modal-overlay" id="addGuardModal">
+        <div class="modal-card">
+            <div class="modal-header">
+                <div class="modal-title">Agregar Nuevo Vigilante</div>
+                <button class="close-btn close-modal-btn">&times;</button>
+            </div>
+
+            <form id="addGuardForm" style="display:flex; flex-direction:column; gap:1rem;">
+                <div>
+                    <label style="display:block; font-weight:600; margin-bottom:0.3rem;">Cédula de Ciudadanía:</label>
+                    <input type="text" id="newCedula" class="form-input" style="width:100%;" required placeholder="Ej: 1012345699">
+                </div>
+
+                <div>
+                    <label style="display:block; font-weight:600; margin-bottom:0.3rem;">Nombre Completo:</label>
+                    <input type="text" id="newName" class="form-input" style="width:100%;" required placeholder="Ej: Roberto Carlos Silva">
+                </div>
+
+                <div>
+                    <label style="display:block; font-weight:600; margin-bottom:0.3rem;">Tipo de Vigilante:</label>
+                    <select id="newType" class="form-select" style="width:100%;">
+                        <option value="FIJO">Vigilante Fijo (Asignado a Sede)</option>
+                        <option value="RELIEVISTA">Vigilante Relievista / Comodín (Rotativo)</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label style="display:block; font-weight:600; margin-bottom:0.3rem;">Sede / Negocio Asignado:</label>
+                    <select id="newContract" class="form-select" style="width:100%;"></select>
+                </div>
+
+                <div>
+                    <label style="display:block; font-weight:600; margin-bottom:0.3rem;">Fecha de Ingreso del Vigilante:</label>
+                    <input type="date" id="newGuardStartDate" class="form-input" style="width:100%;" value="2026-01-01" required>
+                </div>
+
+                <div style="display:flex; justify-content:flex-end; gap:0.75rem; margin-top:0.5rem;">
+                    <button type="button" class="btn btn-secondary close-modal-btn">Cancelar</button>
+                    <button type="submit" class="btn btn-success">Guardar Vigilante</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal 4: Crear Nueva Sede / Negocio con Puestos de Trabajo -->
+    <div class="modal-overlay" id="addContractModal">
+        <div class="modal-card">
+            <div class="modal-header">
+                <div class="modal-title">Crear Nueva Sede / Negocio</div>
+                <button class="close-btn close-modal-btn">&times;</button>
+            </div>
+
+            <form id="addContractForm" style="display:flex; flex-direction:column; gap:1rem;">
+                <div>
+                    <label style="display:block; font-weight:600; margin-bottom:0.3rem;">Nombre de la Sede / Negocio:</label>
+                    <input type="text" id="newContractName" class="form-input" style="width:100%;" required placeholder="Ej: Edificio Pepito">
+                </div>
+
+                <div>
+                    <label style="display:block; font-weight:600; margin-bottom:0.3rem;">Fecha de Inicio de Contrato / Servicio:</label>
+                    <input type="date" id="newContractStartDate" class="form-input" style="width:100%;" value="2026-01-01" required>
+                </div>
+
+                <div>
+                    <label style="display:block; font-weight:600; margin-bottom:0.3rem;">Esquema de Turnos Obligatorio para esta Sede:</label>
+                    <select id="newContractScheme" class="form-select" style="width:100%;">
+                        <option value="2D-2N-2X" selected>2 Días Día - 2 Días Noche - 2 Descansos (24/7 Rotativo Estándar)</option>
+                        <option value="4D-4N-2X">4 Días Día - 4 Días Noche - 2 Descansos (24/7 Rotativo)</option>
+                        <option value="SOLO_DIA_12H">Solo Diurno (06:00 - 18:00) - Cierra y Apaga en la Noche</option>
+                        <option value="SOLO_NOCHE_12H">Solo Nocturno (18:00 - 06:00) - Cierra en el Día</option>
+                    </select>
+                </div>
+
+                <div>
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.3rem;">
+                        <label style="font-weight:600;">Puestos de Trabajo (ej. Portería 1, Portería 2, Recorredor):</label>
+                        <button type="button" class="btn btn-secondary" id="btnAddPostFieldNew" style="padding:0.2rem 0.5rem; font-size:0.75rem;">
+                            ➕ Agregar Puesto
+                        </button>
+                    </div>
+                    <div id="newContractPostsContainer" style="display:flex; flex-direction:column; gap:0.5rem; max-height:160px; overflow-y:auto; padding:0.25rem;">
+                        <div class="post-input-row" style="display:flex; gap:0.5rem; align-items:center;">
+                            <input type="text" class="form-input post-name-input" style="flex:1;" value="Portería 1" placeholder="Nombre del puesto" required>
+                            <button type="button" class="btn btn-danger btn-remove-post" style="padding:0.3rem 0.6rem;">🗑️</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="newContractCalcSummary" style="background:rgba(59,130,246,0.1); border:1px solid rgba(59,130,246,0.3); border-radius:8px; padding:0.75rem; font-size:0.85rem; color:#93c5fd;">
+                    <!-- Resumen de cálculo -->
+                </div>
+
+                <div style="display:flex; justify-content:flex-end; gap:0.75rem; margin-top:0.5rem;">
+                    <button type="button" class="btn btn-secondary close-modal-btn">Cancelar</button>
+                    <button type="submit" class="btn btn-success">Crear Sede</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal 5: Editar / Gestionar Sedes y Puestos Existentes -->
+    <div class="modal-overlay" id="manageContractsModal">
+        <div class="modal-card" style="max-width:650px;">
+            <div class="modal-header">
+                <div class="modal-title">🏢 Editar Sede / Negocio y Puestos de Trabajo</div>
+                <button class="close-btn close-modal-btn">&times;</button>
+            </div>
+
+            <div style="margin-bottom:1rem;">
+                <label style="display:block; font-weight:600; margin-bottom:0.3rem;">Seleccionar Sede a Editar:</label>
+                <select id="editContractSelect" class="form-select" style="width:100%;"></select>
+            </div>
+
+            <form id="editContractForm" style="display:flex; flex-direction:column; gap:1rem;">
+                <div>
+                    <label style="display:block; font-weight:600; margin-bottom:0.3rem;">Nombre de la Sede / Negocio:</label>
+                    <input type="text" id="editContractName" class="form-input" style="width:100%;" required>
+                </div>
+
+                <div>
+                    <label style="display:block; font-weight:600; margin-bottom:0.3rem;">Fecha de Inicio del Contrato / Servicio:</label>
+                    <input type="date" id="editContractStartDate" class="form-input" style="width:100%;" value="2026-01-01" required>
+                </div>
+
+                <div>
+                    <label style="display:block; font-weight:600; margin-bottom:0.3rem;">Esquema de Turnos Obligatorio:</label>
+                    <select id="editContractScheme" class="form-select" style="width:100%;">
+                        <option value="2D-2N-2X">2 Días Día - 2 Días Noche - 2 Descansos (24/7 Rotativo Estándar)</option>
+                        <option value="4D-4N-2X">4 Días Día - 4 Días Noche - 2 Descansos (24/7 Rotativo)</option>
+                        <option value="SOLO_DIA_12H">Solo Diurno (06:00 - 18:00) - Cierra y Apaga en la Noche</option>
+                        <option value="SOLO_NOCHE_12H">Solo Nocturno (18:00 - 06:00) - Cierra en el Día</option>
+                    </select>
+                </div>
+
+                <div>
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.3rem;">
+                        <label style="font-weight:600;">Puestos de Trabajo (ej. Portería 1, Portería 2, Recorredor):</label>
+                        <button type="button" class="btn btn-secondary" id="btnAddPostFieldEdit" style="padding:0.2rem 0.5rem; font-size:0.75rem;">
+                            ➕ Agregar Puesto
+                        </button>
+                    </div>
+                    <div id="editContractPostsContainer" style="display:flex; flex-direction:column; gap:0.5rem; max-height:180px; overflow-y:auto; padding:0.25rem;"></div>
+                </div>
+
+                <div id="editContractCalcSummary" style="background:rgba(59,130,246,0.1); border:1px solid rgba(59,130,246,0.3); border-radius:8px; padding:0.75rem; font-size:0.85rem; color:#93c5fd;">
+                    <!-- Calculo dinámico -->
+                </div>
+
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-top:0.5rem;">
+                    <button type="button" class="btn btn-danger" id="btnDeleteContract" style="padding:0.4rem 0.8rem; font-size:0.8rem;">
+                        🗑️ Eliminar Sede
+                    </button>
+                    <div style="display:flex; gap:0.75rem;">
+                        <button type="button" class="btn btn-secondary close-modal-btn">Cancelar</button>
+                        <button type="submit" class="btn btn-success">Guardar Cambios</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal 6: Intercambiar / Trasladar Vigilantes entre Sedes -->
+    <div class="modal-overlay" id="swapGuardsModal">
+        <div class="modal-card" style="max-width:650px;">
+            <div class="modal-header">
+                <div class="modal-title">🔄 Intercambio / Traslado de Vigilantes entre Sedes</div>
+                <button class="close-btn close-modal-btn">&times;</button>
+            </div>
+
+            <form id="swapGuardsForm" style="display:flex; flex-direction:column; gap:1.2rem;">
+                <p style="font-size:0.85rem; color:#9ca3af;">
+                    Intercambia la sede y la rotación de turnos entre dos vigilantes a partir de una fecha determinada. Los turnos laborados en la sede anterior se conservan y el sistema recalcula automáticamente las horas efectivamente trabajadas.
+                </p>
+
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;">
+                    <div>
+                        <label style="display:block; font-weight:600; margin-bottom:0.3rem; color:#fff;">Vigilante 1 (Sede A):</label>
+                        <select id="swapGuard1Select" class="form-select" style="width:100%;" required></select>
+                    </div>
+                    <div>
+                        <label style="display:block; font-weight:600; margin-bottom:0.3rem; color:#fff;">Vigilante 2 (Sede B / Destino):</label>
+                        <select id="swapGuard2Select" class="form-select" style="width:100%;" required></select>
+                    </div>
+                </div>
+
+                <div>
+                    <label style="display:block; font-weight:600; margin-bottom:0.3rem; color:#fff;">Día de Inicio del Traslado / Intercambio:</label>
+                    <select id="swapStartDaySelect" class="form-select" style="width:100%;" required></select>
+                </div>
+
+                <div id="swapPreviewSummary" style="background:rgba(99,102,241,0.12); border:1px solid rgba(99,102,241,0.35); border-radius:8px; padding:0.85rem; font-size:0.82rem; color:#c7d2fe;">
+                    <!-- Resumen dinámico del impacto del traslado -->
+                </div>
+
+                <div style="display:flex; justify-content:flex-end; gap:0.75rem; margin-top:0.5rem;">
+                    <button type="button" class="btn btn-secondary close-modal-btn">Cancelar</button>
+                    <button type="submit" class="btn btn-primary" style="background:linear-gradient(135deg, #6366f1, #4f46e5);">
+                        ⚡ Ejecutar Intercambio de Sede
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- JS Application Scripts (ES Modules) -->
+    <script type="module" src="js/app.js?v=28"></script>
+</body>
+</html>

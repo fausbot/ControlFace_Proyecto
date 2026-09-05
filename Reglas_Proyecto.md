@@ -12,3 +12,8 @@
 3. **Objetivo Actual:**
    - Sistema de Control de Entrada.
    - Permitir la creación de usuarios adicionales.
+
+4. **Despliegues (Deploy):**
+   - El usuario realiza siempre los despliegues (deploy) manualmente. No ejecutar comandos de despliegue a menos que se indique explícitamente.
+
+

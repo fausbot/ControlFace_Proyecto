@@ -67,7 +67,10 @@ export const exportToExcelHTML = (filename, headers, rows) => {
 
                     // ── CASO 2: Formato HH:MM o HH:MM:SS ──
                     const timeMatch = val.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
-                    // ── CASO 3: Columna con encabezado conocido de horas ──
+                    // ── CASO 3: Formato de Fecha DD/MM/YYYY o YYYY-MM-DD ──
+                    const dateMatchDMY = val.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+                    const dateMatchYMD = val.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
+                    // ── CASO 4: Columna con encabezado conocido de horas ──
                     const isNumericCol = /horas|total|diu|noc|dom\s*diu|dom\s*noc|diurnas|nocturnas|tiempo|clientes\s*visitados/i.test(headers[c] || '');
 
                     if (timeMatch) {
@@ -77,14 +80,38 @@ export const exportToExcelHTML = (filename, headers, rows) => {
                         ws[cellRef].t = 'n';
                         ws[cellRef].v = (h * 3600 + m * 60 + s) / 86400;
                         ws[cellRef].z = timeMatch[3] ? 'hh:mm:ss' : 'hh:mm';
+                    } else if (dateMatchDMY || dateMatchYMD) {
+                        let d, m, y;
+                        if (dateMatchDMY) {
+                            d = parseInt(dateMatchDMY[1], 10);
+                            m = parseInt(dateMatchDMY[2], 10);
+                            y = parseInt(dateMatchDMY[3], 10);
+                        } else {
+                            y = parseInt(dateMatchYMD[1], 10);
+                            m = parseInt(dateMatchYMD[2], 10);
+                            d = parseInt(dateMatchYMD[3], 10);
+                        }
+                        if (m >= 1 && m <= 12 && d >= 1 && d <= 31 && y >= 1970 && y <= 2100) {
+                            // En Excel las fechas se almacenan como el número serial de días desde 1899-12-30
+                            const excelDate = 25569 + (Date.UTC(y, m - 1, d) / 86400000);
+                            ws[cellRef].t = 'n';
+                            ws[cellRef].v = excelDate;
+                            ws[cellRef].z = 'dd/mm/yyyy';
+                        } else {
+                            ws[cellRef].t = 's';
+                            ws[cellRef].v = val;
+                        }
                     } else if (isNumericCol && !isNaN(val) && val.trim() !== '') {
                         ws[cellRef].t = 'n';
                         ws[cellRef].v = parseFloat(val);
                         ws[cellRef].z = '0.00';
                     } else if (val.startsWith('http://') || val.startsWith('https://')) {
-                        ws[cellRef].t = 's';
-                        ws[cellRef].v = 'Ver evidencia';
-                        ws[cellRef].l = { Target: val, Tooltip: 'Haz clic para ver la foto original' };
+                        const cleanUrl = val.replace(/"/g, '%22');
+                        ws[cellRef] = {
+                            t: 's',
+                            f: `HYPERLINK("${cleanUrl}", "Ver evidencia")`,
+                            v: 'Ver evidencia'
+                        };
                     } else {
                         // Default to string to protect user IDs from scientific format
                         ws[cellRef].t = 's';
@@ -108,11 +135,10 @@ export const exportToExcelHTML = (filename, headers, rows) => {
                 ws[cellRef].s.font.bold = true;
             }
 
-            // Link styling
-            if (ws[cellRef].l) {
-                ws[cellRef].s.font.color = { rgb: "0563C1" };
-                ws[cellRef].s.font.underline = true;
-                ws[cellRef].s.font.bold = true;
+            // Link styling (fórmula HYPERLINK o .l)
+            if (ws[cellRef].l || (ws[cellRef].f && ws[cellRef].f.startsWith('HYPERLINK'))) {
+                ws[cellRef].s.font = { name: "Calibri", sz: 11, color: { rgb: "0563C1" }, underline: true, bold: true };
+                ws[cellRef].s.alignment = { vertical: "center", horizontal: "center" };
             }
         }
     }

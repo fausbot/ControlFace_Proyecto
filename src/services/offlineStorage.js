@@ -58,3 +58,32 @@ export const getPendingCount = async () => {
     const count = await db.count(STORE_NAME);
     return count;
 };
+
+/**
+ * Actualiza las coordenadas GPS de un registro pendiente (modo latencia/bolsillo)
+ * @param {number} id ID del registro en IndexedDB
+ * @param {number} latitude Nueva latitud
+ * @param {number} longitude Nueva longitud
+ */
+export const updateOfflineRecordGPS = async (id, latitude, longitude) => {
+    try {
+        const db = await initDB();
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        const store = tx.objectStore(STORE_NAME);
+        const record = await store.get(id);
+        
+        if (record) {
+            record.latitude = latitude;
+            record.longitude = longitude;
+            if (record.metadata) {
+                record.metadata.latitud = latitude;
+                record.metadata.longitud = longitude;
+            }
+            await store.put(record);
+            console.log(`📍 Registro offline ${id} actualizado con nuevas coordenadas: ${latitude}, ${longitude}`);
+        }
+        await tx.done;
+    } catch (error) {
+        console.error(`Error actualizando coordenadas para registro ${id}:`, error);
+    }
+};

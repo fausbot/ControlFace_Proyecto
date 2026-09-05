@@ -5,7 +5,7 @@ import { doc, getDoc } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { db, functions } from '../firebaseConfig';
 import { fetchLicenseStatus } from '../services/licenseService';
-import { UserPlus, LogOut, Loader2, Camera, UserCheck, Download, Calendar, Trash2, AlertTriangle, TriangleAlert, Image, UserMinus, FileText, Printer, Image as ImageIcon, ArrowLeft } from 'lucide-react';
+import { UserPlus, LogOut, Loader2, Camera, UserCheck, Download, Calendar, Trash2, AlertTriangle, TriangleAlert, Image, UserMinus, FileText, Printer, Image as ImageIcon, ArrowLeft, KeyRound, Eye, EyeOff } from 'lucide-react';
 import * as faceapi from '@vladmandic/face-api';
 import Privacidad from './Privacidad';
 
@@ -78,11 +78,20 @@ export default function Register() {
     // ─── Estado de Actualización de Empleado (Edición) ─────────────────────
     const [isUpdating, setIsUpdating] = useState(false);
     const [updateDocId, setUpdateDocId] = useState('');
+    const [newPassword, setNewPassword] = useState('');
+    const [confirmNewPassword, setConfirmNewPassword] = useState('');
     const [validateLoading, setValidateLoading] = useState(false);
     const [validateMessage, setValidateMessage] = useState('');
     const [showConfigPasswordModal, setShowConfigPasswordModal] = useState(false);
     const [configPassword, setConfigPassword] = useState('');
     const [configPasswordError, setConfigPasswordError] = useState('');
+
+    // ─── Visibilidad de Contraseñas (Ojito) ───────────────────────────────
+    const [showPassword, setShowPassword] = useState(false);
+    const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+    const [showNewPassword, setShowNewPassword] = useState(false);
+    const [showConfirmNewPassword, setShowConfirmNewPassword] = useState(false);
+    const [showConfigPassword, setShowConfigPassword] = useState(false);
 
     const navigate = useNavigate();
     const { adminAccess } = useAuth();
@@ -393,6 +402,8 @@ export default function Register() {
                 setFirstName(res.data.firstName);
                 setLastName(res.data.lastName);
                 setExtraFields(res.data.extraFields || {});
+                setNewPassword('');
+                setConfirmNewPassword('');
                 
                 // Recuperar estado de aceptación de políticas
                 const accepted = !!(res.data.extraFields && res.data.extraFields.aceptaPoliticaDatos);
@@ -407,6 +418,7 @@ export default function Register() {
                 setIsUpdating(false);
                 setUpdateDocId('');
                 setFirstName(''); setLastName(''); setExtraFields({});
+                setNewPassword(''); setConfirmNewPassword('');
                 setPolicyAlreadyAccepted(false); setReadPolicy(false); setAcceptPolicy(false);
                 setValidateMessage('ℹ️ Usuario no existe. Llena los datos para crearlo.');
             }
@@ -421,6 +433,15 @@ export default function Register() {
     const handleUpdateSubmit = async () => {
         if (!configPassword.trim()) return setConfigPasswordError("Ingresa la contraseña de Configuración");
         if (!readPolicy || !acceptPolicy) return setConfigPasswordError('Debes aceptar la política de datos.');
+
+        if (newPassword.trim()) {
+            if (newPassword.trim().length < 6) {
+                return setConfigPasswordError('La nueva contraseña debe tener al menos 6 caracteres.');
+            }
+            if (newPassword !== confirmNewPassword) {
+                return setConfigPasswordError('Las nuevas contraseñas no coinciden.');
+            }
+        }
 
         try {
             setConfigPasswordError('');
@@ -445,13 +466,15 @@ export default function Register() {
                 lastName: lastName.trim(),
                 faceDescriptor: faceDescriptor || null, // Opcional en update
                 extraFields: optionalData,
-                configPassword: configPassword.trim()
+                configPassword: configPassword.trim(),
+                newPassword: newPassword.trim() ? newPassword.trim() : null
             });
 
             if (result.data && result.data.success) {
-                alert('Usuario actualizado exitosamente.');
+                alert('Usuario actualizado exitosamente.' + (newPassword.trim() ? ' La nueva contraseña ha sido guardada.' : ''));
                 // Reset states
                 setIsUpdating(false); setUpdateDocId(''); setEmail(''); setFirstName(''); setLastName('');
+                setNewPassword(''); setConfirmNewPassword('');
                 setFaceDescriptor(null); setFaceVerified(false); setVerifyResult(null); setVerifyAttempts(0);
                 setExtraFields({}); setReadPolicy(false); setAcceptPolicy(false);
                 setShowConfigPasswordModal(false); setConfigPassword(''); setValidateMessage('');
@@ -464,12 +487,23 @@ export default function Register() {
         }
     };
 
-    // ─── Submit (Creación Nueva) ────────────────────────────────────────────────
+    // ─── Submit (Creación Nueva o Inicio de Actualización) ────────────────────────
     const handleSubmit = async (e) => {
         e.preventDefault();
 
-        // Si estamos actualizando, abrimos el modal de seguridad
+        // Si estamos actualizando, validamos y abrimos el modal de seguridad
         if (isUpdating) {
+            if (newPassword.trim()) {
+                if (newPassword.trim().length < 6) {
+                    setError('La nueva contraseña debe tener al menos 6 caracteres.');
+                    return;
+                }
+                if (newPassword !== confirmNewPassword) {
+                    setError('Las nuevas contraseñas no coinciden.');
+                    return;
+                }
+            }
+            setError('');
             setShowConfigPasswordModal(true);
             return;
         }
@@ -629,7 +663,7 @@ export default function Register() {
                                     {validateLoading ? <Loader2 size={16} className="animate-spin" /> : 'Validar'}
                                 </button>
                             ) : (
-                                <button type="button" onClick={() => { setIsUpdating(false); setUpdateDocId(''); setEmail(''); setFirstName(''); setLastName(''); setExtraFields({}); setValidateMessage(''); setFaceDescriptor(null); setError(''); setPolicyAlreadyAccepted(false); setReadPolicy(false); setAcceptPolicy(false); }}
+                                <button type="button" onClick={() => { setIsUpdating(false); setUpdateDocId(''); setEmail(''); setFirstName(''); setLastName(''); setNewPassword(''); setConfirmNewPassword(''); setExtraFields({}); setValidateMessage(''); setFaceDescriptor(null); setError(''); setPolicyAlreadyAccepted(false); setReadPolicy(false); setAcceptPolicy(false); }}
                                     className="px-4 py-2 bg-red-100 border border-red-200 text-red-700 rounded-lg text-sm font-bold hover:bg-red-200 flex items-center gap-2 transition whitespace-nowrap">
                                     Cancelar Edición
                                 </button>
@@ -651,23 +685,113 @@ export default function Register() {
                             className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
                             value={lastName} onChange={(e) => setLastName(e.target.value)} placeholder="Ej: Pérez" />
                     </div>
-                    {!isUpdating && (
+                    {!isUpdating ? (
                         <>
                             <div>
                                 <label className="block text-sm font-medium text-gray-700">Contraseña</label>
-                                <input type="text" style={{ WebkitTextSecurity: 'disc' }}
-                                    name="new_sec_field_a" autoComplete="off" required={!isUpdating}
-                                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
-                                    value={password} onChange={(e) => setPassword(e.target.value)} />
+                                <div className="relative mt-1">
+                                    <input
+                                        type={showPassword ? "text" : "password"}
+                                        style={showPassword ? {} : { WebkitTextSecurity: 'disc' }}
+                                        name="new_sec_field_a"
+                                        autoComplete="new-password"
+                                        required={!isUpdating}
+                                        placeholder="••••••••"
+                                        className="block w-full px-3 py-2 pr-10 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 text-sm"
+                                        value={password}
+                                        onChange={(e) => setPassword(e.target.value)}
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowPassword(v => !v)}
+                                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 focus:outline-none p-1 transition"
+                                        title={showPassword ? "Ocultar contraseña" : "Ver contraseña"}
+                                    >
+                                        {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                                    </button>
+                                </div>
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-gray-700">Confirmar Contraseña</label>
-                                <input type="text" style={{ WebkitTextSecurity: 'disc' }}
-                                    name="new_sec_field_b" autoComplete="off" required={!isUpdating}
-                                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
-                                    value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} />
+                                <div className="relative mt-1">
+                                    <input
+                                        type={showConfirmPassword ? "text" : "password"}
+                                        style={showConfirmPassword ? {} : { WebkitTextSecurity: 'disc' }}
+                                        name="new_sec_field_b"
+                                        autoComplete="new-password"
+                                        required={!isUpdating}
+                                        placeholder="••••••••"
+                                        className="block w-full px-3 py-2 pr-10 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 text-sm"
+                                        value={confirmPassword}
+                                        onChange={(e) => setConfirmPassword(e.target.value)}
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowConfirmPassword(v => !v)}
+                                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 focus:outline-none p-1 transition"
+                                        title={showConfirmPassword ? "Ocultar contraseña" : "Ver contraseña"}
+                                    >
+                                        {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                                    </button>
+                                </div>
                             </div>
                         </>
+                    ) : (
+                        <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-4 space-y-3">
+                            <div className="flex items-center gap-2 text-amber-900 font-bold text-sm">
+                                <KeyRound size={17} className="text-amber-600" />
+                                <span>Cambiar Contraseña (Opcional)</span>
+                            </div>
+                            <p className="text-xs text-amber-800 leading-relaxed">
+                                Deja estos campos en blanco si deseas conservar la contraseña actual del empleado.
+                            </p>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-700 mb-1">Nueva Contraseña</label>
+                                    <div className="relative">
+                                        <input
+                                            type={showNewPassword ? "text" : "password"}
+                                            style={showNewPassword ? {} : { WebkitTextSecurity: 'disc' }}
+                                            autoComplete="new-password"
+                                            placeholder="Mínimo 6 caracteres"
+                                            className="block w-full px-3 py-2 pr-9 border border-gray-300 rounded-lg shadow-sm text-sm focus:outline-none focus:ring-amber-500 focus:border-amber-500 bg-white"
+                                            value={newPassword}
+                                            onChange={(e) => setNewPassword(e.target.value)}
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowNewPassword(v => !v)}
+                                            className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 focus:outline-none p-1 transition"
+                                            title={showNewPassword ? "Ocultar contraseña" : "Ver contraseña"}
+                                        >
+                                            {showNewPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                                        </button>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-700 mb-1">Confirmar Nueva Contraseña</label>
+                                    <div className="relative">
+                                        <input
+                                            type={showConfirmNewPassword ? "text" : "password"}
+                                            style={showConfirmNewPassword ? {} : { WebkitTextSecurity: 'disc' }}
+                                            autoComplete="new-password"
+                                            placeholder="Repite la contraseña"
+                                            className="block w-full px-3 py-2 pr-9 border border-gray-300 rounded-lg shadow-sm text-sm focus:outline-none focus:ring-amber-500 focus:border-amber-500 bg-white"
+                                            value={confirmNewPassword}
+                                            onChange={(e) => setConfirmNewPassword(e.target.value)}
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowConfirmNewPassword(v => !v)}
+                                            className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 focus:outline-none p-1 transition"
+                                            title={showConfirmNewPassword ? "Ocultar contraseña" : "Ver contraseña"}
+                                        >
+                                            {showConfirmNewPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     )}
 
                     {/* ── Campos opcionales dinámicos ──────────────────────── */}
@@ -864,13 +988,23 @@ export default function Register() {
                         </div>
                         <p className="text-sm text-gray-600 mb-4 text-center">Vas a actualizar a un empleado que ya existe en la base de datos. Por favor, ingresa la <b>Contraseña de Configuración</b> maestra para ejecutar la acción.</p>
                         
-                        <input
-                            type="password"
-                            placeholder="Contraseña de Configuración..."
-                            className="w-full px-3 py-3 border border-gray-300 rounded-lg mb-2 focus:ring-amber-500 focus:border-amber-500 font-bold tracking-widest text-center"
-                            value={configPassword}
-                            onChange={(e) => setConfigPassword(e.target.value)}
-                        />
+                        <div className="relative mb-2">
+                            <input
+                                type={showConfigPassword ? "text" : "password"}
+                                placeholder="Contraseña de Configuración..."
+                                className="w-full px-3 py-3 pr-10 border border-gray-300 rounded-lg focus:ring-amber-500 focus:border-amber-500 font-bold tracking-widest text-center"
+                                value={configPassword}
+                                onChange={(e) => setConfigPassword(e.target.value)}
+                            />
+                            <button
+                                type="button"
+                                onClick={() => setShowConfigPassword(v => !v)}
+                                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 focus:outline-none p-1 transition"
+                                title={showConfigPassword ? "Ocultar contraseña" : "Ver contraseña"}
+                            >
+                                {showConfigPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                            </button>
+                        </div>
                         {configPasswordError && <p className="text-xs font-bold text-red-600 mb-4 text-center">{configPasswordError}</p>}
                         
                         <div className="mt-4 flex gap-3">

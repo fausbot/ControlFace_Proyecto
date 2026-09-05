@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Camera, MapPin, TriangleAlert } from 'lucide-react';
+import { Camera, MapPin, TriangleAlert, ScanFace } from 'lucide-react';
 
 export default function CameraView({
     mode,
@@ -12,7 +12,8 @@ export default function CameraView({
     handleStopCamera,
     capture,
     step,
-    captureFlash = false  // true por 600ms cuando se toma la foto
+    captureFlash = false,
+    gpsReady = false
 }) {
     const [showFlash, setShowFlash] = useState(false);
 
@@ -43,15 +44,15 @@ export default function CameraView({
                 />
                 <canvas ref={canvasRef} className="hidden" />
 
-                {/* Flash de captura — capa blanca que aparece al tomar foto */}
+                {/* Flash de captura — capa blanca que aparece al verificar rostro */}
                 {showFlash && (
                     <div
                         className="absolute inset-0 bg-white z-20 flex items-center justify-center transition-opacity duration-300"
                         style={{ opacity: showFlash ? 0.85 : 0 }}
                     >
                         <div className="text-center">
-                            <div className="text-5xl mb-2">📸</div>
-                            <p className="text-gray-700 font-bold text-sm">¡Foto capturada!</p>
+                            <div className="text-5xl mb-2">👤</div>
+                            <p className="text-gray-700 font-bold text-sm">¡Identidad verificada!</p>
                         </div>
                     </div>
                 )}
@@ -60,12 +61,15 @@ export default function CameraView({
 
                 {/* Overlay info */}
                 <div className="absolute bottom-4 left-4 right-4 bg-black/50 backdrop-blur text-white p-2 rounded text-xs">
-                    <div className="flex items-center gap-1"><MapPin size={12} /> Buscando GPS...</div>
+                    <div className="flex items-center gap-1">
+                        <MapPin size={12} className={gpsReady ? "text-green-400" : "text-yellow-400 animate-pulse"} /> 
+                        {gpsReady ? "GPS Listo" : "Buscando GPS..."}
+                    </div>
                     {mode === 'incident'
                         ? <div className="flex items-center gap-1"><TriangleAlert size={12} /> Fotografía el área afectada</div>
                         : storageSettings.security_liveness === false
-                            ? <div className="flex items-center gap-1"><Camera size={12} /> Posicione su rostro</div>
-                            : <div className="flex items-center gap-1"><Camera size={12} /> Mueva la cabeza para registrar</div>
+                            ? <div className="flex items-center gap-1"><ScanFace size={12} /> Posicione su rostro</div>
+                            : <div className="flex items-center gap-1"><ScanFace size={12} /> Mueva la cabeza para registrar</div>
                     }
                 </div>
 
@@ -121,15 +125,15 @@ export default function CameraView({
                                 : 'bg-[#2863eb] hover:bg-[#1d4ed8]'
                             } ${mode !== 'incident' ? 'flex items-center gap-2 w-full max-w-[280px] justify-center' : ''}`}
                     >
-                        {mode !== 'incident' && <Camera size={20} />}
-                        {step === 'processing' ? 'Procesando...' : mode === 'incident' ? '📸 Tomar Foto' : '📸 Tomar Foto Ahora'}
+                        {mode === 'incident' ? <Camera size={20} /> : <ScanFace size={20} />}
+                        {step === 'processing' ? 'Procesando...' : mode === 'incident' ? '📸 Tomar Foto' : 'Verificar Identidad Ahora'}
                     </button>
                 )}
             </div>
             {/* Mensaje inferior si liveness está desactivado */}
             {mode !== 'incident' && storageSettings.security_liveness === false && (
                 <p className="text-xs text-gray-500 mt-3 max-w-[280px] text-center opacity-80">
-                    Asegúrese de que su rostro sea visible antes de capturar.
+                    Mire fijamente a la cámara para la verificación facial.
                 </p>
             )}
         </div>

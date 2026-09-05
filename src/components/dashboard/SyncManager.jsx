@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { getPendingRecords, deleteOfflineRecord, getPendingCount } from '../../services/offlineStorage';
 import { db } from '../../firebaseConfig';
-import { collection, addDoc, query, where, getDocs, updateDoc, doc, serverTimestamp, setDoc } from 'firebase/firestore';
+import { collection, addDoc, query, where, getDocs, updateDoc, doc, deleteDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { getStorage, ref, uploadString, getDownloadURL } from 'firebase/storage';
 import { CloudUpload, Wifi, WifiOff } from 'lucide-react';
 import { fetchLocationName, addWatermarkToImage } from '../../utils/watermark';
@@ -118,10 +118,26 @@ export default function SyncManager() {
                         try {
                             const storage = getStorage();
                             
-                            // Extraer año y mes de la fecha guardada
-                            const fechaParts = (finalMetadata.fecha || '').split('/');
-                            const year = fechaParts[2] || new Date().getFullYear().toString();
-                            const month = (fechaParts[1] || '').padStart(2, '0');
+                            // Extraer año y mes de la fecha guardada de forma robusta
+                            const fStr = finalMetadata.fecha || '';
+                            const separator = fStr.includes('/') ? '/' : '-';
+                            const fechaParts = fStr.split(separator);
+                            let year, month;
+                            if (fechaParts.length === 3) {
+                                if (fechaParts[0].length === 4) {
+                                    // YYYY-MM-DD
+                                    year = fechaParts[0];
+                                    month = fechaParts[1];
+                                } else {
+                                    // DD/MM/YYYY
+                                    year = fechaParts[2];
+                                    month = fechaParts[1];
+                                }
+                            } else {
+                                year = new Date().getFullYear().toString();
+                                month = (new Date().getMonth() + 1).toString();
+                            }
+                            month = month.padStart(2, '0');
                             
                             // Usar la misma ruta que storageService para mantener consistencia
                             // Si es visita, la categoría es 'Visita'
@@ -207,11 +223,18 @@ export default function SyncManager() {
                     // Convertir fecha/hora capturada a un objeto Date (Firestore lo convertirá a Timestamp automáticamente)
                     let localTimestamp = serverTimestamp();
                     try {
-                        const [day, month, year] = (finalMetadata.fecha || '').split('/');
+                        const fStr = finalMetadata.fecha || '';
+                        const separator = fStr.includes('/') ? '/' : '-';
+                        const parts = fStr.split(separator);
                         const [hours, minutes, seconds] = (finalMetadata.hora || '').split(':');
-                        if (day && month && year && hours && minutes) {
-                            // Firestore acepta objetos Date de JS directamente
-                            localTimestamp = new Date(year, month - 1, day, hours, minutes, seconds || 0);
+                        if (parts.length === 3 && hours && minutes) {
+                            let d, m, y;
+                            if (parts[0].length === 4) {
+                                [y, m, d] = parts;
+                            } else {
+                                [d, m, y] = parts;
+                            }
+                            localTimestamp = new Date(parseInt(y), parseInt(m) - 1, parseInt(d), parseInt(hours), parseInt(minutes), parseInt(seconds || 0));
                         }
                     } catch (e) {
                         console.error("Error creando fecha local:", e);
@@ -229,6 +252,67 @@ export default function SyncManager() {
                     if (photoURL) {
                         docData.fotoURL = photoURL;
                     }
+
+                    // ── RESOLUCIÓN DE CONFLICTO: Fusión inteligente de registro manual y real ─────
+                    // Si el modo es asistencia (Entrada/Salida), verificar si la empresa ya había creado
+                    // un registro manual provisional (ej. porque el empleado estaba offline).
+                    // REGLA CLAVE: El registro real con foto y GPS prevalece en hora, ubicación y evidencia,
+                    // pero ABSORBE Y PRESERVA intactos los datos cargados por el admin:
+                    //   - comentarioAdmin (observación del admin)
+                    //   - applyLunch (descuento de almuerzo asignado)
+                    //   - observacion manual
+                    // Si el registro manual tenía una hora estimada diferente (ej. admin puso 06:00 y la foto fue 06:05),
+                    // se eliminan los datos provisionales viejos para evitar duplicar la Entrada/Salida en el informe.
+                    if (collectionName === 'attendance' && (finalMetadata.tipo === 'Entrada' || finalMetadata.tipo === 'Salida')) {
+                        try {
+                            const conflictQuery = query(
+                                collection(db, 'attendance'),
+                                where('usuario', '==', finalMetadata.usuario),
+                                where('fecha', '==', finalMetadata.fecha),
+                                where('tipo', '==', finalMetadata.tipo)
+                            );
+                            const conflictSnap = await getDocs(conflictQuery);
+
+                            if (!conflictSnap.empty) {
+                                for (const existingDoc of conflictSnap.docs) {
+                                    const existingData = existingDoc.data();
+                                    const esManual = (existingData.localidad || '') === 'ENTRADA MANUAL DE DATOS';
+
+                                    if (esManual) {
+                                        // 1. Rescatar comentario administrativo
+                                        if (existingData.comentarioAdmin) {
+                                            docData.comentarioAdmin = existingData.comentarioAdmin;
+                                            console.log(`💬 [Sync] Comentario admin preservado del registro manual: "${existingData.comentarioAdmin}".`);
+                                        }
+                                        // 2. Rescatar estado de almuerzo
+                                        if (existingData.applyLunch !== undefined) {
+                                            docData.applyLunch = existingData.applyLunch;
+                                            console.log(`🍽️ [Sync] Estado de almuerzo preservado del registro manual: ${existingData.applyLunch}.`);
+                                        }
+                                        // 3. Rescatar observación si existía
+                                        if (existingData.observacion && existingData.observacion !== "Añadido manualmente") {
+                                            docData.observacionManual = existingData.observacion;
+                                        }
+
+                                        // 4. Si la hora estimada por el admin difiere de la real (ID distinto):
+                                        // Como ya rescatamos los datos admin en docData, eliminamos el doc manual
+                                        // provisional para que el informe no tenga dos Entradas o dos Salidas el mismo día.
+                                        if (existingDoc.id !== deterministicDocId) {
+                                            await deleteDoc(doc(db, 'attendance', existingDoc.id));
+                                            console.log(`🔄 [Sync] Registro manual provisional (${existingDoc.id}) fusionado exitosamente en el registro real con foto (${deterministicDocId}).`);
+                                        }
+                                    } else {
+                                        // Es un registro legítimo (turno doble real con foto/GPS) — no tocarlo
+                                        console.log(`ℹ️ [Sync] Registro existente ${existingDoc.id} no es manual. Se conserva (turno doble o válido).`);
+                                    }
+                                }
+                            }
+                        } catch (conflictErr) {
+                            // Si la consulta falla, proceder con la sincronización normal sin bloquear
+                            console.warn('[Sync] No se pudo verificar conflictos manuales, sincronizando normal:', conflictErr.message);
+                        }
+                    }
+                    // ── FIN RESOLUCIÓN DE CONFLICTO ──────────────────────────────────────────
 
                     // Doble registro para visitas: Colección 'visitas' (original) y 'attendance' (visor)
                     if (record.mode === 'visita') {
@@ -255,16 +339,29 @@ export default function SyncManager() {
 
                     // 7. Actualizar localStorage con el tipo sincronizado (específico por usuario)
                     if (finalMetadata.tipo && finalMetadata.usuario) {
-                        const userSuffix = `_${finalMetadata.usuario}`;
-                        const storageKey = record.mode === 'visita' ? `lastRutaType${userSuffix}` : `lastAttendanceType${userSuffix}`;
-                        const timeKey = record.mode === 'visita' ? null : `lastAttendanceTime${userSuffix}`;
+                        // 🔒 Siempre normalizar a minúsculas para consistencia con checkLastStatus
+                        const rawUser = finalMetadata.usuario || '';
+                        const normUser = rawUser.trim().toLowerCase();
 
-                        localStorage.setItem(storageKey, finalMetadata.tipo);
-                        if (timeKey) {
-                            localStorage.setItem(timeKey, Date.now().toString());
+                        const storageKeyNorm = record.mode === 'visita' ? `lastRutaType_${normUser}` : `lastAttendanceType_${normUser}`;
+                        const timeKeyNorm = record.mode === 'visita' ? null : `lastAttendanceTime_${normUser}`;
+
+                        localStorage.setItem(storageKeyNorm, finalMetadata.tipo);
+                        if (timeKeyNorm) {
+                            localStorage.setItem(timeKeyNorm, Date.now().toString());
                         }
-                        console.log(`📱 localStorage actualizado para ${finalMetadata.usuario}: ${finalMetadata.tipo}`);
+
+                        // También escribir con el email original si difiere (compatibilidad)
+                        if (rawUser !== normUser) {
+                            const storageKeyRaw = record.mode === 'visita' ? `lastRutaType_${rawUser}` : `lastAttendanceType_${rawUser}`;
+                            const timeKeyRaw = record.mode === 'visita' ? null : `lastAttendanceTime_${rawUser}`;
+                            localStorage.setItem(storageKeyRaw, finalMetadata.tipo);
+                            if (timeKeyRaw) localStorage.setItem(timeKeyRaw, Date.now().toString());
+                        }
+
+                        console.log(`📱 localStorage actualizado para ${normUser}: ${finalMetadata.tipo}`);
                     }
+
                 } catch (error) {
                     console.error(`❌ Error sincronizando registro ${record.id}:`, error);
                 }

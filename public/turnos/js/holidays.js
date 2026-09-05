@@ -1,7 +1,5 @@
-// src/utils/colombiaHolidays.js
-
-// Lista extraída de festivos_colombia_2026_2035.csv en formato YYYY-MM-DD
-const HOLIDAYS_COLOMBIA = new Set([
+// Módulo de Festivos Oficiales de Colombia (2026 - 2035)
+export const COLOMBIA_HOLIDAYS = [
     // 2026
     "2026-01-01", "2026-01-12", "2026-03-23", "2026-04-02", "2026-04-03",
     "2026-05-01", "2026-05-18", "2026-06-08", "2026-06-15", "2026-06-29",
@@ -52,23 +50,18 @@ const HOLIDAYS_COLOMBIA = new Set([
     "2035-05-01", "2035-05-07", "2035-05-28", "2035-06-04", "2035-07-02",
     "2035-07-09", "2035-07-20", "2035-08-07", "2035-08-20", "2035-10-15", "2035-11-05",
     "2035-11-12", "2035-12-08", "2035-12-25"
-]);
+];
 
-/**
- * Retorna true si el timestamp o la fecha cae en fin de semana (domingo) o festivo.
- * @param {Date|number} dateObj - Objeto Date o Timestamp (milisegundos)
- * @returns {boolean}
- */
-export const isSundayOrHoliday = (dateObj) => {
-    const d = new Date(dateObj);
-    // Verificar si es Domingo (0 en getDay)
-    if (d.getDay() === 0) return true;
+const holidaySet = new Set(COLOMBIA_HOLIDAYS);
 
-    // Formatear a YYYY-MM-DD para verificar en el Set
-    const yyyy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    const dd = String(d.getDate()).padStart(2, '0');
-    const formattedDate = `${yyyy}-${mm}-${dd}`;
+export function isHoliday(dateStr) {
+    return holidaySet.has(dateStr);
+}
 
-    return HOLIDAYS_COLOMBIA.has(formattedDate);
-};
+export function isSunday(dateObj) {
+    return dateObj.getDay() === 0;
+}
+
+export function isSundayOrHoliday(dateObj, dateStr) {
+    return isSunday(dateObj) || isHoliday(dateStr);
+}

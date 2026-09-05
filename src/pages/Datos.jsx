@@ -1,9 +1,9 @@
 // src/pages/Datos.jsx
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Trash2, ChevronLeft, ChevronRight, Loader2, FileText, CheckCircle, Search, X, ArrowLeft, Camera } from 'lucide-react';
+import { Trash2, ChevronLeft, ChevronRight, Loader2, FileText, CheckCircle, Search, X, ArrowLeft, Camera, Check } from 'lucide-react';
 import { db } from '../firebaseConfig';
-import { collection, query, where, getDocs, doc, setDoc, getDoc, deleteDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, setDoc, getDoc, deleteDoc, deleteField } from 'firebase/firestore';
 import { useAuth } from '../contexts/AuthContext';
 import AdminPasswordModal from '../components/AdminPasswordModal';
 
@@ -27,6 +27,7 @@ export default function Datos() {
     const [employeesMap, setEmployeesMap] = useState({});
     const [searchTerm, setSearchTerm] = useState('');
     const [rutaActive, setRutaActive] = useState(false); // Flag para mostrar modo visita
+    const [systemConfig, setSystemConfig] = useState(null); // Configuración de almuerzo y sistema
 
     // Estado para Entrada Manual
     const [mUser, setMUser] = useState('');
@@ -41,10 +42,19 @@ export default function Datos() {
     const [mAmPm, setMAmPm] = useState(() => new Date().getHours() < 12 ? 'AM' : 'PM');
     const [mReason, setMReason] = useState('');
     const [mSaving, setMSaving] = useState(false);
+    const [mUserError, setMUserError] = useState('');
 
-    // Estado para borrado protegido
+    // Estado para borrado y edición protegida de almuerzo
     const [deletingId, setDeletingId] = useState(null);
+    const [lunchToggleId, setLunchToggleId] = useState(null);
+    const [lunchToggleValue, setLunchToggleValue] = useState(false);
     const [showDeleteModal, setShowDeleteModal] = useState(false);
+
+    // Estado para la ventana flotante de comentarios y su protección
+    const [openCommentModal, setOpenCommentModal] = useState(false);
+    const [commentModalLog, setCommentModalLog] = useState(null);
+    const [commentModalText, setCommentModalText] = useState('');
+    const [pendingCommentSave, setPendingCommentSave] = useState(null);
 
     const navigate = useNavigate();
     const { adminAccess } = useAuth();
@@ -63,14 +73,18 @@ export default function Datos() {
         };
         loadInitialData();
 
-        // Cargar flag ruta_active
+        // Cargar flag ruta_active y configuración del sistema
         const fetchSettings = async () => {
             try {
                 const docSnap = await getDoc(doc(db, 'settings', 'employeeFields'));
-                if (docSnap.exists() && docSnap.data().ruta_active === true) {
-                    setRutaActive(true);
+                if (docSnap.exists()) {
+                    const data = docSnap.data();
+                    setSystemConfig(data);
+                    if (data.ruta_active === true) {
+                        setRutaActive(true);
+                    }
                 }
-            } catch (err) { console.warn("No se pudo cargar config ruta:", err) }
+            } catch (err) { console.warn("No se pudo cargar la configuración del sistema:", err) }
         };
         fetchSettings();
 
@@ -123,6 +137,15 @@ export default function Datos() {
             return;
         }
 
+        const emailNormalized = mUser.toLowerCase().trim();
+        if (!employeesMap[emailNormalized]) {
+            setMUserError('Usuario inexistente');
+            alert(`⚠️ El usuario "${mUser}" no existe en el sistema. Asegúrese de escribir el correo correctamente o verifique que esté creado en la sección de Empleados.`);
+            return;
+        } else {
+            setMUserError('');
+        }
+
         const [y, m, d] = mDate.split('-');
         const dateStr = `${parseInt(d)}/${parseInt(m)}/${y}`;
         // Convertir de 12h a 24h para guardar
@@ -139,24 +162,89 @@ export default function Datos() {
         try {
             setMSaving(true);
             
-            // Para Entrada/Salida normales, la regla es 1 por día general.
-            // Para Visitas (En Cliente / En Tránsito), pueden haber MUCHAS por día.
+            // Para Entrada/Salida normales, validamos de forma inteligente para permitir múltiples turnos por día
             if (mType === 'Entrada' || mType === 'Salida') {
                 const q = query(
                     collection(db, "attendance"),
                     where("usuario", "==", mUser.toLowerCase().trim()),
-                    where("fecha", "==", dateStr),
-                    where("tipo", "==", mType)
+                    where("fecha", "==", dateStr)
                 );
                 const snap = await getDocs(q);
 
                 if (!snap.empty) {
-                    if (!window.confirm(`Ya existe una ${mType} en esta fecha. ¿Desea sobreescribirla?`)) {
-                        setMSaving(false);
-                        return;
-                    }
-                    for (const docSnap of snap.docs) {
-                        await deleteAttendanceLog(docSnap.id);
+                    const existingLogs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+                    
+                    // 1. Verificar coincidencia exacta de tipo e ID/Hora
+                    const exactMatch = existingLogs.find(log => log.tipo === mType && log.hora === timeStr);
+                    if (exactMatch) {
+                        if (!window.confirm(`Ya existe una ${mType} registrada exactamente a las ${mHour}:${mMinute} ${mAmPm} para este día. ¿Desea sobreescribirla con los nuevos datos?`)) {
+                            setMSaving(false);
+                            return;
+                        }
+                    } else {
+                        // 2. Verificar solapamiento con turnos existentes del mismo día
+                        const timeToMinutes = (tStr) => {
+                            if (!tStr) return 0;
+                            const [h, m] = tStr.split(':').map(Number);
+                            return h * 60 + m;
+                        };
+                        const newTimeMins = timeToMinutes(timeStr);
+
+                        // Ordenamos cronológicamente
+                        existingLogs.sort((a, b) => timeToMinutes(a.hora) - timeToMinutes(b.hora));
+
+                        // Reconstruimos los turnos emparejados del día
+                        const existingShifts = [];
+                        let currentEntry = null;
+                        existingLogs.forEach(log => {
+                            if (log.tipo === 'Entrada') {
+                                if (currentEntry) {
+                                    existingShifts.push({ entry: currentEntry, exit: null });
+                                }
+                                currentEntry = log;
+                            } else if (log.tipo === 'Salida') {
+                                if (currentEntry) {
+                                    existingShifts.push({ entry: currentEntry, exit: log });
+                                    currentEntry = null;
+                                } else {
+                                    existingShifts.push({ entry: null, exit: log });
+                                }
+                            }
+                        });
+                        if (currentEntry) {
+                            existingShifts.push({ entry: currentEntry, exit: null });
+                        }
+
+                        // Buscar solapamientos
+                        let overlapShift = null;
+                        for (const shift of existingShifts) {
+                            if (shift.entry && shift.exit) {
+                                const entryMins = timeToMinutes(shift.entry.hora);
+                                const exitMins = timeToMinutes(shift.exit.hora);
+                                if (newTimeMins > entryMins && newTimeMins < exitMins) {
+                                    overlapShift = shift;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (overlapShift) {
+                            const entryLabel = overlapShift.entry.hora;
+                            const exitLabel = overlapShift.exit.hora;
+                            if (!window.confirm(`⚠️ Advertencia de Solapamiento:\nLa hora seleccionada (${mHour}:${mMinute} ${mAmPm}) se encuentra dentro de un turno de trabajo ya registrado para este empleado en esta fecha (${entryLabel} a ${exitLabel}).\n\n¿Desea registrar esta ${mType} de todas formas?`)) {
+                                setMSaving(false);
+                                return;
+                            }
+                        }
+
+                        // Verificar si se está registrando una Entrada/Salida adicional a otra hora en la misma fecha
+                        const sameTypeLogs = existingLogs.filter(log => log.tipo === mType);
+                        if (sameTypeLogs.length > 0) {
+                            if (!window.confirm(`ℹ️ Registro de Turno Adicional:\nYa existe una ${mType} registrada en esta fecha a otra hora. Al adicionar esta nueva ${mType}, el sistema creará un turno de trabajo adicional para el empleado en este día.\n\n¿Desea continuar?`)) {
+                                setMSaving(false);
+                                return;
+                            }
+                        }
                     }
                 }
             } else {
@@ -172,14 +260,23 @@ export default function Datos() {
             }
 
             // Usando setDoc con ID determinístico para consistencia con app principal
+            // NOTA: Se corrige el timestamp utilizando h24 en lugar de mHour para evitar desfase de 12 horas.
+            const [y, m, d] = mDate.split('-');
+            const timestampDate = new Date(parseInt(y), parseInt(m) - 1, parseInt(d), h24, parseInt(mMinute), 0);
+
+            // Resolver nombre del empleado desde el mapa para que los motores de reporte lo incluyan
+            const empData = employeesMap[mUser.toLowerCase().trim()] || {};
+            const nombreCompleto = `${empData.nombre || empData.firstName || ''} ${empData.apellido || empData.lastName || ''}`.trim();
+
             const docData = {
                 usuario: mUser.toLowerCase().trim(),
+                nombre: nombreCompleto || mUser.toLowerCase().trim(),
                 tipo: mType,
                 fecha: dateStr,
                 hora: timeStr,
                 localidad: "ENTRADA MANUAL DE DATOS",
                 observacion: mReason || "Añadido manualmente",
-                timestamp: new Date(`${mDate}T${mHour}:${mMinute}:00`)
+                timestamp: timestampDate
             };
             await setDoc(doc(db, "attendance", deterministicDocId), docData);
 
@@ -195,7 +292,7 @@ export default function Datos() {
             }
 
             alert('✅ Registro adicionado correctamente.');
-            setMUser(''); setMDate(''); setMReason('');
+            setMUser(''); setMUserError(''); setMDate(''); setMReason('');
             const h = new Date().getHours();
             setMHour(String(h % 12 || 12).padStart(2, '0'));
             setMMinute(String(new Date().getMinutes()).padStart(2, '0'));
@@ -226,6 +323,75 @@ export default function Datos() {
             setDeletingId(null);
         }
     };
+
+    const confirmToggleLunch = (id, currentVal) => {
+        setLunchToggleId(id);
+        setLunchToggleValue(currentVal);
+        setShowDeleteModal(true);
+    };
+
+    const executeToggleLunch = async (id, currentVal) => {
+        try {
+            const docRef = doc(db, "attendance", id);
+            const newVal = !currentVal;
+
+            // Guardar el valor booleano explícito (true o false).
+            // Cuando el administrador interactúa con el botón en En Vivo, su decisión manual
+            // prevalece de forma definitiva sobre cualquier cálculo automático o modo de sistema:
+            //   - true  → Descuenta almuerzo sí o sí en Informes y Motores de Tiempo.
+            //   - false → NO descuenta almuerzo sí o sí en Informes y Motores de Tiempo.
+            await setDoc(docRef, { applyLunch: newVal }, { merge: true });
+
+            // Actualizar estado local inmediatamente para que la UI refleje el cambio al instante
+            setAllLogs(prev => prev.map(log => log.id === id ? { ...log, applyLunch: newVal } : log));
+            console.log(`🍽️ [Almuerzo] Registro ${id} actualizado a applyLunch = ${newVal}`);
+        } catch (error) {
+            console.error("Error al actualizar el descuento de almuerzo:", error);
+            alert("No se pudo actualizar el descuento de almuerzo.");
+        } finally {
+            setLunchToggleId(null);
+        }
+    };
+
+    const startEditComment = (log) => {
+        setCommentModalLog(log);
+        setCommentModalText(log.comentarioAdmin || '');
+        setOpenCommentModal(true);
+    };
+
+    const executeSaveComment = async (id, text) => {
+        try {
+            const docRef = doc(db, "attendance", id);
+            const trimmedText = text.trim();
+            if (trimmedText) {
+                await setDoc(docRef, { comentarioAdmin: trimmedText }, { merge: true });
+            } else {
+                await setDoc(docRef, { comentarioAdmin: deleteField() }, { merge: true });
+            }
+            // Actualizar estado local inmediatamente — no esperar al ciclo del onSnapshot
+            setAllLogs(prev => prev.map(log => {
+                if (log.id !== id) return log;
+                const updated = { ...log };
+                if (trimmedText) {
+                    updated.comentarioAdmin = trimmedText;
+                } else {
+                    delete updated.comentarioAdmin;
+                }
+                return updated;
+            }));
+            // Cerrar modal automáticamente
+            setOpenCommentModal(false);
+            setCommentModalLog(null);
+            setCommentModalText('');
+            alert('✅ Observación guardada correctamente.');
+        } catch (error) {
+            console.error("Error al guardar comentario:", error);
+            alert("No se pudo guardar la observación.");
+        } finally {
+            setPendingCommentSave(null);
+        }
+    };
+
 
     return (
         <div className="min-h-screen bg-gradient-to-b from-[#3C7DA6] to-[#6FAF6B] p-6 pb-72">
@@ -274,21 +440,102 @@ export default function Datos() {
                     </div>
                 </div>
 
-                {/* Modal de Protección para Borrado */}
+                {/* Modal de Protección para Borrado, Almuerzo y Observaciones */}
                 <AdminPasswordModal
                     isOpen={showDeleteModal}
                     target="/configuracion"
                     onClose={() => {
                         setShowDeleteModal(false);
                         setDeletingId(null);
+                        setLunchToggleId(null);
+                        setPendingCommentSave(null);
                     }}
                     onSuccess={() => {
                         setShowDeleteModal(false);
                         if (deletingId) {
                             executeDelete(deletingId);
+                        } else if (lunchToggleId) {
+                            executeToggleLunch(lunchToggleId, lunchToggleValue);
+                        } else if (pendingCommentSave) {
+                            executeSaveComment(pendingCommentSave.id, pendingCommentSave.text);
                         }
                     }}
                 />
+
+                {/* Modal Flotante de Edición de Comentarios */}
+                {openCommentModal && commentModalLog && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+                        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden transform transition-all scale-100 border border-gray-100">
+                            {/* Header */}
+                            <div className="bg-gray-50 px-6 py-4 flex justify-between items-center border-b border-gray-100">
+                                <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+                                    <FileText className="text-blue-600" size={20} />
+                                    Comentario Administrativo
+                                </h3>
+                                <button
+                                    onClick={() => {
+                                        setOpenCommentModal(false);
+                                        setCommentModalLog(null);
+                                        setCommentModalText('');
+                                    }}
+                                    className="text-gray-400 hover:text-gray-600 transition p-1 hover:bg-gray-100 rounded-full"
+                                >
+                                    <X size={20} />
+                                </button>
+                            </div>
+
+                            {/* Body */}
+                            <div className="p-6 space-y-4">
+                                <p className="text-sm text-gray-500">
+                                    Escriba el comentario para el registro de {commentModalLog.tipo} de{' '}
+                                    <span className="font-bold text-gray-700">
+                                        {employeesMap[commentModalLog.usuario]
+                                            ? `${employeesMap[commentModalLog.usuario].firstName} ${employeesMap[commentModalLog.usuario].lastName}`
+                                            : commentModalLog.usuario}
+                                    </span> del día {commentModalLog.fecha} a las {commentModalLog.hora}.
+                                </p>
+
+                                <div className="space-y-2">
+                                    <textarea
+                                        value={commentModalText}
+                                        onChange={(e) => setCommentModalText(e.target.value)}
+                                        className="w-full h-32 px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition text-gray-800 resize-none font-normal"
+                                        placeholder="Escriba el comentario de la empresa con respecto a este turno..."
+                                        autoFocus
+                                    />
+                                </div>
+
+                                <div className="flex justify-end gap-3 pt-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setOpenCommentModal(false);
+                                            setCommentModalLog(null);
+                                            setCommentModalText('');
+                                        }}
+                                        className="px-4 py-2.5 text-gray-600 hover:bg-gray-100 rounded-xl font-medium transition"
+                                    >
+                                        Cancelar
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setPendingCommentSave({
+                                                id: commentModalLog.id,
+                                                text: commentModalText
+                                            });
+                                            setOpenCommentModal(false);
+                                            setShowDeleteModal(true);
+                                        }}
+                                        className="px-6 py-2.5 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 active:bg-blue-800 transition shadow-lg shadow-blue-200 flex items-center gap-2"
+                                    >
+                                        Guardar
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
 
                 {/* Tabla */}
                 <div className="bg-white rounded-xl shadow-2xl overflow-hidden">
@@ -302,12 +549,15 @@ export default function Datos() {
                                     <th className="p-4 font-semibold text-gray-600">Fecha</th>
                                     <th className="p-4 font-semibold text-gray-600">Hora</th>
                                     <th className="p-4 font-semibold text-gray-600">Localidad</th>
-                                    <th className="p-4 text-center">Borrar</th>
+                                    <th className="py-4 px-1 text-center font-semibold text-gray-600 w-14">Foto</th>
+                                    <th className="py-4 px-1 text-center font-semibold text-gray-600 w-14">Borrar</th>
+                                    <th className="py-4 px-1 text-center font-semibold text-gray-600 w-20">Almuerzo</th>
+                                    <th className="py-4 px-1 text-center font-semibold text-gray-600 w-24">Comentario</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y">
                                 {loading ? (
-                                    <tr><td colSpan="7" className="p-8 text-center text-gray-400">Cargando registros...</td></tr>
+                                    <tr><td colSpan="10" className="p-8 text-center text-gray-400">Cargando registros...</td></tr>
                                 ) : logs.map((log) => {
                                     const emp = employeesMap[log.usuario] || { firstName: '-', lastName: '' };
                                     return (
@@ -326,21 +576,208 @@ export default function Datos() {
                                             <td className="p-4">{log.fecha}</td>
                                             <td className="p-4">{log.hora}</td>
                                             <td className="p-4 text-xs text-gray-400 max-w-[200px] truncate" title={log.localidad || log.ubicacion}>{log.localidad || log.ubicacion}</td>
-                                            <td className="p-4 text-center">
-                                                <div className="flex items-center justify-center gap-2">
-                                                    {log.fotoURL && (
-                                                        <button 
-                                                            onClick={() => window.open(log.fotoURL, '_blank')} 
-                                                            className="p-1.5 text-blue-500 hover:text-blue-700 hover:bg-blue-50 rounded transition"
-                                                            title="Ver foto"
-                                                        >
-                                                            <Camera size={16} />
-                                                        </button>
-                                                    )}
-                                                    <button onClick={() => confirmDelete(log.id)} className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded transition">
-                                                        <Trash2 size={16} />
+                                            {/* Columna Foto */}
+                                            <td className="py-4 px-1 text-center w-14">
+                                                {log.fotoURL ? (
+                                                    <button 
+                                                        onClick={() => window.open(log.fotoURL, '_blank')} 
+                                                        className="p-1.5 text-blue-500 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition"
+                                                        title="Ver foto"
+                                                    >
+                                                        <Camera size={20} />
                                                     </button>
-                                                </div>
+                                                ) : (
+                                                    <span className="text-gray-300 text-xs">-</span>
+                                                )}
+                                            </td>
+                                            
+                                            {/* Columna Borrar */}
+                                            <td className="py-4 px-1 text-center w-14">
+                                                <button 
+                                                    onClick={() => confirmDelete(log.id)} 
+                                                    className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition"
+                                                    title="Borrar registro"
+                                                >
+                                                    <Trash2 size={20} />
+                                                </button>
+                                            </td>
+                                            
+                                            {/* Columna Almuerzo */}
+                                            <td className="py-4 px-1 text-center w-20">
+                                                {log.tipo === 'Salida' ? (
+                                                    (() => {
+                                                        // ─── Helpers ──────────────────────────────────────────────────────
+                                                        const parseLocalDateTime = (fStr, hStr) => {
+                                                             if (!fStr || !hStr) return null;
+                                                             try {
+                                                                 const separator = fStr.includes('/') ? '/' : '-';
+                                                                 const parts = fStr.split(separator);
+                                                                 if (parts.length !== 3) return null;
+
+                                                                 let d, m, y;
+                                                                 if (parts[0].length === 4) {
+                                                                     // Formato YYYY-MM-DD
+                                                                     [y, m, d] = parts;
+                                                                 } else {
+                                                                     // Formato DD/MM/YYYY o DD-MM-YYYY
+                                                                     [d, m, y] = parts;
+                                                                 }
+
+                                                                 const cleanHora = hStr.replace(/[^0-9:]/g, '');
+                                                                 const timeParts = cleanHora.split(':');
+                                                                 if (timeParts.length < 2) return null;
+
+                                                                 const h = timeParts[0];
+                                                                 const min = timeParts[1];
+                                                                 const s = timeParts[2] || '00';
+
+                                                                 const dObj = new Date(parseInt(y), parseInt(m) - 1, parseInt(d), parseInt(h), parseInt(min), parseInt(s));
+                                                                 return isNaN(dObj.getTime()) ? null : dObj;
+                                                             } catch { return null; }
+                                                         };
+ 
+                                                        if (!systemConfig?.calc_lunch) {
+                                                            // Almuerzo desactivado globalmente → no mostrar nada
+                                                            return <span className="text-gray-300 text-xs">-</span>;
+                                                        }
+ 
+                                                        const lunchMode = systemConfig?.calc_lunchMode || 'general';
+ 
+                                                        if (lunchMode === 'empresa') {
+                                                            // Modo Control Empresa: solo el admin puede marcar con contraseña desde En Vivo.
+                                                            const isLunchApplied = log.applyLunch === true;
+                                                            return (
+                                                                <button
+                                                                    onClick={() => confirmToggleLunch(log.id, isLunchApplied)}
+                                                                    title={isLunchApplied
+                                                                        ? "Admin marcó descuento: SÍ (clic con contraseña para cambiar)"
+                                                                        : "Admin no marcó descuento (clic con contraseña para marcar)"}
+                                                                    className={`w-5 h-5 mx-auto rounded-md border flex items-center justify-center transition-all ${
+                                                                        isLunchApplied
+                                                                            ? 'bg-green-500 border-green-600 text-white shadow-[0_0_8px_rgba(34,197,94,0.35)] hover:scale-105'
+                                                                            : 'bg-slate-50 border-slate-300 hover:border-slate-400 text-transparent hover:scale-105'
+                                                                    }`}
+                                                                >
+                                                                    <Check size={12} strokeWidth={2.5} />
+                                                                </button>
+                                                            );
+                                                        }
+ 
+                                                        if (lunchMode === 'individual') {
+                                                            // Solo muestra verde si el empleado explícitamente marcó el descuento
+                                                            const isLunchApplied = log.applyLunch === true;
+                                                            return (
+                                                                <button
+                                                                    onClick={() => confirmToggleLunch(log.id, isLunchApplied)}
+                                                                    title={isLunchApplied
+                                                                        ? "Empleado marcó descuento de almuerzo: SÍ (clic para cambiar)"
+                                                                        : "Empleado NO marcó descuento de almuerzo (clic para forzar)"}
+                                                                    className={`w-5 h-5 mx-auto rounded-md border flex items-center justify-center transition-all ${
+                                                                        isLunchApplied
+                                                                            ? 'bg-green-500 border-green-600 text-white shadow-[0_0_8px_rgba(34,197,94,0.35)] hover:scale-105'
+                                                                            : 'bg-slate-50 border-slate-300 hover:border-slate-400 text-transparent hover:scale-105'
+                                                                    }`}
+                                                                >
+                                                                    <Check size={12} strokeWidth={2.5} />
+                                                                </button>
+                                                            );
+                                                        }
+ 
+                                                        // ─── Modo GENERAL (automático por umbral) ────────────────────────
+                                                        const autoApplied = (() => {
+                                                            const endObj = parseLocalDateTime(log.fecha, log.hora);
+                                                            if (!endObj) return false;
+                                                            const salidaTime = endObj.getTime();
+ 
+                                                            // Buscar la entrada más cercana anterior a esta salida, mismo usuario y fecha
+                                                            let matchingEntry = null;
+                                                            let minDiff = Infinity;
+                                                            for (const ent of allLogs) {
+                                                                if (ent.usuario === log.usuario && ent.tipo === 'Entrada' && ent.fecha === log.fecha) {
+                                                                    const entryObj = parseLocalDateTime(ent.fecha, ent.hora);
+                                                                    if (entryObj) {
+                                                                        const diff = salidaTime - entryObj.getTime();
+                                                                        if (diff > 0 && diff < minDiff) {
+                                                                            minDiff = diff;
+                                                                            matchingEntry = ent;
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                            if (!matchingEntry) return false;
+ 
+                                                            const startObj = parseLocalDateTime(matchingEntry.fecha, matchingEntry.hora);
+                                                            if (!startObj) return false;
+ 
+                                                            const totalMinutes = Math.floor((endObj.getTime() - startObj.getTime()) / 1000 / 60);
+ 
+                                                            // Umbral = horas del turno del día + minutos de almuerzo configurados
+                                                            const dayNum = endObj.getDay() === 0 ? '7' : String(endObj.getDay());
+                                                            let dayConf = systemConfig.calc_dailyWorkdayConfig?.[dayNum] || { hours: 8, mins: 0 };
+ 
+                                                            // Fallback: si es domingo (7) con 0 horas, usar la config del sábado (6)
+                                                            if (dayNum === '7' && (dayConf.hours || 0) === 0) {
+                                                                const satConf = systemConfig.calc_dailyWorkdayConfig?.['6'];
+                                                                if (satConf && (satConf.hours || 0) > 0) dayConf = satConf;
+                                                            }
+ 
+                                                            const requiredThresholdMins = (dayConf.hours * 60) + (dayConf.mins || 0);
+                                                            const lunchMinsToDeduct = parseInt(systemConfig.calc_lunchMins, 10) || 60;
+ 
+                                                            // Solo aplicar si el día tiene jornada laboral configurada (> 0 horas).
+                                                            const LUNCH_TOLERANCE_MINS = parseInt(import.meta.env.VITE_LUNCH_TOLERANCE_MINS, 10) || 0;
+                                                            return requiredThresholdMins > 0 &&
+                                                                totalMinutes >= (requiredThresholdMins + lunchMinsToDeduct - LUNCH_TOLERANCE_MINS);
+                                                        })();
+ 
+                                                        // Override manual del admin tiene prioridad sobre el automático
+                                                        const isLunchApplied = log.applyLunch === true
+                                                            ? true
+                                                            : log.applyLunch === false
+                                                                ? false
+                                                                : autoApplied;
+ 
+                                                        return (
+                                                            <button
+                                                                onClick={() => confirmToggleLunch(log.id, isLunchApplied)}
+                                                                title={isLunchApplied
+                                                                    ? "Descuento de almuerzo aplicado: SÍ (clic para cambiar)"
+                                                                    : "Descuento de almuerzo: NO (clic para forzar)"}
+                                                                className={`w-5 h-5 mx-auto rounded-md border flex items-center justify-center transition-all ${
+                                                                    isLunchApplied
+                                                                        ? 'bg-green-500 border-green-600 text-white shadow-[0_0_8px_rgba(34,197,94,0.35)] hover:scale-105'
+                                                                        : 'bg-slate-50 border-slate-300 hover:border-slate-400 text-transparent hover:scale-105'
+                                                                }`}
+                                                            >
+                                                                <Check size={12} strokeWidth={2.5} />
+                                                            </button>
+                                                        );
+                                                    })()
+                                                ) : (
+                                                    <span className="text-gray-300 text-xs">-</span>
+                                                )}
+                                            </td>
+                                            
+                                            {/* Columna Comentario Admin */}
+                                            <td className="py-4 px-1 text-center w-24">
+                                                {(log.tipo === 'Entrada' || log.tipo === 'Salida') ? (
+                                                    <button
+                                                        onClick={() => startEditComment(log)}
+                                                        title={log.comentarioAdmin 
+                                                            ? `Comentario: "${log.comentarioAdmin}" (clic para editar)`
+                                                            : "Agregar comentario"
+                                                        }
+                                                        className={`w-5 h-5 mx-auto rounded-md border flex items-center justify-center transition-all ${
+                                                            log.comentarioAdmin
+                                                                ? 'bg-green-500 border-green-600 text-white shadow-[0_0_8px_rgba(34,197,94,0.35)] hover:scale-105'
+                                                                : 'bg-slate-50 border-slate-300 hover:border-slate-400 text-transparent hover:scale-105'
+                                                        }`}
+                                                    >
+                                                        <Check size={12} strokeWidth={2.5} />
+                                                    </button>
+                                                ) : (
+                                                    <span className="text-gray-300 text-xs">-</span>
+                                                )}
                                             </td>
                                         </tr>
                                     );
@@ -373,10 +810,28 @@ export default function Datos() {
                                 type="text"
                                 placeholder="ej: faus@bot.com"
                                 value={mUser}
-                                onChange={e => setMUser(e.target.value)}
-                                className="w-full h-[42px] px-3 border rounded-lg text-sm"
+                                onChange={e => {
+                                    setMUser(e.target.value);
+                                    if (mUserError) setMUserError('');
+                                }}
+                                onBlur={() => {
+                                    const emailNormalized = mUser.toLowerCase().trim();
+                                    if (emailNormalized && !employeesMap[emailNormalized]) {
+                                        setMUserError('Usuario inexistente');
+                                    } else {
+                                        setMUserError('');
+                                    }
+                                }}
+                                className={`w-full h-[42px] px-3 border rounded-lg text-sm transition-colors ${
+                                    mUserError ? 'border-red-500 focus:ring-red-400 bg-red-50 text-red-950 font-semibold' : 'border-gray-300 focus:ring-blue-400'
+                                }`}
                                 required
                             />
+                            {mUserError && (
+                                <p className="text-red-600 text-[11px] mt-1.5 font-bold flex items-center gap-1 animate-pulse">
+                                    ⚠️ {mUserError}
+                                </p>
+                            )}
                         </div>
                         {/* Evento */}
                         <div className="w-[120px]">
@@ -445,7 +900,7 @@ export default function Datos() {
                             <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Observación</label>
                             <input
                                 type="text"
-                                placeholder="ej: Olvidó registrar al llegar"
+                                placeholder="ej: Olvió registrar al llegar"
                                 value={mReason}
                                 onChange={e => setMReason(e.target.value)}
                                 className="w-full h-[42px] px-3 border rounded-lg text-sm"
