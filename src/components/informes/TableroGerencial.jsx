@@ -160,21 +160,19 @@ export default function TableroGerencial() {
             );
         }
 
-        // Checks de decisión
-        if (checkSoloExtras) {
-            list = list.filter(e => e.hasExtras);
-        }
-        if (checkSoloDeficit) {
-            list = list.filter(e => e.hasDeficit);
-        }
-        if (checkSoloEnRuta) {
-            list = list.filter(e => e.hasTraslados);
-        }
-        if (checkSoloAlertas) {
-            list = list.filter(e => e.hasAlerts);
-        }
-        if (checkSoloComentarios) {
-            list = list.filter(e => e.comments && e.comments.length > 0);
+        // Checks de decisión (Lógica inclusiva OR: si marca ninguno o marca todos, muestra todos)
+        const totalChecksActivos = [checkSoloExtras, checkSoloDeficit, checkSoloEnRuta, checkSoloAlertas, checkSoloComentarios].filter(Boolean).length;
+
+        if (totalChecksActivos > 0 && totalChecksActivos < 5) {
+            list = list.filter(e => {
+                const matchExtras = checkSoloExtras && e.hasExtras;
+                const matchDeficit = checkSoloDeficit && e.hasDeficit;
+                const matchRuta = checkSoloEnRuta && e.hasTraslados;
+                const matchAlertas = checkSoloAlertas && e.hasAlerts;
+                const matchComentarios = checkSoloComentarios && (e.comments && e.comments.length > 0);
+
+                return matchExtras || matchDeficit || matchRuta || matchAlertas || matchComentarios;
+            });
         }
 
         return list;
