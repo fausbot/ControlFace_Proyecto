@@ -5,7 +5,7 @@ import {
     AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Download,
     Search, RefreshCw, SlidersHorizontal, CheckSquare, Square,
     Calendar, Eye, EyeOff, FileSpreadsheet, ChevronLeft, ChevronRight,
-    MapPin, MessageSquare, ShieldAlert
+    MapPin, MessageSquare, ShieldAlert, Utensils, RotateCcw, Filter
 } from 'lucide-react';
 import { getDocs, collection, doc, getDoc } from 'firebase/firestore';
 import { db } from '../../firebaseConfig';
@@ -49,6 +49,15 @@ export default function TableroGerencial() {
     const [checkSoloEnRuta, setCheckSoloEnRuta] = useState(false);
     const [checkSoloAlertas, setCheckSoloAlertas] = useState(false);
     const [checkSoloComentarios, setCheckSoloComentarios] = useState(false);
+
+    const hayFiltrosActivos = checkSoloExtras || checkSoloDeficit || checkSoloEnRuta || checkSoloAlertas || checkSoloComentarios;
+    const limpiarFiltros = () => {
+        setCheckSoloExtras(false);
+        setCheckSoloDeficit(false);
+        setCheckSoloEnRuta(false);
+        setCheckSoloAlertas(false);
+        setCheckSoloComentarios(false);
+    };
 
     // Checks de columnas visibles
     const [colTraslados, setColTraslados] = useState(true);
@@ -383,7 +392,181 @@ export default function TableroGerencial() {
                 </div>
             </div>
 
-            {/* ── TARJETAS KPI GLOBALES ────────────────────────────────────── */}
+            {/* ── BARRA DE CONTROLES: FILTROS Y PERSONALIZACIÓN (PRIMERO) ──── */}
+            <div className="bg-white rounded-2xl p-4 sm:p-5 shadow-md border border-gray-100/80 space-y-3.5">
+                {/* Fila 1: Filtros de decisión (Chips interactivos de selección) */}
+                <div className="flex flex-wrap items-center justify-between gap-2.5">
+                    <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5 mr-1">
+                            <SlidersHorizontal size={14} className="text-blue-600" /> Checks de Filtro:
+                        </span>
+
+                        {/* Check: Solo con Extras */}
+                        <button
+                            type="button"
+                            onClick={() => setCheckSoloExtras(!checkSoloExtras)}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 border transition duration-150 ${
+                                checkSoloExtras
+                                    ? 'bg-emerald-50 border-emerald-300 text-emerald-700 shadow-sm'
+                                    : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'
+                            }`}
+                        >
+                            {checkSoloExtras ? <CheckSquare size={14} /> : <Square size={14} />}
+                            Solo con Horas Extras
+                        </button>
+
+                        {/* Check: Solo con Déficit */}
+                        <button
+                            type="button"
+                            onClick={() => setCheckSoloDeficit(!checkSoloDeficit)}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 border transition duration-150 ${
+                                checkSoloDeficit
+                                    ? 'bg-rose-50 border-rose-300 text-rose-700 shadow-sm'
+                                    : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'
+                            }`}
+                        >
+                            {checkSoloDeficit ? <CheckSquare size={14} /> : <Square size={14} />}
+                            Solo con Déficit
+                        </button>
+
+                        {/* Check: Solo en Ruta */}
+                        <button
+                            type="button"
+                            onClick={() => setCheckSoloEnRuta(!checkSoloEnRuta)}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 border transition duration-150 ${
+                                checkSoloEnRuta
+                                    ? 'bg-indigo-50 border-indigo-300 text-indigo-700 shadow-sm'
+                                    : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'
+                            }`}
+                        >
+                            {checkSoloEnRuta ? <CheckSquare size={14} /> : <Square size={14} />}
+                            Solo en Ruta (con Traslados)
+                        </button>
+
+                        {/* Check: Solo con Alertas / Inconsistencias */}
+                        <button
+                            type="button"
+                            onClick={() => setCheckSoloAlertas(!checkSoloAlertas)}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 border transition duration-150 ${
+                                checkSoloAlertas
+                                    ? 'bg-amber-50 border-amber-300 text-amber-700 shadow-sm'
+                                    : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'
+                            }`}
+                        >
+                            {checkSoloAlertas ? <CheckSquare size={14} /> : <Square size={14} />}
+                            Solo con Alertas / Turnos Huérfanos
+                        </button>
+
+                        {/* Check: Solo con Comentarios */}
+                        <button
+                            type="button"
+                            onClick={() => setCheckSoloComentarios(!checkSoloComentarios)}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 border transition duration-150 ${
+                                checkSoloComentarios
+                                    ? 'bg-purple-50 border-purple-300 text-purple-700 shadow-sm'
+                                    : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'
+                            }`}
+                        >
+                            {checkSoloComentarios ? <CheckSquare size={14} /> : <Square size={14} />}
+                            Solo con Observaciones
+                        </button>
+                    </div>
+
+                    {/* Botón de limpiar filtros activos */}
+                    {hayFiltrosActivos && (
+                        <button
+                            type="button"
+                            onClick={limpiarFiltros}
+                            className="text-xs font-bold text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 px-2.5 py-1 rounded-lg flex items-center gap-1 transition"
+                            title="Restablecer todos los filtros"
+                        >
+                            <RotateCcw size={12} />
+                            Limpiar filtros
+                        </button>
+                    )}
+                </div>
+
+                {/* Fila 2: Columnas visibles (izquierda) y Simulación de Almuerzo estilizada (derecha) */}
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-gray-100">
+                    <div className="flex items-center gap-2 flex-wrap text-xs text-gray-600">
+                        <span className="font-bold text-gray-400 mr-1">Mostrar Columnas:</span>
+
+                        <button
+                            type="button"
+                            onClick={() => setColTraslados(!colTraslados)}
+                            className={`px-2.5 py-1 rounded-lg border font-medium transition ${
+                                colTraslados ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-gray-50 border-gray-200 text-gray-400 hover:text-gray-600'
+                            }`}
+                        >
+                            {colTraslados ? '✓' : '+'} Traslados
+                        </button>
+
+                        <button
+                            type="button"
+                            onClick={() => setColVisitas(!colVisitas)}
+                            className={`px-2.5 py-1 rounded-lg border font-medium transition ${
+                                colVisitas ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-gray-50 border-gray-200 text-gray-400 hover:text-gray-600'
+                            }`}
+                        >
+                            {colVisitas ? '✓' : '+'} Visitas a Clientes
+                        </button>
+
+                        <button
+                            type="button"
+                            onClick={() => setColRecargos(!colRecargos)}
+                            className={`px-2.5 py-1 rounded-lg border font-medium transition ${
+                                colRecargos ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-gray-50 border-gray-200 text-gray-400 hover:text-gray-600'
+                            }`}
+                        >
+                            {colRecargos ? '✓' : '+'} Recargos Diu/Noc/Dom
+                        </button>
+
+                        <button
+                            type="button"
+                            onClick={() => setColBaseBalance(!colBaseBalance)}
+                            className={`px-2.5 py-1 rounded-lg border font-medium transition ${
+                                colBaseBalance ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-gray-50 border-gray-200 text-gray-400 hover:text-gray-600'
+                            }`}
+                        >
+                            {colBaseBalance ? '✓' : '+'} Base y Balance
+                        </button>
+
+                        <button
+                            type="button"
+                            onClick={() => setColAlmuerzoBruto(!colAlmuerzoBruto)}
+                            className={`px-2.5 py-1 rounded-lg border font-medium transition ${
+                                colAlmuerzoBruto ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-gray-50 border-gray-200 text-gray-400 hover:text-gray-600'
+                            }`}
+                        >
+                            {colAlmuerzoBruto ? '✓' : '+'} Bruto y Almuerzo
+                        </button>
+                    </div>
+
+                    {/* Simulación: Descontar Almuerzo (Diseño Widget Premium con Toggle) */}
+                    <button
+                        type="button"
+                        onClick={() => setDescontarAlmuerzo(!descontarAlmuerzo)}
+                        className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-bold transition duration-200 shadow-sm ${
+                            descontarAlmuerzo
+                                ? 'bg-gradient-to-r from-amber-50 to-orange-50 border-amber-300 text-amber-900 shadow-amber-100/50 hover:border-amber-400'
+                                : 'bg-gray-50 border-gray-200 text-gray-400 hover:bg-gray-100 hover:text-gray-600'
+                        }`}
+                        title="Alternar descuento de tiempo de almuerzo en el cálculo de horas netas"
+                    >
+                        <Utensils size={14} className={descontarAlmuerzo ? 'text-amber-600' : 'text-gray-400'} />
+                        <span>Descontar Almuerzo ({timeConfig.calc_lunchMins || 60}m)</span>
+                        <div
+                            className={`w-7 h-4 rounded-full transition-colors duration-200 flex items-center p-0.5 ${
+                                descontarAlmuerzo ? 'bg-amber-500 justify-end' : 'bg-gray-300 justify-start'
+                            }`}
+                        >
+                            <div className="w-3 h-3 bg-white rounded-full shadow"></div>
+                        </div>
+                    </button>
+                </div>
+            </div>
+
+            {/* ── TARJETAS KPI GLOBALES (INFORMACIÓN) ───────────────────────── */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 {/* KPI 1: Horas Totales */}
                 <div className="bg-white rounded-2xl p-5 shadow-lg border-l-4 border-blue-600 flex flex-col justify-between">
@@ -469,146 +652,6 @@ export default function TableroGerencial() {
                             -{kpis?.empleadosConDeficit || 0} con déficit
                         </span>
                     </div>
-                </div>
-            </div>
-
-            {/* ── BARRA DE CHECKS DE DECISIÓN Y PERSONALIZACIÓN ────────────── */}
-            <div className="bg-white rounded-2xl p-5 shadow-lg border border-gray-100 space-y-4">
-                {/* Fila 1: Filtros de decisión (Chips de Check) */}
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5 mr-1">
-                            <SlidersHorizontal size={14} className="text-blue-600" /> Checks de Filtro:
-                        </span>
-
-                        {/* Check: Solo con Extras */}
-                        <button
-                            onClick={() => setCheckSoloExtras(!checkSoloExtras)}
-                            className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 border transition ${
-                                checkSoloExtras
-                                    ? 'bg-emerald-50 border-emerald-300 text-emerald-700 shadow-sm'
-                                    : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'
-                            }`}
-                        >
-                            {checkSoloExtras ? <CheckSquare size={14} /> : <Square size={14} />}
-                            Solo con Horas Extras
-                        </button>
-
-                        {/* Check: Solo con Déficit */}
-                        <button
-                            onClick={() => setCheckSoloDeficit(!checkSoloDeficit)}
-                            className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 border transition ${
-                                checkSoloDeficit
-                                    ? 'bg-rose-50 border-rose-300 text-rose-700 shadow-sm'
-                                    : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'
-                            }`}
-                        >
-                            {checkSoloDeficit ? <CheckSquare size={14} /> : <Square size={14} />}
-                            Solo con Déficit
-                        </button>
-
-                        {/* Check: Solo en Ruta */}
-                        <button
-                            onClick={() => setCheckSoloEnRuta(!checkSoloEnRuta)}
-                            className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 border transition ${
-                                checkSoloEnRuta
-                                    ? 'bg-indigo-50 border-indigo-300 text-indigo-700 shadow-sm'
-                                    : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'
-                            }`}
-                        >
-                            {checkSoloEnRuta ? <CheckSquare size={14} /> : <Square size={14} />}
-                            Solo en Ruta (con Traslados)
-                        </button>
-
-                        {/* Check: Solo con Alertas / Inconsistencias */}
-                        <button
-                            onClick={() => setCheckSoloAlertas(!checkSoloAlertas)}
-                            className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 border transition ${
-                                checkSoloAlertas
-                                    ? 'bg-amber-50 border-amber-300 text-amber-700 shadow-sm'
-                                    : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'
-                            }`}
-                        >
-                            {checkSoloAlertas ? <CheckSquare size={14} /> : <Square size={14} />}
-                            Solo con Alertas / Turnos Huérfanos
-                        </button>
-
-                        {/* Check: Solo con Comentarios */}
-                        <button
-                            onClick={() => setCheckSoloComentarios(!checkSoloComentarios)}
-                            className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 border transition ${
-                                checkSoloComentarios
-                                    ? 'bg-purple-50 border-purple-300 text-purple-700 shadow-sm'
-                                    : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'
-                            }`}
-                        >
-                            {checkSoloComentarios ? <CheckSquare size={14} /> : <Square size={14} />}
-                            Solo con Observaciones
-                        </button>
-                    </div>
-
-                    {/* Switch Simulación: Descontar Almuerzo */}
-                    <div className="flex items-center gap-2 bg-amber-50/80 border border-amber-200 px-3 py-1.5 rounded-xl">
-                        <label className="text-xs font-bold text-amber-900 flex items-center gap-1.5 cursor-pointer">
-                            <input
-                                type="checkbox"
-                                checked={descontarAlmuerzo}
-                                onChange={e => setDescontarAlmuerzo(e.target.checked)}
-                                className="w-4 h-4 text-amber-600 rounded focus:ring-0 cursor-pointer"
-                            />
-                            Descontar Almuerzo ({timeConfig.calc_lunchMins || 60}m)
-                        </label>
-                    </div>
-                </div>
-
-                {/* Fila 2: Columnas visibles */}
-                <div className="flex items-center gap-2 flex-wrap pt-3 border-t border-gray-100 text-xs text-gray-600">
-                    <span className="font-bold text-gray-400 mr-1">Mostrar Columnas:</span>
-
-                    <button
-                        onClick={() => setColTraslados(!colTraslados)}
-                        className={`px-2.5 py-1 rounded-lg border font-medium transition ${
-                            colTraslados ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-gray-50 border-gray-200 text-gray-400'
-                        }`}
-                    >
-                        {colTraslados ? '✓' : '+'} Traslados
-                    </button>
-
-                    <button
-                        onClick={() => setColVisitas(!colVisitas)}
-                        className={`px-2.5 py-1 rounded-lg border font-medium transition ${
-                            colVisitas ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-gray-50 border-gray-200 text-gray-400'
-                        }`}
-                    >
-                        {colVisitas ? '✓' : '+'} Visitas a Clientes
-                    </button>
-
-                    <button
-                        onClick={() => setColRecargos(!colRecargos)}
-                        className={`px-2.5 py-1 rounded-lg border font-medium transition ${
-                            colRecargos ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-gray-50 border-gray-200 text-gray-400'
-                        }`}
-                    >
-                        {colRecargos ? '✓' : '+'} Recargos Diu/Noc/Dom
-                    </button>
-
-                    <button
-                        onClick={() => setColBaseBalance(!colBaseBalance)}
-                        className={`px-2.5 py-1 rounded-lg border font-medium transition ${
-                            colBaseBalance ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-gray-50 border-gray-200 text-gray-400'
-                        }`}
-                    >
-                        {colBaseBalance ? '✓' : '+'} Base y Balance
-                    </button>
-
-                    <button
-                        onClick={() => setColAlmuerzoBruto(!colAlmuerzoBruto)}
-                        className={`px-2.5 py-1 rounded-lg border font-medium transition ${
-                            colAlmuerzoBruto ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-gray-50 border-gray-200 text-gray-400'
-                        }`}
-                    >
-                        {colAlmuerzoBruto ? '✓' : '+'} Bruto y Almuerzo
-                    </button>
                 </div>
             </div>
 
