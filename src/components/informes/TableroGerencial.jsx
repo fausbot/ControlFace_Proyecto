@@ -5,8 +5,10 @@ import {
     AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Download,
     Search, RefreshCw, SlidersHorizontal, CheckSquare, Square,
     Calendar, Eye, EyeOff, FileSpreadsheet, ChevronLeft, ChevronRight,
-    MapPin, MessageSquare, ShieldAlert, Utensils, RotateCcw, Filter
+    MapPin, MessageSquare, ShieldAlert, Utensils, RotateCcw, Filter,
+    BarChart3, Table, LayoutGrid
 } from 'lucide-react';
+import GraficasGerenciales from './GraficasGerenciales';
 import { getDocs, collection, doc, getDoc } from 'firebase/firestore';
 import { db } from '../../firebaseConfig';
 import { getAllAttendanceLogs } from '../../services/attendanceService';
@@ -74,6 +76,9 @@ export default function TableroGerencial() {
 
     // Exportación
     const [exporting, setExporting] = useState(false);
+
+    // Mostrar u ocultar gráficas analíticas (por defecto visibles abajo)
+    const [mostrarGraficas, setMostrarGraficas] = useState(true);
 
     // ── 1. Inicializar Fechas según Preset y Mes ───────────────────────────────
     useEffect(() => {
@@ -654,7 +659,7 @@ export default function TableroGerencial() {
             </div>
 
             {/* ── BARRA DE BÚSQUEDA, SELECCIÓN Y EXPORTACIÓN ───────────────── */}
-            <div className="flex flex-wrap items-center justify-between gap-4">
+            <div id="tablero-controles-top" className="flex flex-wrap items-center justify-between gap-4">
                 {/* Buscador */}
                 <div className="relative flex-1 min-w-[280px]">
                     <Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -675,12 +680,27 @@ export default function TableroGerencial() {
                     )}
                 </div>
 
-                {/* Contador y Botón Exportar */}
-                <div className="flex items-center gap-3">
+                {/* Contador, Botón Ver Gráficas y Botón Exportar */}
+                <div className="flex items-center gap-2.5 flex-wrap">
                     <span className="text-xs text-gray-500 font-medium">
                         Mostrando <b>{filteredEmployees.length}</b> colaboradores
                         {selectedEmails.size > 0 && ` (${selectedEmails.size} seleccionados)`}
                     </span>
+
+                    <button
+                        type="button"
+                        onClick={() => {
+                            if (!mostrarGraficas) setMostrarGraficas(true);
+                            setTimeout(() => {
+                                document.getElementById('seccion-graficas')?.scrollIntoView({ behavior: 'smooth' });
+                            }, 50);
+                        }}
+                        className="px-4 py-2.5 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-xs sm:text-sm rounded-xl border border-blue-200 shadow-sm flex items-center gap-1.5 transition"
+                        title="Ver Gráficas Analíticas debajo de la tabla"
+                    >
+                        <BarChart3 size={17} />
+                        {mostrarGraficas ? 'Ver Gráficas ↓' : 'Mostrar Gráficas'}
+                    </button>
 
                     <button
                         onClick={handleExportExcel}
@@ -1029,6 +1049,21 @@ export default function TableroGerencial() {
                     </table>
                 </div>
             </div>
+
+            {/* ── SECCIÓN DE ANÁLISIS VISUAL Y GRÁFICAS (DEBAJO DE LOS DATOS) ── */}
+            {mostrarGraficas && (
+                <div id="seccion-graficas" className="pt-2">
+                    <GraficasGerenciales
+                        employeesList={filteredEmployees}
+                        kpis={processedData?.kpis}
+                        basePeriodHours={processedData?.basePeriodHours || 0}
+                        monthLabel={monthLabel}
+                        startDate={startDate}
+                        endDate={endDate}
+                        onOcultar={() => setMostrarGraficas(false)}
+                    />
+                </div>
+            )}
         </div>
     );
 }
