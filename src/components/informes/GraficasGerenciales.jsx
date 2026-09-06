@@ -28,8 +28,11 @@ export default function GraficasGerenciales({
     const [filtroCantidad, setFiltroCantidad] = useState('top10'); // 'top5' | 'top10' | 'todos'
     const [hoveredEmp, setHoveredEmp] = useState(null);
 
-    // ── Controles para la Dona de Recargos ──────────────────────────────────────
+    // ── Controles para la pestaña Recargos ──────────────────────────────────────
+    const [subVistaRecargos, setSubVistaRecargos] = useState('dona'); // 'dona' | 'empleados'
+    const [ordenRecargosEmp, setOrdenRecargosEmp] = useState('total'); // 'total' | 'nocturnas' | 'festivas'
     const [hoveredSlice, setHoveredSlice] = useState(null);
+    const [hoveredRecargoEmp, setHoveredRecargoEmp] = useState(null);
 
     // ── Controles para el Gráfico de Rutas (Barras Dobles) ──────────────────────
     const [ordenRutas, setOrdenRutas] = useState('visitas'); // 'visitas' | 'traslados' | 'eficiencia'
@@ -113,6 +116,53 @@ export default function GraficasGerenciales({
 
         return { items, total: parseFloat(total.toFixed(2)), activeCount };
     }, [kpis]);
+
+    // ── 2b. Procesar Datos de Recargos por Colaborador (Barras Apiladas) ────────
+    const recargosEmpleadosData = useMemo(() => {
+        if (!employeesList.length) {
+            return { list: [], maxHoras: 100, liderNocturnas: null, liderFestivas: null, liderTotal: null };
+        }
+
+        const mapped = employeesList.map(e => {
+            const d = parseFloat((e.diurnas || 0).toFixed(2));
+            const n = parseFloat((e.nocturnas || 0).toFixed(2));
+            const dd = parseFloat((e.domDiurnas || 0).toFixed(2));
+            const dn = parseFloat((e.domNocturnas || 0).toFixed(2));
+            const total = parseFloat((d + n + dd + dn).toFixed(2));
+            const totalFestivas = parseFloat((dd + dn).toFixed(2));
+            const totalRecargosEspeciales = parseFloat((n + dd + dn).toFixed(2));
+
+            return {
+                ...e,
+                diurnas: d,
+                nocturnas: n,
+                domDiurnas: dd,
+                domNocturnas: dn,
+                totalRecargosHoras: total,
+                totalFestivas,
+                totalRecargosEspeciales
+            };
+        });
+
+        let sorted = [...mapped].sort((a, b) => {
+            if (ordenRecargosEmp === 'nocturnas') return b.nocturnas - a.nocturnas;
+            if (ordenRecargosEmp === 'festivas') return b.totalFestivas - a.totalFestivas;
+            return b.totalRecargosHoras - a.totalRecargosHoras;
+        });
+
+        const maxHoras = Math.max(...mapped.map(e => e.totalRecargosHoras), 10);
+        const liderNocturnas = [...mapped].filter(e => e.nocturnas > 0).sort((a, b) => b.nocturnas - a.nocturnas)[0] || null;
+        const liderFestivas = [...mapped].filter(e => e.totalFestivas > 0).sort((a, b) => b.totalFestivas - a.totalFestivas)[0] || null;
+        const liderTotal = [...mapped].filter(e => e.totalRecargosHoras > 0).sort((a, b) => b.totalRecargosHoras - a.totalRecargosHoras)[0] || null;
+
+        return {
+            list: sorted,
+            maxHoras,
+            liderNocturnas,
+            liderFestivas,
+            liderTotal
+        };
+    }, [employeesList, ordenRecargosEmp]);
 
     // ── 3. Procesar Datos para Gráfica de Rutas (Barras Dobles) ───────────────
     const rutasData = useMemo(() => {
@@ -244,7 +294,7 @@ export default function GraficasGerenciales({
                         }`}
                     >
                         <PieChart size={16} />
-                        Dona de Recargos
+                        Recargos
                     </button>
 
                     <button
@@ -682,172 +732,520 @@ export default function GraficasGerenciales({
             )}
 
             {/* ══════════════════════════════════════════════════════════════════════ */}
-            {/* 3. GRÁFICA: DONA DE RECARGOS DE NÓMINA (SVG INTERACTIVO NATIVO)        */}
+            {/* 3. GRÁFICA: RECARGOS DE NÓMINA (DONA GENERAL & POR COLABORADOR)       */}
             {/* ══════════════════════════════════════════════════════════════════════ */}
             {tabGrafica === 'dona' && (
                 <div className="bg-white rounded-2xl p-5 shadow-lg border border-gray-100 space-y-6 animate-in fade-in duration-200">
+                    {/* Encabezado con selector de sub-vista tipo pastilla */}
                     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 pb-4">
                         <div>
-                            <h3 className="text-lg font-black text-gray-800">
-                                Distribución de Recargos de Nómina
-                            </h3>
+                            <div className="flex items-center gap-2">
+                                <h3 className="text-lg font-black text-gray-800">
+                                    {subVistaRecargos === 'dona' ? 'Distribución General de Recargos' : 'Recargos por Colaborador'}
+                                </h3>
+                                {subVistaRecargos === 'empleados' && (
+                                    <span className="bg-purple-100 text-purple-800 text-[11px] font-extrabold px-2.5 py-0.5 rounded-full">
+                                        {recargosEmpleadosData.list.length} colaboradores
+                                    </span>
+                                )}
+                            </div>
                             <p className="text-xs text-gray-500 mt-0.5">
-                                Proporción del total de horas laboradas según la legislación laboral colombiana.
+                                {subVistaRecargos === 'dona'
+                                    ? 'Proporción global de horas ordinarias, nocturnas y festivas de la empresa según ley colombiana.'
+                                    : 'Desglose detallado de horas diurnas ordinarias, nocturnas y festivas acumuladas por colaborador.'}
                             </p>
                         </div>
-                        <div className="text-right">
-                            <span className="text-xs text-gray-400 font-medium block">Total Horas Consolidadas:</span>
-                            <span className="text-xl font-black text-gray-800">{recargosData.total} h</span>
+
+                        {/* Controles de vista: [Dona General] / [Por Colaborador] */}
+                        <div className="flex items-center gap-3">
+                            <div className="flex items-center bg-gray-100 p-1 rounded-xl text-xs font-bold gap-1 shadow-inner">
+                                <button
+                                    type="button"
+                                    onClick={() => setSubVistaRecargos('dona')}
+                                    className={`px-3.5 py-1.5 rounded-lg transition-all duration-150 flex items-center gap-1.5 ${
+                                        subVistaRecargos === 'dona'
+                                            ? 'bg-purple-600 text-white shadow-sm font-black'
+                                            : 'text-gray-600 hover:text-gray-900'
+                                    }`}
+                                >
+                                    <PieChart size={14} />
+                                    Dona General
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setSubVistaRecargos('empleados')}
+                                    className={`px-3.5 py-1.5 rounded-lg transition-all duration-150 flex items-center gap-1.5 ${
+                                        subVistaRecargos === 'empleados'
+                                            ? 'bg-purple-600 text-white shadow-sm font-black'
+                                            : 'text-gray-600 hover:text-gray-900'
+                                    }`}
+                                >
+                                    <Users size={14} />
+                                    Por Colaborador
+                                </button>
+                            </div>
+
+                            <div className="hidden sm:block text-right pl-3 border-l border-gray-100">
+                                <span className="text-[10px] text-gray-400 font-bold block uppercase tracking-wider">Total Nómina</span>
+                                <span className="text-lg font-black text-gray-800">{recargosData.total} h</span>
+                            </div>
                         </div>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
-                        {/* Dona SVG Interactiva */}
-                        <div className="relative flex justify-center items-center py-4">
-                            {(() => {
-                                const size = 200;
-                                const strokeWidth = 28;
-                                const radius = (size - strokeWidth) / 2;
-                                const circumference = 2 * Math.PI * radius;
+                    {/* ── SUB-VISTA 1: DONA GENERAL ──────────────────────────────── */}
+                    {subVistaRecargos === 'dona' && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center animate-in fade-in duration-150">
+                            {/* Dona SVG Interactiva */}
+                            <div className="relative flex justify-center items-center py-4">
+                                {(() => {
+                                    const size = 200;
+                                    const strokeWidth = 28;
+                                    const radius = (size - strokeWidth) / 2;
+                                    const circumference = 2 * Math.PI * radius;
 
-                                let accumulatedPercent = 0;
+                                    let accumulatedPercent = 0;
 
-                                return (
-                                    <div className="relative w-[200px] h-[200px]">
-                                        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="transform -rotate-90">
-                                            {/* Fondo de la dona */}
-                                            <circle
-                                                cx={size / 2}
-                                                cy={size / 2}
-                                                r={radius}
-                                                stroke="#F3F4F6"
-                                                strokeWidth={strokeWidth}
-                                                fill="transparent"
-                                            />
-                                            {/* Segmentos de recargos con separación nítida */}
-                                            {recargosData.items.map(item => {
-                                                if (item.horas === 0) return null;
-                                                const gap = recargosData.activeCount > 1 ? 3.5 : 0;
-                                                const arcLength = Math.max(2, ((item.porcentaje / 100) * circumference) - gap);
-                                                const strokeDasharray = `${arcLength} ${circumference}`;
-                                                const strokeDashoffset = -((accumulatedPercent / 100) * circumference + (gap / 2));
-                                                accumulatedPercent += item.porcentaje;
+                                    return (
+                                        <div className="relative w-[200px] h-[200px]">
+                                            <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="transform -rotate-90">
+                                                {/* Fondo de la dona */}
+                                                <circle
+                                                    cx={size / 2}
+                                                    cy={size / 2}
+                                                    r={radius}
+                                                    stroke="#F3F4F6"
+                                                    strokeWidth={strokeWidth}
+                                                    fill="transparent"
+                                                />
+                                                {/* Segmentos de recargos con separación nítida */}
+                                                {recargosData.items.map(item => {
+                                                    if (item.horas === 0) return null;
+                                                    const gap = recargosData.activeCount > 1 ? 3.5 : 0;
+                                                    const arcLength = Math.max(2, ((item.porcentaje / 100) * circumference) - gap);
+                                                    const strokeDasharray = `${arcLength} ${circumference}`;
+                                                    const strokeDashoffset = -((accumulatedPercent / 100) * circumference + (gap / 2));
+                                                    accumulatedPercent += item.porcentaje;
 
-                                                const isHovered = hoveredSlice?.id === item.id;
+                                                    const isHovered = hoveredSlice?.id === item.id;
 
-                                                return (
-                                                    <circle
-                                                        key={item.id}
-                                                        cx={size / 2}
-                                                        cy={size / 2}
-                                                        r={radius}
-                                                        stroke={item.color}
-                                                        strokeWidth={isHovered ? strokeWidth + 6 : strokeWidth}
-                                                        strokeDasharray={strokeDasharray}
-                                                        strokeDashoffset={strokeDashoffset}
-                                                        fill="transparent"
-                                                        className="transition-all duration-200 cursor-pointer"
-                                                        onMouseEnter={() => setHoveredSlice(item)}
-                                                        onMouseLeave={() => setHoveredSlice(null)}
-                                                    />
-                                                );
-                                            })}
-                                        </svg>
+                                                    return (
+                                                        <circle
+                                                            key={item.id}
+                                                            cx={size / 2}
+                                                            cy={size / 2}
+                                                            r={radius}
+                                                            stroke={item.color}
+                                                            strokeWidth={isHovered ? strokeWidth + 6 : strokeWidth}
+                                                            strokeDasharray={strokeDasharray}
+                                                            strokeDashoffset={strokeDashoffset}
+                                                            fill="transparent"
+                                                            className="transition-all duration-200 cursor-pointer"
+                                                            onMouseEnter={() => setHoveredSlice(item)}
+                                                            onMouseLeave={() => setHoveredSlice(null)}
+                                                        />
+                                                    );
+                                                })}
+                                            </svg>
 
-                                        {/* Centro de la Dona */}
-                                        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center p-2">
-                                            {hoveredSlice ? (
-                                                <>
-                                                    <span
-                                                        className="text-[10px] font-black uppercase tracking-wider"
-                                                        style={{ color: hoveredSlice.color }}
-                                                    >
-                                                        {hoveredSlice.label}
+                                            {/* Centro de la Dona */}
+                                            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center p-2">
+                                                {hoveredSlice ? (
+                                                    <>
+                                                        <span
+                                                            className="text-[10px] font-black uppercase tracking-wider"
+                                                            style={{ color: hoveredSlice.color }}
+                                                        >
+                                                            {hoveredSlice.label}
+                                                        </span>
+                                                        <span className="text-2xl font-black text-gray-800">
+                                                            {hoveredSlice.horas} h
+                                                        </span>
+                                                        <span
+                                                            className="text-xs font-black px-2 py-0.5 rounded-full border mt-0.5"
+                                                            style={{
+                                                                color: hoveredSlice.color,
+                                                                borderColor: `${hoveredSlice.color}40`,
+                                                                backgroundColor: `${hoveredSlice.color}15`
+                                                            }}
+                                                        >
+                                                            {hoveredSlice.porcentaje}% del total
+                                                        </span>
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                                                            Total Nómina
+                                                        </span>
+                                                        <span className="text-2xl font-black text-gray-800">
+                                                            {recargosData.total} h
+                                                        </span>
+                                                        <span className="text-[10px] text-gray-400 font-medium">
+                                                            100% horas
+                                                        </span>
+                                                    </>
+                                                )}
+                                            </div>
+                                        </div>
+                                    );
+                                })()}
+                            </div>
+
+                            {/* Tarjetas de Detalle de Recargos con Alto Contraste */}
+                            <div className="space-y-3">
+                                {recargosData.items.map(item => {
+                                    const isHovered = hoveredSlice?.id === item.id;
+                                    const IconComponent = item.icon;
+
+                                    return (
+                                        <div
+                                            key={item.id}
+                                            onMouseEnter={() => setHoveredSlice(item)}
+                                            onMouseLeave={() => setHoveredSlice(null)}
+                                            className={`p-3.5 rounded-2xl border transition duration-200 cursor-pointer flex items-center justify-between border-l-[6px] shadow-sm ${
+                                                isHovered
+                                                    ? 'bg-gray-50/90 shadow-md scale-[1.01]'
+                                                    : 'bg-white border-gray-100 hover:bg-gray-50/50'
+                                            }`}
+                                            style={{ borderLeftColor: item.color }}
+                                        >
+                                            <div className="flex items-center gap-3">
+                                                <div
+                                                    className="w-9 h-9 rounded-xl flex items-center justify-center shadow-sm text-white shrink-0"
+                                                    style={{ backgroundColor: item.color }}
+                                                >
+                                                    <IconComponent size={18} />
+                                                </div>
+                                                <div>
+                                                    <div className="flex items-center gap-2">
+                                                        <p className="text-xs font-black text-gray-800">{item.label}</p>
+                                                        <span
+                                                            className="text-[10px] font-black px-2 py-0.5 rounded-full border"
+                                                            style={{
+                                                                color: item.color,
+                                                                borderColor: `${item.color}40`,
+                                                                backgroundColor: `${item.color}15`
+                                                            }}
+                                                        >
+                                                            {item.porcentaje}%
+                                                        </span>
+                                                    </div>
+                                                    <p className="text-[11px] text-gray-400 mt-0.5">{item.recargoText}</p>
+                                                </div>
+                                            </div>
+                                            <div className="text-right">
+                                                <span className="text-sm font-black text-gray-800 block">{item.horas} h</span>
+                                                <span className="text-[10px] text-gray-400 font-medium">acumuladas</span>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* ── SUB-VISTA 2: POR COLABORADOR (BARRAS APILADAS - IDEA A) ── */}
+                    {subVistaRecargos === 'empleados' && (
+                        <div className="space-y-5 animate-in fade-in duration-150">
+                            {/* Barra de Filtros, Ordenamiento y Leyenda */}
+                            <div className="flex flex-wrap items-center justify-between gap-3 bg-gray-50/80 p-3 rounded-2xl border border-gray-100">
+                                {/* Botones de Ordenamiento */}
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className="text-xs font-bold text-gray-500 mr-1 flex items-center gap-1">
+                                        <Filter size={13} />
+                                        Ordenar por:
+                                    </span>
+                                    <button
+                                        type="button"
+                                        onClick={() => setOrdenRecargosEmp('total')}
+                                        className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+                                            ordenRecargosEmp === 'total'
+                                                ? 'bg-purple-600 text-white shadow-sm'
+                                                : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-100'
+                                        }`}
+                                    >
+                                        <Clock size={13} />
+                                        Total Horas
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setOrdenRecargosEmp('nocturnas')}
+                                        className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+                                            ordenRecargosEmp === 'nocturnas'
+                                                ? 'bg-fuchsia-600 text-white shadow-sm'
+                                                : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-100'
+                                        }`}
+                                    >
+                                        <Moon size={13} />
+                                        Más Nocturnas (35%)
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setOrdenRecargosEmp('festivas')}
+                                        className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+                                            ordenRecargosEmp === 'festivas'
+                                                ? 'bg-orange-600 text-white shadow-sm'
+                                                : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-100'
+                                        }`}
+                                    >
+                                        <Calendar size={13} />
+                                        Más Festivas (75%/110%)
+                                    </button>
+                                </div>
+
+                                {/* Leyenda de Colores */}
+                                <div className="flex items-center gap-3 text-[11px] font-bold text-gray-600 flex-wrap">
+                                    <div className="flex items-center gap-1.5">
+                                        <div className="w-3 h-3 rounded-md bg-blue-600 shadow-sm" />
+                                        <span>Diurna (100%)</span>
+                                    </div>
+                                    <div className="flex items-center gap-1.5">
+                                        <div className="w-3 h-3 rounded-md bg-fuchsia-600 shadow-sm" />
+                                        <span>Nocturna (35%)</span>
+                                    </div>
+                                    <div className="flex items-center gap-1.5">
+                                        <div className="w-3 h-3 rounded-md bg-orange-600 shadow-sm" />
+                                        <span>Fest. Diurna (75%)</span>
+                                    </div>
+                                    <div className="flex items-center gap-1.5">
+                                        <div className="w-3 h-3 rounded-md bg-red-600 shadow-sm" />
+                                        <span>Fest. Nocturna (110%)</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Regla Superior de Escala de Horas */}
+                            <div className="hidden sm:grid sm:grid-cols-12 gap-3 px-3 text-[11px] font-black text-gray-400 uppercase tracking-wider border-b border-gray-100 pb-2">
+                                <div className="col-span-3">Colaborador</div>
+                                <div className="col-span-7 flex justify-between">
+                                    <span>0 h</span>
+                                    <span>Escala Proporcional de Horas Reales</span>
+                                    <span>Máx: {recargosEmpleadosData.maxHoras} h</span>
+                                </div>
+                                <div className="col-span-2 text-right">Total & Recargos</div>
+                            </div>
+
+                            {/* Lista de Colaboradores con Barras Apiladas */}
+                            <div className="space-y-2.5">
+                                {recargosEmpleadosData.list.map((emp, idx) => {
+                                    const total = emp.totalRecargosHoras;
+                                    const pctBarra = total > 0
+                                        ? Math.max(8, Math.min(100, (total / recargosEmpleadosData.maxHoras) * 100))
+                                        : 0;
+
+                                    const pctD = total > 0 ? (emp.diurnas / total) * 100 : 0;
+                                    const pctN = total > 0 ? (emp.nocturnas / total) * 100 : 0;
+                                    const pctDD = total > 0 ? (emp.domDiurnas / total) * 100 : 0;
+                                    const pctDN = total > 0 ? (emp.domNocturnas / total) * 100 : 0;
+
+                                    const isHovered = hoveredRecargoEmp === emp.id;
+
+                                    return (
+                                        <div
+                                            key={emp.id}
+                                            onMouseEnter={() => setHoveredRecargoEmp(emp.id)}
+                                            onMouseLeave={() => setHoveredRecargoEmp(null)}
+                                            className={`p-3 rounded-2xl border transition-all duration-200 ${
+                                                isHovered
+                                                    ? 'bg-purple-50/40 border-purple-200 shadow-md'
+                                                    : 'bg-white border-gray-100 hover:border-gray-200 hover:shadow-sm'
+                                            }`}
+                                        >
+                                            <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-center">
+                                                {/* Columna Colaborador */}
+                                                <div className="sm:col-span-3 flex items-center gap-2.5 min-w-0">
+                                                    <span className="text-xs font-black text-gray-400 w-5 shrink-0 text-center">
+                                                        #{idx + 1}
                                                     </span>
-                                                    <span className="text-2xl font-black text-gray-800">
-                                                        {hoveredSlice.horas} h
+                                                    <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-purple-600 to-indigo-500 text-white font-black text-xs flex items-center justify-center shrink-0 shadow-sm">
+                                                        {emp.nombre ? emp.nombre.substring(0, 2).toUpperCase() : 'CO'}
+                                                    </div>
+                                                    <div className="min-w-0 flex-1">
+                                                        <p className="text-xs font-black text-gray-800 truncate" title={emp.nombre}>
+                                                            {emp.nombre}
+                                                        </p>
+                                                        <p className="text-[10px] text-gray-400 truncate">
+                                                            {emp.cargo || emp.cedula || 'Operativo'}
+                                                        </p>
+                                                    </div>
+                                                </div>
+
+                                                {/* Columna Barra Apilada */}
+                                                <div className="sm:col-span-7">
+                                                    <div className="w-full bg-gray-100/90 rounded-xl h-8 relative flex items-center p-1 border border-gray-200/60 shadow-inner">
+                                                        {total > 0 ? (
+                                                            <div
+                                                                style={{ width: `${pctBarra}%` }}
+                                                                className="flex h-full rounded-lg overflow-hidden shadow-sm transition-all duration-300 relative"
+                                                            >
+                                                                {/* Segmento Diurna */}
+                                                                {pctD > 0 && (
+                                                                    <div
+                                                                        style={{ width: `${pctD}%` }}
+                                                                        className="bg-blue-600 h-full flex items-center justify-center text-[10px] text-white font-black overflow-hidden select-none hover:brightness-110 transition"
+                                                                        title={`Diurna Ordinaria: ${emp.diurnas} h (${Math.round(pctD)}%)`}
+                                                                    >
+                                                                        {pctD >= 14 && <span>{emp.diurnas}h</span>}
+                                                                    </div>
+                                                                )}
+                                                                {/* Segmento Nocturna */}
+                                                                {pctN > 0 && (
+                                                                    <div
+                                                                        style={{ width: `${pctN}%` }}
+                                                                        className="bg-fuchsia-600 h-full flex items-center justify-center text-[10px] text-white font-black overflow-hidden select-none hover:brightness-110 transition"
+                                                                        title={`Nocturna (+35%): ${emp.nocturnas} h (${Math.round(pctN)}%)`}
+                                                                    >
+                                                                        {pctN >= 14 && <span>{emp.nocturnas}h</span>}
+                                                                    </div>
+                                                                )}
+                                                                {/* Segmento Dom. Diurna */}
+                                                                {pctDD > 0 && (
+                                                                    <div
+                                                                        style={{ width: `${pctDD}%` }}
+                                                                        className="bg-orange-600 h-full flex items-center justify-center text-[10px] text-white font-black overflow-hidden select-none hover:brightness-110 transition"
+                                                                        title={`Dom./Fest. Diurna (+75%): ${emp.domDiurnas} h (${Math.round(pctDD)}%)`}
+                                                                    >
+                                                                        {pctDD >= 14 && <span>{emp.domDiurnas}h</span>}
+                                                                    </div>
+                                                                )}
+                                                                {/* Segmento Dom. Nocturna */}
+                                                                {pctDN > 0 && (
+                                                                    <div
+                                                                        style={{ width: `${pctDN}%` }}
+                                                                        className="bg-red-600 h-full flex items-center justify-center text-[10px] text-white font-black overflow-hidden select-none hover:brightness-110 transition"
+                                                                        title={`Dom./Fest. Nocturna (+110%): ${emp.domNocturnas} h (${Math.round(pctDN)}%)`}
+                                                                    >
+                                                                        {pctDN >= 14 && <span>{emp.domNocturnas}h</span>}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        ) : (
+                                                            <div className="w-full text-center text-[11px] text-gray-400 font-medium">
+                                                                Sin horas en este periodo
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </div>
+
+                                                {/* Columna Total y Chips de Recargos */}
+                                                <div className="sm:col-span-2 flex sm:flex-col items-center sm:items-end justify-between sm:justify-center gap-1">
+                                                    <span className="text-xs font-black text-gray-800 bg-gray-100 px-2 py-0.5 rounded-lg">
+                                                        {total} h
                                                     </span>
-                                                    <span
-                                                        className="text-xs font-black px-2 py-0.5 rounded-full border mt-0.5"
-                                                        style={{
-                                                            color: hoveredSlice.color,
-                                                            borderColor: `${hoveredSlice.color}40`,
-                                                            backgroundColor: `${hoveredSlice.color}15`
-                                                        }}
-                                                    >
-                                                        {hoveredSlice.porcentaje}% del total
-                                                    </span>
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
-                                                        Total Nómina
-                                                    </span>
-                                                    <span className="text-2xl font-black text-gray-800">
-                                                        {recargosData.total} h
-                                                    </span>
-                                                    <span className="text-[10px] text-gray-400 font-medium">
-                                                        100% horas
-                                                    </span>
-                                                </>
+                                                    <div className="flex items-center gap-1 flex-wrap justify-end">
+                                                        {emp.nocturnas > 0 && (
+                                                            <span className="text-[10px] font-black px-1.5 py-0.2 rounded bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200">
+                                                                N: {emp.nocturnas}h
+                                                            </span>
+                                                        )}
+                                                        {emp.totalFestivas > 0 && (
+                                                            <span className="text-[10px] font-black px-1.5 py-0.2 rounded bg-orange-50 text-orange-700 border border-orange-200">
+                                                                F: {emp.totalFestivas}h
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* Panel desplegable en Hover con el desglose exacto */}
+                                            {isHovered && (
+                                                <div className="mt-3 pt-3 border-t border-purple-100 grid grid-cols-2 sm:grid-cols-4 gap-2 animate-in fade-in duration-150">
+                                                    <div className="bg-white/80 p-2 rounded-xl border border-blue-100 flex items-center justify-between">
+                                                        <span className="text-[11px] text-blue-700 font-bold flex items-center gap-1">
+                                                            <Sun size={12} /> Diurna (100%):
+                                                        </span>
+                                                        <span className="text-xs font-black text-gray-800">
+                                                            {emp.diurnas} h <span className="text-[10px] text-gray-400 font-normal">({total > 0 ? Math.round(pctD) : 0}%)</span>
+                                                        </span>
+                                                    </div>
+                                                    <div className="bg-white/80 p-2 rounded-xl border border-fuchsia-100 flex items-center justify-between">
+                                                        <span className="text-[11px] text-fuchsia-700 font-bold flex items-center gap-1">
+                                                            <Moon size={12} /> Noc. (+35%):
+                                                        </span>
+                                                        <span className="text-xs font-black text-gray-800">
+                                                            {emp.nocturnas} h <span className="text-[10px] text-gray-400 font-normal">({total > 0 ? Math.round(pctN) : 0}%)</span>
+                                                        </span>
+                                                    </div>
+                                                    <div className="bg-white/80 p-2 rounded-xl border border-orange-100 flex items-center justify-between">
+                                                        <span className="text-[11px] text-orange-700 font-bold flex items-center gap-1">
+                                                            <Calendar size={12} /> Fest. Diu (+75%):
+                                                        </span>
+                                                        <span className="text-xs font-black text-gray-800">
+                                                            {emp.domDiurnas} h <span className="text-[10px] text-gray-400 font-normal">({total > 0 ? Math.round(pctDD) : 0}%)</span>
+                                                        </span>
+                                                    </div>
+                                                    <div className="bg-white/80 p-2 rounded-xl border border-red-100 flex items-center justify-between">
+                                                        <span className="text-[11px] text-red-700 font-bold flex items-center gap-1">
+                                                            <Zap size={12} /> Fest. Noc (+110%):
+                                                        </span>
+                                                        <span className="text-xs font-black text-gray-800">
+                                                            {emp.domNocturnas} h <span className="text-[10px] text-gray-400 font-normal">({total > 0 ? Math.round(pctDN) : 0}%)</span>
+                                                        </span>
+                                                    </div>
+                                                </div>
                                             )}
                                         </div>
-                                    </div>
-                                );
-                            })()}
-                        </div>
+                                    );
+                                })}
+                            </div>
 
-                        {/* Tarjetas de Detalle de Recargos con Alto Contraste */}
-                        <div className="space-y-3">
-                            {recargosData.items.map(item => {
-                                const isHovered = hoveredSlice?.id === item.id;
-                                const IconComponent = item.icon;
-
-                                return (
-                                    <div
-                                        key={item.id}
-                                        onMouseEnter={() => setHoveredSlice(item)}
-                                        onMouseLeave={() => setHoveredSlice(null)}
-                                        className={`p-3.5 rounded-2xl border transition duration-200 cursor-pointer flex items-center justify-between border-l-[6px] shadow-sm ${
-                                            isHovered
-                                                ? 'bg-gray-50/90 shadow-md scale-[1.01]'
-                                                : 'bg-white border-gray-100 hover:bg-gray-50/50'
-                                        }`}
-                                        style={{ borderLeftColor: item.color }}
-                                    >
-                                        <div className="flex items-center gap-3">
-                                            <div
-                                                className="w-9 h-9 rounded-xl flex items-center justify-center shadow-sm text-white shrink-0"
-                                                style={{ backgroundColor: item.color }}
-                                            >
-                                                <IconComponent size={18} />
-                                            </div>
-                                            <div>
-                                                <div className="flex items-center gap-2">
-                                                    <p className="text-xs font-black text-gray-800">{item.label}</p>
-                                                    <span
-                                                        className="text-[10px] font-black px-2 py-0.5 rounded-full border"
-                                                        style={{
-                                                            color: item.color,
-                                                            borderColor: `${item.color}40`,
-                                                            backgroundColor: `${item.color}15`
-                                                        }}
-                                                    >
-                                                        {item.porcentaje}%
-                                                    </span>
-                                                </div>
-                                                <p className="text-[11px] text-gray-400 mt-0.5">{item.recargoText}</p>
-                                            </div>
-                                        </div>
-                                        <div className="text-right">
-                                            <span className="text-sm font-black text-gray-800 block">{item.horas} h</span>
-                                            <span className="text-[10px] text-gray-400 font-medium">acumuladas</span>
-                                        </div>
+                            {/* ── TARJETAS RESUMEN DE LÍDERES DE RECARGOS ──────────────── */}
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4 border-t border-gray-100">
+                                {/* 1. Mayor Carga Nocturna */}
+                                <div className="p-4 rounded-2xl bg-fuchsia-50/50 border border-fuchsia-200/80 flex items-center gap-3 shadow-sm">
+                                    <div className="w-11 h-11 rounded-xl bg-fuchsia-600 text-white flex items-center justify-center shadow-md shadow-fuchsia-200 shrink-0">
+                                        <Moon size={20} />
                                     </div>
-                                );
-                            })}
+                                    <div className="min-w-0 flex-1">
+                                        <span className="text-[10px] font-black uppercase tracking-wider text-fuchsia-700 block">
+                                            Mayor Carga Nocturna (35%)
+                                        </span>
+                                        <p className="text-sm font-black text-gray-800 truncate">
+                                            {recargosEmpleadosData.liderNocturnas?.nombre || 'Sin registros'}
+                                        </p>
+                                        <p className="text-xs text-gray-600 mt-0.5">
+                                            <b className="text-fuchsia-700">{recargosEmpleadosData.liderNocturnas?.nocturnas || 0} h</b> nocturnas acumuladas
+                                        </p>
+                                    </div>
+                                </div>
+
+                                {/* 2. Mayor Carga Festiva / Dominical */}
+                                <div className="p-4 rounded-2xl bg-orange-50/50 border border-orange-200/80 flex items-center gap-3 shadow-sm">
+                                    <div className="w-11 h-11 rounded-xl bg-orange-600 text-white flex items-center justify-center shadow-md shadow-orange-200 shrink-0">
+                                        <Calendar size={20} />
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                        <span className="text-[10px] font-black uppercase tracking-wider text-orange-700 block">
+                                            Mayor Carga Dominical/Festiva
+                                        </span>
+                                        <p className="text-sm font-black text-gray-800 truncate">
+                                            {recargosEmpleadosData.liderFestivas?.nombre || 'Sin registros'}
+                                        </p>
+                                        <p className="text-xs text-gray-600 mt-0.5">
+                                            <b className="text-orange-700">{recargosEmpleadosData.liderFestivas?.totalFestivas || 0} h</b> en domingos y festivos
+                                        </p>
+                                    </div>
+                                </div>
+
+                                {/* 3. Mayor Volumen Total de Horas */}
+                                <div className="p-4 rounded-2xl bg-blue-50/50 border border-blue-200/80 flex items-center gap-3 shadow-sm">
+                                    <div className="w-11 h-11 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-md shadow-blue-200 shrink-0">
+                                        <Award size={20} />
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                        <span className="text-[10px] font-black uppercase tracking-wider text-blue-700 block">
+                                            Mayor Volumen Total
+                                        </span>
+                                        <p className="text-sm font-black text-gray-800 truncate">
+                                            {recargosEmpleadosData.liderTotal?.nombre || 'Sin registros'}
+                                        </p>
+                                        <p className="text-xs text-gray-600 mt-0.5">
+                                            <b className="text-blue-700">{recargosEmpleadosData.liderTotal?.totalRecargosHoras || 0} h</b> laboradas en el periodo
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
-                    </div>
+                    )}
                 </div>
             )}
 
