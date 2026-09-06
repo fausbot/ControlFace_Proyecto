@@ -407,20 +407,33 @@ export default function GraficasGerenciales({
 
                     {/* Contenedor Gráfico con Línea de Base SVG */}
                     <div className="relative pt-6 pb-2">
-                        {/* Posición porcentual de la línea base en el contenedor */}
+                        {/* Overlay con Línea de Base transversal matemáticamente alineada */}
                         {(() => {
                             const basePercent = Math.min(100, Math.max(5, (basePeriodHours / rankingData.maxHoras) * 100));
                             return (
-                                <div
-                                    className="absolute top-0 bottom-0 pointer-events-none z-10 flex flex-col items-center"
-                                    style={{ left: `calc(190px + (100% - 290px) * ${basePercent / 100})` }}
-                                >
-                                    {/* Etiqueta superior de la línea */}
-                                    <div className="bg-purple-700 text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-md whitespace-nowrap transform -translate-x-1/2 -translate-y-1">
-                                        Meta: {basePeriodHours}h
+                                <div className="absolute inset-0 pointer-events-none z-10">
+                                    <div className="flex items-center gap-3 p-1.5 h-full">
+                                        {/* Espacio izquierdo idéntico a las columnas de nombres */}
+                                        <div className="w-[180px] shrink-0"></div>
+
+                                        {/* Columna central: exactamente el mismo ancho y padding que los tracks de barras */}
+                                        <div className="flex-1 relative h-full px-1">
+                                            <div
+                                                className="absolute top-0 bottom-0 flex flex-col items-center"
+                                                style={{ left: `${basePercent}%` }}
+                                            >
+                                                {/* Etiqueta superior de la línea */}
+                                                <div className="bg-purple-700 text-white text-[10px] font-black px-2.5 py-0.5 rounded-full shadow-md whitespace-nowrap transform -translate-x-1/2 -translate-y-2">
+                                                    Meta: {basePeriodHours}h
+                                                </div>
+                                                {/* Línea vertical punteada transversal */}
+                                                <div className="w-0.5 flex-1 border-l-2 border-dashed border-purple-500/80 shadow-xs"></div>
+                                            </div>
+                                        </div>
+
+                                        {/* Espacio derecho idéntico a las columnas de balances */}
+                                        <div className="w-[90px] shrink-0"></div>
                                     </div>
-                                    {/* Línea vertical punteada */}
-                                    <div className="w-0.5 flex-1 border-l-2 border-dashed border-purple-500 opacity-80"></div>
                                 </div>
                             );
                         })()}
@@ -828,7 +841,7 @@ export default function GraficasGerenciales({
                                     Rendimiento en Ruta: Visitas vs. Horas de Viaje
                                 </h3>
                                 <span className="bg-emerald-100 text-emerald-800 text-[11px] font-extrabold px-2.5 py-0.5 rounded-full">
-                                    {rutasData.totalEnRuta} en campo
+                                    {rutasData.totalEnRuta} colaboradores con visitas
                                 </span>
                             </div>
                             <p className="text-xs text-gray-500 mt-0.5">

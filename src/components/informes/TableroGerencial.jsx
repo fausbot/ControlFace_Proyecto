@@ -630,7 +630,7 @@ export default function TableroGerencial() {
                     </div>
                     <div className="mt-3 pt-3 border-t border-gray-100 flex items-center justify-between text-xs text-gray-500">
                         <span>En clientes: <b>{kpis?.totalServicio || 0} h</b></span>
-                        <span className="text-emerald-600 font-medium">{kpis?.empleadosEnRuta || 0} en campo</span>
+                        <span className="text-emerald-600 font-medium">{kpis?.empleadosEnRuta || 0} colaboradores con visitas</span>
                     </div>
                 </div>
 
