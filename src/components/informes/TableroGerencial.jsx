@@ -234,19 +234,43 @@ export default function TableroGerencial() {
     };
 
     // ── 7. Navegación de Meses ─────────────────────────────────────────────────
-    const handlePrevMonth = () => {
+    const handleShiftMonth = (delta) => {
         setCurrentYearMonth(prev => {
-            if (prev.month === 0) return { year: prev.year - 1, month: 11 };
-            return { year: prev.year, month: prev.month - 1 };
+            let newMonth = prev.month + delta;
+            let newYear = prev.year;
+            if (newMonth < 0) {
+                newMonth = 11;
+                newYear -= 1;
+            } else if (newMonth > 11) {
+                newMonth = 0;
+                newYear += 1;
+            }
+
+            // Si el preset es 'custom', ajustar manualmente startDate y endDate al nuevo mes
+            if (presetPeriodo === 'custom' && startDate && endDate) {
+                const pad = (n) => String(n).padStart(2, '0');
+                const mStr = pad(newMonth + 1);
+                const lastDay = new Date(newYear, newMonth + 1, 0).getDate();
+
+                const partsStart = startDate.split('-');
+                const partsEnd = endDate.split('-');
+                if (partsStart.length === 3 && partsEnd.length === 3) {
+                    const startDay = Math.min(parseInt(partsStart[2], 10) || 1, lastDay);
+                    const endDay = Math.min(parseInt(partsEnd[2], 10) || lastDay, lastDay);
+                    setStartDate(`${newYear}-${mStr}-${pad(startDay)}`);
+                    setEndDate(`${newYear}-${mStr}-${pad(endDay)}`);
+                } else {
+                    setStartDate(`${newYear}-${mStr}-01`);
+                    setEndDate(`${newYear}-${mStr}-${pad(lastDay)}`);
+                }
+            }
+
+            return { year: newYear, month: newMonth };
         });
     };
 
-    const handleNextMonth = () => {
-        setCurrentYearMonth(prev => {
-            if (prev.month === 11) return { year: prev.year + 1, month: 0 };
-            return { year: prev.year, month: prev.month + 1 };
-        });
-    };
+    const handlePrevMonth = () => handleShiftMonth(-1);
+    const handleNextMonth = () => handleShiftMonth(1);
 
     const monthLabel = useMemo(() => {
         const d = new Date(currentYearMonth.year, currentYearMonth.month, 1);
@@ -366,29 +390,51 @@ export default function TableroGerencial() {
                 </div>
 
                 {/* Rango Manual de Fechas y Botón Recargar */}
-                <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                    {/* Flecha Mes Anterior */}
+                    <button
+                        type="button"
+                        onClick={handlePrevMonth}
+                        title="Mes anterior"
+                        className="p-2 bg-gray-50 border border-gray-200 rounded-xl text-gray-600 hover:bg-white hover:text-blue-600 hover:border-blue-300 transition shadow-xs active:scale-95"
+                    >
+                        <ChevronLeft size={16} />
+                    </button>
+
+                    {/* Selector de Rango de Fechas */}
                     <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded-xl px-2.5 py-1 text-xs">
                         <span className="text-gray-500 font-medium">Del:</span>
                         <input
                             type="date"
                             value={startDate}
                             onChange={e => { setStartDate(e.target.value); setPresetPeriodo('custom'); }}
-                            className="bg-transparent font-bold text-gray-700 outline-none"
+                            className="bg-transparent font-bold text-gray-700 outline-none cursor-pointer"
                         />
                         <span className="text-gray-500 font-medium ml-1">al:</span>
                         <input
                             type="date"
                             value={endDate}
                             onChange={e => { setEndDate(e.target.value); setPresetPeriodo('custom'); }}
-                            className="bg-transparent font-bold text-gray-700 outline-none"
+                            className="bg-transparent font-bold text-gray-700 outline-none cursor-pointer"
                         />
                     </div>
 
+                    {/* Flecha Mes Siguiente */}
+                    <button
+                        type="button"
+                        onClick={handleNextMonth}
+                        title="Mes siguiente"
+                        className="p-2 bg-gray-50 border border-gray-200 rounded-xl text-gray-600 hover:bg-white hover:text-blue-600 hover:border-blue-300 transition shadow-xs active:scale-95"
+                    >
+                        <ChevronRight size={16} />
+                    </button>
+
+                    {/* Botón Recargar */}
                     <button
                         onClick={loadData}
                         disabled={loading}
                         title="Refrescar datos de Firebase"
-                        className="p-2 bg-gray-50 border border-gray-200 rounded-xl text-gray-600 hover:bg-gray-100 hover:text-blue-600 transition"
+                        className="p-2 bg-gray-50 border border-gray-200 rounded-xl text-gray-600 hover:bg-white hover:text-blue-600 hover:border-blue-300 transition shadow-xs active:scale-95"
                     >
                         <RefreshCw size={16} className={loading ? 'animate-spin text-blue-600' : ''} />
                     </button>
