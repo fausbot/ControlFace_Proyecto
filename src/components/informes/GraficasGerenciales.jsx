@@ -396,8 +396,10 @@ export default function GraficasGerenciales({
                                 Por debajo (-Déficit de Horas)
                             </span>
                             <span className="flex items-center gap-1.5 font-medium text-gray-700">
-                                <span className="w-3 h-0.5 bg-purple-600 border-t-2 border-dashed border-purple-600"></span>
-                                Línea Base del Periodo ({basePeriodHours}h)
+                                <span className="w-3 h-3 rounded-md bg-purple-700 flex items-center justify-center">
+                                    <span className="w-0.5 h-2 bg-white"></span>
+                                </span>
+                                Marca de Meta del Periodo ({basePeriodHours}h)
                             </span>
                         </div>
                         <span className="text-gray-400 italic text-[11px]">
@@ -405,46 +407,56 @@ export default function GraficasGerenciales({
                         </span>
                     </div>
 
-                    {/* Contenedor Gráfico con Línea de Base SVG */}
-                    <div className="relative pt-6 pb-2">
-                        {/* Overlay con Línea de Base transversal matemáticamente alineada */}
+                    {/* Contenedor Gráfico con Eje Superior y Marcador Integrado */}
+                    <div className="relative pt-2 pb-2 space-y-2">
+                        {/* ── Regleta / Eje de Escala Superior ──────────────────────────────── */}
                         {(() => {
                             const basePercent = Math.min(100, Math.max(5, (basePeriodHours / rankingData.maxHoras) * 100));
                             return (
-                                <div className="absolute inset-0 pointer-events-none z-10">
-                                    <div className="flex items-center gap-3 p-1.5 h-full">
-                                        {/* Espacio izquierdo idéntico a las columnas de nombres */}
-                                        <div className="w-[180px] shrink-0"></div>
+                                <div className="flex items-center gap-3 px-1.5 pt-2 pb-1 text-[10px] font-bold text-gray-400 border-b border-gray-100">
+                                    {/* Columna Izquierda: Encabezado */}
+                                    <div className="w-[180px] shrink-0 text-gray-500 uppercase tracking-wider text-[9px]">
+                                        Colaborador
+                                    </div>
 
-                                        {/* Columna central: exactamente el mismo ancho y padding que los tracks de barras */}
-                                        <div className="flex-1 relative h-full px-1">
-                                            <div
-                                                className="absolute top-0 bottom-0 flex flex-col items-center"
-                                                style={{ left: `${basePercent}%` }}
-                                            >
-                                                {/* Etiqueta superior de la línea */}
-                                                <div className="bg-purple-700 text-white text-[10px] font-black px-2.5 py-0.5 rounded-full shadow-md whitespace-nowrap transform -translate-x-1/2 -translate-y-2">
-                                                    Meta: {basePeriodHours}h
-                                                </div>
-                                                {/* Línea vertical punteada transversal */}
-                                                <div className="w-0.5 flex-1 border-l-2 border-dashed border-purple-500/80 shadow-xs"></div>
-                                            </div>
+                                    {/* Columna Central: Regleta de Escala */}
+                                    <div className="flex-1 relative h-6 flex items-end">
+                                        {/* Origen 0h */}
+                                        <span className="absolute left-0 bottom-0 text-gray-400 font-bold">0h</span>
+
+                                        {/* Indicador de Meta Superior */}
+                                        <div
+                                            className="absolute top-0 flex flex-col items-center pointer-events-none transform -translate-x-1/2"
+                                            style={{ left: `${basePercent}%` }}
+                                        >
+                                            <span className="bg-purple-700 text-white text-[9px] font-black px-2 py-0.5 rounded-md shadow-xs flex items-center gap-0.5 whitespace-nowrap">
+                                                Meta: {basePeriodHours}h
+                                            </span>
+                                            <span className="w-1.5 h-1.5 bg-purple-700 rotate-45 -mt-0.5"></span>
                                         </div>
 
-                                        {/* Espacio derecho idéntico a las columnas de balances */}
-                                        <div className="w-[90px] shrink-0"></div>
+                                        {/* Máximo del Periodo */}
+                                        <span className="absolute right-0 bottom-0 text-gray-400 font-bold">
+                                            Max: {Math.round(rankingData.maxHoras)}h
+                                        </span>
+                                    </div>
+
+                                    {/* Columna Derecha: Encabezado */}
+                                    <div className="w-[90px] shrink-0 text-right text-gray-500 uppercase tracking-wider text-[9px]">
+                                        Balance
                                     </div>
                                 </div>
                             );
                         })()}
 
-                        {/* Lista de Barras por Empleado */}
+                        {/* ── Lista de Barras por Empleado ─────────────────────────────────── */}
                         <div className="space-y-2.5">
                             {rankingData.list.map((emp, index) => {
                                 const netas = emp.horasNetas || 0;
                                 const isSupero = netas >= basePeriodHours;
                                 const balance = emp.balance || 0;
                                 const barPercent = Math.min(100, Math.max(3, (netas / rankingData.maxHoras) * 100));
+                                const basePercent = Math.min(100, Math.max(5, (basePeriodHours / rankingData.maxHoras) * 100));
 
                                 return (
                                     <div
@@ -468,25 +480,36 @@ export default function GraficasGerenciales({
                                             </div>
                                         </div>
 
-                                        {/* Columna Centro: Barra de Horas */}
-                                        <div className="flex-1 relative h-7 bg-gray-100/80 rounded-lg overflow-hidden flex items-center px-1">
+                                        {/* Columna Centro: Barra de Horas con Marcador de Meta integrado */}
+                                        <div className="flex-1 relative h-7 bg-gray-100/90 rounded-lg overflow-hidden flex items-center">
+                                            {/* Barra Rellena */}
                                             <div
-                                                className={`h-5 rounded-md transition-all duration-500 flex items-center justify-end pr-2 text-[10px] font-black text-white shadow-sm ${
+                                                className={`h-full rounded-lg transition-all duration-500 flex items-center justify-end pr-2.5 text-[10px] font-black text-white shadow-xs ${
                                                     isSupero
                                                         ? 'bg-gradient-to-r from-emerald-500 to-teal-500'
                                                         : 'bg-gradient-to-r from-rose-500 to-amber-500'
                                                 }`}
                                                 style={{ width: `${barPercent}%` }}
                                             >
-                                                {barPercent > 20 && `${netas}h`}
+                                                {barPercent > 18 && `${netas}h`}
                                             </div>
 
                                             {/* Si la barra es muy corta, texto afuera */}
-                                            {barPercent <= 20 && (
+                                            {barPercent <= 18 && (
                                                 <span className="ml-2 text-[11px] font-black text-gray-700">
                                                     {netas}h
                                                 </span>
                                             )}
+
+                                            {/* MARCADOR DE META INTEGRADO DENTRO DEL PROPIO TRACK */}
+                                            <div
+                                                className="absolute top-0 bottom-0 w-0.5 bg-purple-700 z-10 pointer-events-none shadow-sm flex flex-col justify-between items-center"
+                                                style={{ left: `${basePercent}%` }}
+                                                title={`Meta: ${basePeriodHours}h`}
+                                            >
+                                                <div className="w-1.5 h-1 bg-purple-700 rounded-full"></div>
+                                                <div className="w-1.5 h-1 bg-purple-700 rounded-full"></div>
+                                            </div>
                                         </div>
 
                                         {/* Columna Derecha: Balance y Badge (+/-) */}
@@ -504,7 +527,7 @@ export default function GraficasGerenciales({
 
                                         {/* Tooltip Flotante en Hover */}
                                         {hoveredEmp?.email === emp.email && (
-                                            <div className="absolute left-[200px] -top-12 z-20 bg-gray-900 text-white text-xs rounded-xl py-2 px-3 shadow-2xl pointer-events-none flex items-center gap-4 animate-in fade-in duration-150">
+                                            <div className="absolute left-[190px] -top-10 z-30 bg-gray-900 text-white text-xs rounded-xl py-2 px-3 shadow-2xl pointer-events-none flex items-center gap-4 animate-in fade-in duration-150">
                                                 <div>
                                                     <span className="text-gray-400 block text-[10px]">Horas Netas:</span>
                                                     <b className="text-white text-sm">{netas} h</b>
