@@ -33,6 +33,7 @@ export default function GraficasGerenciales({
     const [ordenRecargosEmp, setOrdenRecargosEmp] = useState('total'); // 'total' | 'nocturnas' | 'festivas'
     const [hoveredSlice, setHoveredSlice] = useState(null);
     const [hoveredRecargoEmp, setHoveredRecargoEmp] = useState(null);
+    const [expandedRecargoEmpId, setExpandedRecargoEmpId] = useState(null);
 
     // ── Controles para el Gráfico de Rutas (Barras Dobles) ──────────────────────
     const [ordenRutas, setOrdenRutas] = useState('visitas'); // 'visitas' | 'traslados' | 'eficiencia'
@@ -1013,6 +1014,13 @@ export default function GraficasGerenciales({
                                 </div>
                             </div>
 
+                            {/* Pista o ayuda visual */}
+                            <div className="flex items-center justify-between text-xs px-2 text-gray-500">
+                                <span className="text-[11px] text-gray-500 flex items-center gap-1">
+                                    💡 <b>Tip:</b> Pasa el cursor sobre cualquier barra para ver el cuadro informativo o <b>haz clic en la fila</b> para desplegar su desglose completo.
+                                </span>
+                            </div>
+
                             {/* Regla Superior de Escala de Horas */}
                             <div className="hidden sm:grid sm:grid-cols-12 gap-3 px-3 text-[11px] font-black text-gray-400 uppercase tracking-wider border-b border-gray-100 pb-2">
                                 <div className="col-span-3">Colaborador</div>
@@ -1038,18 +1046,54 @@ export default function GraficasGerenciales({
                                     const pctDN = total > 0 ? (emp.domNocturnas / total) * 100 : 0;
 
                                     const isHovered = hoveredRecargoEmp === emp.id;
+                                    const isExpanded = expandedRecargoEmpId === emp.id;
 
                                     return (
                                         <div
                                             key={emp.id}
                                             onMouseEnter={() => setHoveredRecargoEmp(emp.id)}
                                             onMouseLeave={() => setHoveredRecargoEmp(null)}
-                                            className={`p-3 rounded-2xl border transition-all duration-200 ${
-                                                isHovered
-                                                    ? 'bg-purple-50/40 border-purple-200 shadow-md'
-                                                    : 'bg-white border-gray-100 hover:border-gray-200 hover:shadow-sm'
+                                            onClick={() => setExpandedRecargoEmpId(isExpanded ? null : emp.id)}
+                                            className={`relative p-3 rounded-2xl border transition-all duration-200 cursor-pointer ${
+                                                isExpanded
+                                                    ? 'bg-purple-50/50 border-purple-300 shadow-md ring-1 ring-purple-200'
+                                                    : isHovered
+                                                        ? 'bg-purple-50/30 border-purple-200 shadow-sm z-20'
+                                                        : 'bg-white border-gray-100 hover:border-gray-200 hover:shadow-xs'
                                             }`}
                                         >
+                                            {/* Tooltip Flotante en Hover (Similar a la primera gráfica, sin alterar altura ni layout) */}
+                                            {isHovered && !isExpanded && (
+                                                <div className="absolute left-1/2 -translate-x-1/2 -top-11 z-30 bg-gray-900/95 backdrop-blur-md text-white text-xs rounded-xl py-2 px-3.5 shadow-2xl pointer-events-none flex items-center gap-3 border border-gray-700/80 animate-in fade-in duration-150 whitespace-nowrap">
+                                                    <div className="flex items-center gap-1.5">
+                                                        <span className="w-2.5 h-2.5 rounded-full bg-blue-500 shrink-0" />
+                                                        <span className="text-[11px] text-gray-300">Diurna:</span>
+                                                        <b className="text-white text-xs">{emp.diurnas}h</b>
+                                                        <span className="text-[10px] text-blue-400 font-bold">({total > 0 ? Math.round(pctD) : 0}%)</span>
+                                                    </div>
+                                                    <div className="border-l border-gray-700 pl-3 flex items-center gap-1.5">
+                                                        <span className="w-2.5 h-2.5 rounded-full bg-fuchsia-500 shrink-0" />
+                                                        <span className="text-[11px] text-gray-300">Noc (35%):</span>
+                                                        <b className="text-white text-xs">{emp.nocturnas}h</b>
+                                                        <span className="text-[10px] text-fuchsia-400 font-bold">({total > 0 ? Math.round(pctN) : 0}%)</span>
+                                                    </div>
+                                                    <div className="border-l border-gray-700 pl-3 flex items-center gap-1.5">
+                                                        <span className="w-2.5 h-2.5 rounded-full bg-orange-500 shrink-0" />
+                                                        <span className="text-[11px] text-gray-300">Fest. Diu (75%):</span>
+                                                        <b className="text-white text-xs">{emp.domDiurnas}h</b>
+                                                        <span className="text-[10px] text-orange-400 font-bold">({total > 0 ? Math.round(pctDD) : 0}%)</span>
+                                                    </div>
+                                                    <div className="border-l border-gray-700 pl-3 flex items-center gap-1.5">
+                                                        <span className="w-2.5 h-2.5 rounded-full bg-red-500 shrink-0" />
+                                                        <span className="text-[11px] text-gray-300">Fest. Noc (110%):</span>
+                                                        <b className="text-white text-xs">{emp.domNocturnas}h</b>
+                                                        <span className="text-[10px] text-red-400 font-bold">({total > 0 ? Math.round(pctDN) : 0}%)</span>
+                                                    </div>
+                                                    {/* Flechita orientadora hacia la barra */}
+                                                    <div className="absolute left-1/2 -translate-x-1/2 -bottom-1 w-2 h-2 bg-gray-900 border-r border-b border-gray-700 rotate-45" />
+                                                </div>
+                                            )}
+
                                             <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-center">
                                                 {/* Columna Colaborador */}
                                                 <div className="sm:col-span-3 flex items-center gap-2.5 min-w-0">
@@ -1128,9 +1172,17 @@ export default function GraficasGerenciales({
 
                                                 {/* Columna Total y Chips de Recargos */}
                                                 <div className="sm:col-span-2 flex sm:flex-col items-center sm:items-end justify-between sm:justify-center gap-1">
-                                                    <span className="text-xs font-black text-gray-800 bg-gray-100 px-2 py-0.5 rounded-lg">
-                                                        {total} h
-                                                    </span>
+                                                    <div className="flex items-center gap-1.5">
+                                                        <span className="text-xs font-black text-gray-800 bg-gray-100 px-2 py-0.5 rounded-lg">
+                                                            {total} h
+                                                        </span>
+                                                        <ChevronDown
+                                                            size={14}
+                                                            className={`text-gray-400 transition-transform duration-200 shrink-0 ${
+                                                                isExpanded ? 'rotate-180 text-purple-600' : ''
+                                                            }`}
+                                                        />
+                                                    </div>
                                                     <div className="flex items-center gap-1 flex-wrap justify-end">
                                                         {emp.nocturnas > 0 && (
                                                             <span className="text-[10px] font-black px-1.5 py-0.2 rounded bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200">
@@ -1146,10 +1198,10 @@ export default function GraficasGerenciales({
                                                 </div>
                                             </div>
 
-                                            {/* Panel desplegable en Hover con el desglose exacto */}
-                                            {isHovered && (
+                                            {/* Panel desplegado solo cuando el usuario toca / hace click en la barra */}
+                                            {isExpanded && (
                                                 <div className="mt-3 pt-3 border-t border-purple-100 grid grid-cols-2 sm:grid-cols-4 gap-2 animate-in fade-in duration-150">
-                                                    <div className="bg-white/80 p-2 rounded-xl border border-blue-100 flex items-center justify-between">
+                                                    <div className="bg-white/90 p-2.5 rounded-xl border border-blue-100 flex items-center justify-between shadow-xs">
                                                         <span className="text-[11px] text-blue-700 font-bold flex items-center gap-1">
                                                             <Sun size={12} /> Diurna (100%):
                                                         </span>
@@ -1157,7 +1209,7 @@ export default function GraficasGerenciales({
                                                             {emp.diurnas} h <span className="text-[10px] text-gray-400 font-normal">({total > 0 ? Math.round(pctD) : 0}%)</span>
                                                         </span>
                                                     </div>
-                                                    <div className="bg-white/80 p-2 rounded-xl border border-fuchsia-100 flex items-center justify-between">
+                                                    <div className="bg-white/90 p-2.5 rounded-xl border border-fuchsia-100 flex items-center justify-between shadow-xs">
                                                         <span className="text-[11px] text-fuchsia-700 font-bold flex items-center gap-1">
                                                             <Moon size={12} /> Noc. (+35%):
                                                         </span>
@@ -1165,7 +1217,7 @@ export default function GraficasGerenciales({
                                                             {emp.nocturnas} h <span className="text-[10px] text-gray-400 font-normal">({total > 0 ? Math.round(pctN) : 0}%)</span>
                                                         </span>
                                                     </div>
-                                                    <div className="bg-white/80 p-2 rounded-xl border border-orange-100 flex items-center justify-between">
+                                                    <div className="bg-white/90 p-2.5 rounded-xl border border-orange-100 flex items-center justify-between shadow-xs">
                                                         <span className="text-[11px] text-orange-700 font-bold flex items-center gap-1">
                                                             <Calendar size={12} /> Fest. Diu (+75%):
                                                         </span>
@@ -1173,7 +1225,7 @@ export default function GraficasGerenciales({
                                                             {emp.domDiurnas} h <span className="text-[10px] text-gray-400 font-normal">({total > 0 ? Math.round(pctDD) : 0}%)</span>
                                                         </span>
                                                     </div>
-                                                    <div className="bg-white/80 p-2 rounded-xl border border-red-100 flex items-center justify-between">
+                                                    <div className="bg-white/90 p-2.5 rounded-xl border border-red-100 flex items-center justify-between shadow-xs">
                                                         <span className="text-[11px] text-red-700 font-bold flex items-center gap-1">
                                                             <Zap size={12} /> Fest. Noc (+110%):
                                                         </span>
