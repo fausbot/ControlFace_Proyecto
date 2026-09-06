@@ -4,7 +4,7 @@ import {
     BarChart3, PieChart, TrendingUp, TrendingDown, Clock,
     Truck, Award, Users, Info, ChevronDown, ChevronUp,
     Compass, CheckCircle2, AlertCircle, Sparkles, Filter,
-    Sun, Moon, Calendar, Zap
+    Sun, Moon, Calendar, Zap, MapPin
 } from 'lucide-react';
 
 /**
@@ -30,6 +30,9 @@ export default function GraficasGerenciales({
 
     // ── Controles para la Dona de Recargos ──────────────────────────────────────
     const [hoveredSlice, setHoveredSlice] = useState(null);
+
+    // ── Controles para el Gráfico de Rutas (Barras Dobles) ──────────────────────
+    const [ordenRutas, setOrdenRutas] = useState('visitas'); // 'visitas' | 'traslados' | 'eficiencia'
 
     // ── 1. Procesar Lista para el Ranking ───────────────────────────────────────
     const rankingData = useMemo(() => {
@@ -111,8 +114,8 @@ export default function GraficasGerenciales({
         return { items, total: parseFloat(total.toFixed(2)), activeCount };
     }, [kpis]);
 
-    // ── 3. Procesar Datos para Eficiencia de Rutas ─────────────────────────────
-    const rutasEficienciaData = useMemo(() => {
+    // ── 3. Procesar Datos para Gráfica de Rutas (Barras Dobles) ───────────────
+    const rutasData = useMemo(() => {
         // Filtrar colaboradores con actividad en campo
         const enRuta = employeesList.filter(e => (e.horasTraslado > 0 || e.totalVisitas > 0));
 
@@ -131,16 +134,69 @@ export default function GraficasGerenciales({
                 ? Math.round((servicio * 60) / visitas)
                 : 0;
 
+            // Diagnóstico visual de la ruta
+            let diagnostico = {
+                tipo: 'balanceada',
+                label: 'Ruta Balanceada',
+                badgeClass: 'bg-blue-50 text-blue-700 border-blue-200',
+                dotClass: 'bg-blue-500'
+            };
+
+            if (visitasPorHoraViaje >= 1.5) {
+                diagnostico = {
+                    tipo: 'agil',
+                    label: 'Ruta Ágil / Alta Densidad',
+                    badgeClass: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+                    dotClass: 'bg-emerald-500'
+                };
+            } else if (visitasPorHoraViaje < 0.8 && traslados >= 5) {
+                diagnostico = {
+                    tipo: 'traslado_alto',
+                    label: 'Alto Desplazamiento',
+                    badgeClass: 'bg-amber-50 text-amber-700 border-amber-200',
+                    dotClass: 'bg-amber-500'
+                };
+            }
+
             return {
                 ...e,
+                visitas,
+                traslados,
+                servicio,
                 visitasPorHoraViaje,
-                minsPromedioVisita
+                minsPromedioVisita,
+                diagnostico
             };
         });
 
-        // Ordenar por mayor eficiencia (visitas por hora de viaje)
-        return mapped.sort((a, b) => b.visitasPorHoraViaje - a.visitasPorHoraViaje);
-    }, [employeesList]);
+        // Ordenamiento dinámico según pestaña/control activo
+        const sorted = [...mapped].sort((a, b) => {
+            if (ordenRutas === 'visitas') return b.visitas - a.visitas;
+            if (ordenRutas === 'traslados') return b.traslados - a.traslados;
+            return b.visitasPorHoraViaje - a.visitasPorHoraViaje;
+        });
+
+        // Escalas máximas relativas para que las barras aprovechen todo el ancho
+        const maxVisitas = Math.max(...mapped.map(e => e.visitas), 10);
+        const maxTraslados = Math.max(...mapped.map(e => e.traslados), 5);
+
+        // Identificar líderes para las tarjetas resumen inferiores
+        const liderVisitas = [...mapped].sort((a, b) => b.visitas - a.visitas)[0] || null;
+        const liderTraslados = [...mapped].sort((a, b) => b.traslados - a.traslados)[0] || null;
+        const liderEficiencia = [...mapped].sort((a, b) => b.visitasPorHoraViaje - a.visitasPorHoraViaje)[0] || null;
+
+        return {
+            list: sorted,
+            totalEnRuta: mapped.length,
+            maxVisitas,
+            maxTraslados,
+            liderVisitas,
+            liderTraslados,
+            liderEficiencia
+        };
+    }, [employeesList, ordenRutas]);
+
+    const rutasEficienciaData = rutasData.list;
 
     // Si no hay colaboradores cargados
     if (!employeesList.length) {
@@ -768,87 +824,253 @@ export default function GraficasGerenciales({
             )}
 
             {/* ══════════════════════════════════════════════════════════════════════ */}
-            {/* 4. GRÁFICA: EFICIENCIA DE RUTAS (VISITAS POR HORA DE TRASLADO)         */}
+            {/* 4. GRÁFICA: RENDIMIENTO EN RUTA (BARRAS DOBLES: VISITAS VS VIAJE)       */}
             {/* ══════════════════════════════════════════════════════════════════════ */}
             {tabGrafica === 'rutas' && (
                 <div className="bg-white rounded-2xl p-5 shadow-lg border border-gray-100 space-y-5 animate-in fade-in duration-200">
+                    {/* Encabezado y Controles de Ordenamiento */}
                     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 pb-4">
                         <div>
                             <div className="flex items-center gap-2">
                                 <h3 className="text-lg font-black text-gray-800">
-                                    Eficiencia y Rendimiento en Ruta
+                                    Rendimiento en Ruta: Visitas vs. Horas de Viaje
                                 </h3>
                                 <span className="bg-emerald-100 text-emerald-800 text-[11px] font-extrabold px-2.5 py-0.5 rounded-full">
-                                    {rutasEficienciaData.length} en campo
+                                    {rutasData.totalEnRuta} en campo
                                 </span>
                             </div>
                             <p className="text-xs text-gray-500 mt-0.5">
-                                Mide la productividad comparando cuántas <b>visitas efectivas</b> completa cada colaborador por cada <b>hora de desplazamiento</b>.
+                                Compara el volumen de <b>visitas atendidas</b> frente a las <b>horas en carretera</b> para identificar rutas ágiles o con exceso de desplazamiento.
                             </p>
+                        </div>
+
+                        {/* Botones de Ordenamiento */}
+                        <div className="flex items-center bg-gray-100 p-1 rounded-xl text-xs font-bold gap-1 flex-wrap">
+                            <button
+                                type="button"
+                                onClick={() => setOrdenRutas('visitas')}
+                                className={`px-3 py-1.5 rounded-lg transition flex items-center gap-1.5 ${
+                                    ordenRutas === 'visitas'
+                                        ? 'bg-emerald-600 text-white shadow-sm'
+                                        : 'text-gray-600 hover:text-gray-900'
+                                }`}
+                            >
+                                <Award size={13} />
+                                Más Visitas
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setOrdenRutas('traslados')}
+                                className={`px-3 py-1.5 rounded-lg transition flex items-center gap-1.5 ${
+                                    ordenRutas === 'traslados'
+                                        ? 'bg-amber-600 text-white shadow-sm'
+                                        : 'text-gray-600 hover:text-gray-900'
+                                }`}
+                            >
+                                <Truck size={13} />
+                                Más Horas de Viaje
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setOrdenRutas('eficiencia')}
+                                className={`px-3 py-1.5 rounded-lg transition flex items-center gap-1.5 ${
+                                    ordenRutas === 'eficiencia'
+                                        ? 'bg-indigo-600 text-white shadow-sm'
+                                        : 'text-gray-600 hover:text-gray-900'
+                                }`}
+                            >
+                                <Zap size={13} />
+                                Mayor Rendimiento (vis/h)
+                            </button>
                         </div>
                     </div>
 
-                    {/* Explicación didáctica rápida */}
-                    <div className="bg-emerald-50/60 border border-emerald-200 p-3.5 rounded-xl flex items-start gap-3 text-xs text-emerald-900">
-                        <Info size={18} className="text-emerald-600 shrink-0 mt-0.5" />
-                        <div>
-                            <p className="font-bold">¿Cómo interpretar esta métrica?</p>
-                            <p className="text-[11px] text-emerald-700 mt-0.5">
-                                Un ratio más alto (ej. <b>3.5 visitas/hora</b>) indica alta densidad de visitas o rutas optimizadas. Un ratio muy bajo (ej. <b>0.4 visitas/hora</b>) indica que el colaborador pasa demasiado tiempo manejando en relación a las visitas atendidas.
-                            </p>
+                    {/* Leyenda Visual de Barras Dobles y Explicación Didáctica */}
+                    <div className="bg-gray-50 border border-gray-200/80 p-3.5 rounded-xl space-y-2 text-xs">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div className="flex items-center gap-5 flex-wrap">
+                                <span className="flex items-center gap-2 font-bold text-gray-800">
+                                    <span className="w-3.5 h-3.5 rounded-md bg-gradient-to-r from-emerald-500 to-teal-500 shadow-xs"></span>
+                                    Barra Verde: Visitas Realizadas (Clientes Atendidos)
+                                </span>
+                                <span className="flex items-center gap-2 font-bold text-gray-800">
+                                    <span className="w-3.5 h-3.5 rounded-md bg-gradient-to-r from-amber-500 to-orange-500 shadow-xs"></span>
+                                    Barra Naranja: Horas de Viaje (Desplazamientos)
+                                </span>
+                            </div>
+                            <span className="text-gray-400 italic text-[11px]">
+                                Escala proporcional al líder del periodo
+                            </span>
                         </div>
+                        <p className="text-[11px] text-gray-500 border-t border-gray-200/60 pt-2 leading-relaxed">
+                            💡 <b>Regla de oro de logística:</b> Una barra verde extensa con una naranja corta refleja una ruta de alta densidad. Si la barra naranja supera proporcionalmente a la verde, el colaborador pasa más tiempo en el tráfico que atendiendo clientes.
+                        </p>
                     </div>
 
-                    {/* Listado de Eficiencia */}
-                    {rutasEficienciaData.length === 0 ? (
-                        <p className="text-gray-400 text-xs text-center py-6">
+                    {/* Contenedor de Barras Dobles por Colaborador */}
+                    {rutasData.list.length === 0 ? (
+                        <p className="text-gray-400 text-xs text-center py-8">
                             No hay colaboradores con registros de visitas o traslados en este periodo.
                         </p>
                     ) : (
                         <div className="space-y-3">
-                            {rutasEficienciaData.map((emp, idx) => (
-                                <div
-                                    key={emp.email}
-                                    className="p-3.5 bg-gray-50/80 hover:bg-white border border-gray-200/80 rounded-xl transition duration-150 flex flex-wrap items-center justify-between gap-4 shadow-sm"
-                                >
-                                    <div className="flex items-center gap-3">
-                                        <div className={`w-8 h-8 rounded-xl font-black text-xs flex items-center justify-center shadow-sm ${
-                                            idx === 0
-                                                ? 'bg-amber-400 text-amber-950'
-                                                : idx === 1
-                                                ? 'bg-gray-300 text-gray-800'
-                                                : idx === 2
-                                                ? 'bg-amber-700 text-white'
-                                                : 'bg-white border text-gray-500'
-                                        }`}>
-                                            #{idx + 1}
-                                        </div>
-                                        <div>
-                                            <p className="text-xs font-black text-gray-800">{emp.nombre}</p>
-                                            <p className="text-[10px] text-gray-400">
-                                                {emp.totalVisitas} visitas realizadas en {emp.horasTraslado} h de ruta
-                                            </p>
-                                        </div>
-                                    </div>
+                            {rutasData.list.map((emp, idx) => {
+                                const pVisitas = Math.min(100, Math.max(6, (emp.visitas / rutasData.maxVisitas) * 100));
+                                const pTraslados = Math.min(100, Math.max(6, (emp.traslados / rutasData.maxTraslados) * 100));
 
-                                    <div className="flex items-center gap-6 text-xs">
-                                        <div>
-                                            <span className="text-gray-400 text-[10px] block">Tiempo Prom./Visita:</span>
-                                            <b className="text-gray-700">{emp.minsPromedioVisita} min</b>
+                                return (
+                                    <div
+                                        key={emp.email}
+                                        className="p-3.5 bg-white hover:bg-gray-50/70 border border-gray-200/80 rounded-2xl transition duration-150 shadow-sm flex flex-col md:flex-row md:items-center gap-4"
+                                    >
+                                        {/* Columna 1: Información y Diagnóstico del Colaborador */}
+                                        <div className="w-full md:w-56 shrink-0 space-y-1">
+                                            <div className="flex items-center gap-2">
+                                                <span className="w-6 h-6 rounded-lg bg-gray-100 text-gray-700 text-xs font-black flex items-center justify-center shrink-0">
+                                                    #{idx + 1}
+                                                </span>
+                                                <p className="text-xs font-bold text-gray-800 truncate" title={emp.nombre}>
+                                                    {emp.nombre}
+                                                </p>
+                                            </div>
+                                            <p className="text-[10px] text-gray-400 pl-8 truncate">
+                                                {emp.cargo || emp.departamento || 'Operativo de Campo'}
+                                            </p>
+                                            <div className="pl-8 pt-0.5">
+                                                <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold border ${emp.diagnostico.badgeClass}`}>
+                                                    <span className={`w-1.5 h-1.5 rounded-full ${emp.diagnostico.dotClass}`}></span>
+                                                    {emp.diagnostico.label}
+                                                </span>
+                                            </div>
                                         </div>
-                                        <div>
-                                            <span className="text-gray-400 text-[10px] block">Tiempo en Clientes:</span>
-                                            <b className="text-emerald-600">{emp.horasServicio} h</b>
+
+                                        {/* Columna 2: Las Dos Barras Paralelas (Visitas vs Viaje) */}
+                                        <div className="flex-1 space-y-2">
+                                            {/* Barra 1: Visitas Realizadas */}
+                                            <div className="flex items-center gap-2">
+                                                <div className="w-16 shrink-0 flex items-center gap-1 text-[11px] font-bold text-emerald-700">
+                                                    <MapPin size={12} className="shrink-0" />
+                                                    <span>Visitas:</span>
+                                                </div>
+                                                <div className="flex-1 h-6 bg-emerald-50/70 border border-emerald-100 rounded-lg overflow-hidden flex items-center px-1">
+                                                    <div
+                                                        className="h-4 rounded-md bg-gradient-to-r from-emerald-500 to-teal-500 transition-all duration-500 flex items-center justify-end pr-2 text-[10px] font-black text-white shadow-xs"
+                                                        style={{ width: `${pVisitas}%` }}
+                                                    >
+                                                        {pVisitas > 22 && `${emp.visitas} vis`}
+                                                    </div>
+                                                    {pVisitas <= 22 && (
+                                                        <span className="ml-2 text-[10px] font-black text-emerald-800">
+                                                            {emp.visitas} vis
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </div>
+
+                                            {/* Barra 2: Horas en Carretera (Traslados) */}
+                                            <div className="flex items-center gap-2">
+                                                <div className="w-16 shrink-0 flex items-center gap-1 text-[11px] font-bold text-amber-700">
+                                                    <Truck size={12} className="shrink-0" />
+                                                    <span>Viaje:</span>
+                                                </div>
+                                                <div className="flex-1 h-6 bg-amber-50/70 border border-amber-100 rounded-lg overflow-hidden flex items-center px-1">
+                                                    <div
+                                                        className="h-4 rounded-md bg-gradient-to-r from-amber-500 to-orange-500 transition-all duration-500 flex items-center justify-end pr-2 text-[10px] font-black text-white shadow-xs"
+                                                        style={{ width: `${pTraslados}%` }}
+                                                    >
+                                                        {pTraslados > 22 && `${emp.traslados} h`}
+                                                    </div>
+                                                    {pTraslados <= 22 && (
+                                                        <span className="ml-2 text-[10px] font-black text-amber-800">
+                                                            {emp.traslados} h
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </div>
                                         </div>
-                                        <div className="text-right">
-                                            <span className="text-gray-400 text-[10px] block">Ratio de Rendimiento:</span>
-                                            <span className="text-sm font-black text-indigo-700 bg-indigo-50 border border-indigo-200 px-2.5 py-1 rounded-lg">
-                                                {emp.visitasPorHoraViaje} vis/hora
-                                            </span>
+
+                                        {/* Columna 3: Indicadores de Rendimiento y Ratio */}
+                                        <div className="w-full md:w-44 shrink-0 flex md:flex-col items-center md:items-end justify-between md:justify-center gap-1 border-t md:border-t-0 md:border-l border-gray-100 pt-2 md:pt-0 md:pl-4">
+                                            <div className="text-left md:text-right">
+                                                <span className="text-[10px] text-gray-400 block font-medium">Rendimiento:</span>
+                                                <span className="inline-block text-xs font-black text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-lg shadow-xs">
+                                                    {emp.visitasPorHoraViaje} vis/hora
+                                                </span>
+                                            </div>
+                                            <div className="text-right text-[10px] text-gray-500 space-y-0.5">
+                                                <p title="Tiempo promedio que dedica en cada cliente">
+                                                    ⏱️ <b className="text-gray-700">{emp.minsPromedioVisita} min</b> /visita
+                                                </p>
+                                                <p title="Total de horas en atención a clientes">
+                                                    💼 <b className="text-emerald-700">{emp.servicio} h</b> servicio
+                                                </p>
+                                            </div>
                                         </div>
                                     </div>
+                                );
+                            })}
+                        </div>
+                    )}
+
+                    {/* Resumen Inferior: 3 Tarjetas KPI de Líderes de Ruta */}
+                    {rutasData.list.length > 0 && (
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-4 border-t border-gray-100 text-xs">
+                            {/* 1. Líder en Visitas */}
+                            <div className="p-3.5 bg-emerald-50/80 border border-emerald-200 rounded-xl space-y-1">
+                                <div className="flex items-center justify-between">
+                                    <span className="font-bold text-emerald-800 flex items-center gap-1">
+                                        <Award size={14} className="text-emerald-600" />
+                                        Mayor Cobertura
+                                    </span>
+                                    <span className="text-base font-black text-emerald-700">
+                                        {rutasData.liderVisitas?.visitas || 0} visitas
+                                    </span>
                                 </div>
-                            ))}
+                                <p className="text-xs font-bold text-gray-800 truncate">
+                                    {rutasData.liderVisitas?.nombre || 'N/A'}
+                                </p>
+                                <p className="text-[11px] text-emerald-700">
+                                    {rutasData.liderVisitas?.servicio || 0} h de atención directa en clientes.
+                                </p>
+                            </div>
+
+                            {/* 2. Mayor Recorrido / Desplazamiento */}
+                            <div className="p-3.5 bg-amber-50/80 border border-amber-200 rounded-xl space-y-1">
+                                <div className="flex items-center justify-between">
+                                    <span className="font-bold text-amber-800 flex items-center gap-1">
+                                        <Truck size={14} className="text-amber-600" />
+                                        Mayor Desplazamiento
+                                    </span>
+                                    <span className="text-base font-black text-amber-700">
+                                        {rutasData.liderTraslados?.traslados || 0} h
+                                    </span>
+                                </div>
+                                <p className="text-xs font-bold text-gray-800 truncate">
+                                    {rutasData.liderTraslados?.nombre || 'N/A'}
+                                </p>
+                                <p className="text-[11px] text-amber-700">
+                                    Completó {rutasData.liderTraslados?.visitas || 0} visitas en sus trayectos.
+                                </p>
+                            </div>
+
+                            {/* 3. Ruta Más Ágil */}
+                            <div className="p-3.5 bg-indigo-50/80 border border-indigo-200 rounded-xl space-y-1">
+                                <div className="flex items-center justify-between">
+                                    <span className="font-bold text-indigo-800 flex items-center gap-1">
+                                        <Zap size={14} className="text-indigo-600" />
+                                        Ruta Más Ágil
+                                    </span>
+                                    <span className="text-base font-black text-indigo-700">
+                                        {rutasData.liderEficiencia?.visitasPorHoraViaje || 0} vis/h
+                                    </span>
+                                </div>
+                                <p className="text-xs font-bold text-gray-800 truncate">
+                                    {rutasData.liderEficiencia?.nombre || 'N/A'}
+                                </p>
+                                <p className="text-[11px] text-indigo-700">
+                                    {rutasData.liderEficiencia?.minsPromedioVisita || 0} min prom. por atención.
+                                </p>
+                            </div>
                         </div>
                     )}
                 </div>
