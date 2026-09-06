@@ -3,7 +3,8 @@ import React, { useState, useMemo } from 'react';
 import {
     BarChart3, PieChart, TrendingUp, TrendingDown, Clock,
     Truck, Award, Users, Info, ChevronDown, ChevronUp,
-    Compass, CheckCircle2, AlertCircle, Sparkles, Filter
+    Compass, CheckCircle2, AlertCircle, Sparkles, Filter,
+    Sun, Moon, Calendar, Zap
 } from 'lucide-react';
 
 /**
@@ -60,7 +61,7 @@ export default function GraficasGerenciales({
         const domNocturnas = kpis?.totalDomNocturnas || 0;
         const total = diurnas + nocturnas + domDiurnas + domNocturnas;
 
-        if (total === 0) return { items: [], total: 0 };
+        if (total === 0) return { items: [], total: 0, activeCount: 0 };
 
         const items = [
             {
@@ -69,9 +70,8 @@ export default function GraficasGerenciales({
                 sublabel: 'Jornada diurna legal',
                 recargoText: 'Tarifa base (100%)',
                 horas: diurnas,
-                color: '#3B82F6', // blue-500
-                bgClass: 'bg-blue-500',
-                textClass: 'text-blue-600',
+                color: '#2563EB', // Azul Rey Vibrante (blue-600)
+                icon: Sun,
                 porcentaje: parseFloat(((diurnas / total) * 100).toFixed(1))
             },
             {
@@ -80,9 +80,8 @@ export default function GraficasGerenciales({
                 sublabel: 'Recargo noche ordinario',
                 recargoText: '+35% sobre hora ordinaria',
                 horas: nocturnas,
-                color: '#6366F1', // indigo-500
-                bgClass: 'bg-indigo-500',
-                textClass: 'text-indigo-600',
+                color: '#C026D3', // Fucsia / Magenta Neón Eléctrico (fuchsia-600)
+                icon: Moon,
                 porcentaje: parseFloat(((nocturnas / total) * 100).toFixed(1))
             },
             {
@@ -91,9 +90,8 @@ export default function GraficasGerenciales({
                 sublabel: 'Domingo o festivo diurno',
                 recargoText: '+75% recargo legal',
                 horas: domDiurnas,
-                color: '#F59E0B', // amber-500
-                bgClass: 'bg-amber-500',
-                textClass: 'text-amber-600',
+                color: '#EA580C', // Naranja Fuego Solar (orange-600)
+                icon: Calendar,
                 porcentaje: parseFloat(((domDiurnas / total) * 100).toFixed(1))
             },
             {
@@ -102,14 +100,15 @@ export default function GraficasGerenciales({
                 sublabel: 'Domingo o festivo nocturno',
                 recargoText: '+110% recargo nocturno festivo',
                 horas: domNocturnas,
-                color: '#8B5CF6', // purple-500
-                bgClass: 'bg-purple-500',
-                textClass: 'text-purple-600',
+                color: '#DC2626', // Rojo Carmesí Intenso (red-600)
+                icon: Zap,
                 porcentaje: parseFloat(((domNocturnas / total) * 100).toFixed(1))
             }
         ];
 
-        return { items, total: parseFloat(total.toFixed(2)) };
+        const activeCount = items.filter(i => i.horas > 0).length;
+
+        return { items, total: parseFloat(total.toFixed(2)), activeCount };
     }, [kpis]);
 
     // ── 3. Procesar Datos para Eficiencia de Rutas ─────────────────────────────
@@ -641,11 +640,13 @@ export default function GraficasGerenciales({
                                                 strokeWidth={strokeWidth}
                                                 fill="transparent"
                                             />
-                                            {/* Segmentos de recargos */}
+                                            {/* Segmentos de recargos con separación nítida */}
                                             {recargosData.items.map(item => {
                                                 if (item.horas === 0) return null;
-                                                const strokeDasharray = `${(item.porcentaje / 100) * circumference} ${circumference}`;
-                                                const strokeDashoffset = -((accumulatedPercent / 100) * circumference);
+                                                const gap = recargosData.activeCount > 1 ? 3.5 : 0;
+                                                const arcLength = Math.max(2, ((item.porcentaje / 100) * circumference) - gap);
+                                                const strokeDasharray = `${arcLength} ${circumference}`;
+                                                const strokeDashoffset = -((accumulatedPercent / 100) * circumference + (gap / 2));
                                                 accumulatedPercent += item.porcentaje;
 
                                                 const isHovered = hoveredSlice?.id === item.id;
@@ -657,7 +658,7 @@ export default function GraficasGerenciales({
                                                         cy={size / 2}
                                                         r={radius}
                                                         stroke={item.color}
-                                                        strokeWidth={isHovered ? strokeWidth + 4 : strokeWidth}
+                                                        strokeWidth={isHovered ? strokeWidth + 6 : strokeWidth}
                                                         strokeDasharray={strokeDasharray}
                                                         strokeDashoffset={strokeDashoffset}
                                                         fill="transparent"
@@ -673,14 +674,24 @@ export default function GraficasGerenciales({
                                         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center p-2">
                                             {hoveredSlice ? (
                                                 <>
-                                                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                                                    <span
+                                                        className="text-[10px] font-black uppercase tracking-wider"
+                                                        style={{ color: hoveredSlice.color }}
+                                                    >
                                                         {hoveredSlice.label}
                                                     </span>
-                                                    <span className="text-xl font-black text-gray-800">
+                                                    <span className="text-2xl font-black text-gray-800">
                                                         {hoveredSlice.horas} h
                                                     </span>
-                                                    <span className="text-xs font-black text-blue-600">
-                                                        {hoveredSlice.porcentaje}%
+                                                    <span
+                                                        className="text-xs font-black px-2 py-0.5 rounded-full border mt-0.5"
+                                                        style={{
+                                                            color: hoveredSlice.color,
+                                                            borderColor: `${hoveredSlice.color}40`,
+                                                            backgroundColor: `${hoveredSlice.color}15`
+                                                        }}
+                                                    >
+                                                        {hoveredSlice.porcentaje}% del total
                                                     </span>
                                                 </>
                                             ) : (
@@ -691,7 +702,7 @@ export default function GraficasGerenciales({
                                                     <span className="text-2xl font-black text-gray-800">
                                                         {recargosData.total} h
                                                     </span>
-                                                    <span className="text-[10px] text-gray-400">
+                                                    <span className="text-[10px] text-gray-400 font-medium">
                                                         100% horas
                                                     </span>
                                                 </>
@@ -702,32 +713,55 @@ export default function GraficasGerenciales({
                             })()}
                         </div>
 
-                        {/* Tarjetas de Detalle de Recargos */}
-                        <div className="space-y-2.5">
-                            {recargosData.items.map(item => (
-                                <div
-                                    key={item.id}
-                                    onMouseEnter={() => setHoveredSlice(item)}
-                                    onMouseLeave={() => setHoveredSlice(null)}
-                                    className={`p-3 rounded-xl border transition duration-150 cursor-pointer flex items-center justify-between ${
-                                        hoveredSlice?.id === item.id
-                                            ? 'bg-gray-50 border-blue-300 shadow-sm scale-[1.01]'
-                                            : 'bg-white border-gray-100 hover:bg-gray-50/50'
-                                    }`}
-                                >
-                                    <div className="flex items-center gap-3">
-                                        <div className={`w-3.5 h-3.5 rounded-md ${item.bgClass}`}></div>
-                                        <div>
-                                            <p className="text-xs font-bold text-gray-800">{item.label}</p>
-                                            <p className="text-[10px] text-gray-400">{item.recargoText}</p>
+                        {/* Tarjetas de Detalle de Recargos con Alto Contraste */}
+                        <div className="space-y-3">
+                            {recargosData.items.map(item => {
+                                const isHovered = hoveredSlice?.id === item.id;
+                                const IconComponent = item.icon;
+
+                                return (
+                                    <div
+                                        key={item.id}
+                                        onMouseEnter={() => setHoveredSlice(item)}
+                                        onMouseLeave={() => setHoveredSlice(null)}
+                                        className={`p-3.5 rounded-2xl border transition duration-200 cursor-pointer flex items-center justify-between border-l-[6px] shadow-sm ${
+                                            isHovered
+                                                ? 'bg-gray-50/90 shadow-md scale-[1.01]'
+                                                : 'bg-white border-gray-100 hover:bg-gray-50/50'
+                                        }`}
+                                        style={{ borderLeftColor: item.color }}
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <div
+                                                className="w-9 h-9 rounded-xl flex items-center justify-center shadow-sm text-white shrink-0"
+                                                style={{ backgroundColor: item.color }}
+                                            >
+                                                <IconComponent size={18} />
+                                            </div>
+                                            <div>
+                                                <div className="flex items-center gap-2">
+                                                    <p className="text-xs font-black text-gray-800">{item.label}</p>
+                                                    <span
+                                                        className="text-[10px] font-black px-2 py-0.5 rounded-full border"
+                                                        style={{
+                                                            color: item.color,
+                                                            borderColor: `${item.color}40`,
+                                                            backgroundColor: `${item.color}15`
+                                                        }}
+                                                    >
+                                                        {item.porcentaje}%
+                                                    </span>
+                                                </div>
+                                                <p className="text-[11px] text-gray-400 mt-0.5">{item.recargoText}</p>
+                                            </div>
+                                        </div>
+                                        <div className="text-right">
+                                            <span className="text-sm font-black text-gray-800 block">{item.horas} h</span>
+                                            <span className="text-[10px] text-gray-400 font-medium">acumuladas</span>
                                         </div>
                                     </div>
-                                    <div className="text-right">
-                                        <span className="text-xs font-black text-gray-800 block">{item.horas} h</span>
-                                        <span className={`text-[11px] font-black ${item.textClass}`}>{item.porcentaje}%</span>
-                                    </div>
-                                </div>
-                            ))}
+                                );
+                            })}
                         </div>
                     </div>
                 </div>
