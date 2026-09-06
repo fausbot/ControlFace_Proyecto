@@ -135,6 +135,7 @@ export default function GraficasGerenciales({
 
             return {
                 ...e,
+                id: e.id || e.email || e.documento || e.nombre,
                 diurnas: d,
                 nocturnas: n,
                 domDiurnas: dd,
@@ -1045,15 +1046,16 @@ export default function GraficasGerenciales({
                                     const pctDD = total > 0 ? (emp.domDiurnas / total) * 100 : 0;
                                     const pctDN = total > 0 ? (emp.domNocturnas / total) * 100 : 0;
 
-                                    const isHovered = hoveredRecargoEmp === emp.id;
-                                    const isExpanded = expandedRecargoEmpId === emp.id;
+                                    const empKey = String(emp.id || emp.email || emp.documento || emp.nombre || idx);
+                                    const isHovered = Boolean(hoveredRecargoEmp && hoveredRecargoEmp === empKey);
+                                    const isExpanded = Boolean(expandedRecargoEmpId && expandedRecargoEmpId === empKey);
 
                                     return (
                                         <div
-                                            key={emp.id}
-                                            onMouseEnter={() => setHoveredRecargoEmp(emp.id)}
+                                            key={empKey}
+                                            onMouseEnter={() => setHoveredRecargoEmp(empKey)}
                                             onMouseLeave={() => setHoveredRecargoEmp(null)}
-                                            onClick={() => setExpandedRecargoEmpId(isExpanded ? null : emp.id)}
+                                            onClick={() => setExpandedRecargoEmpId(isExpanded ? null : empKey)}
                                             className={`relative p-3 rounded-2xl border transition-all duration-200 cursor-pointer ${
                                                 isExpanded
                                                     ? 'bg-purple-50/50 border-purple-300 shadow-md ring-1 ring-purple-200'
