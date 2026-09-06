@@ -124,48 +124,37 @@ export default function GraficasGerenciales({
             const traslados = e.horasTraslado || 0;
             const servicio = e.horasServicio || 0;
 
-            // Ratio: Visitas completadas por cada hora en carretera
-            const visitasPorHoraViaje = traslados > 0 
-                ? parseFloat((visitas / traslados).toFixed(2))
-                : (visitas > 0 ? visitas : 0);
+            // Tiempo promedio de viaje por cliente visitado (en horas o minutos según corresponda)
+            let textoViajePromedio = '0 h de viaje por cliente visitado';
+            let horasViajePorVisita = 0;
+            if (visitas > 0) {
+                horasViajePorVisita = traslados / visitas;
+                if (horasViajePorVisita >= 1) {
+                    textoViajePromedio = `${horasViajePorVisita.toFixed(1)} h de viaje por cliente visitado`;
+                } else {
+                    const mins = Math.round(horasViajePorVisita * 60);
+                    textoViajePromedio = `${mins} min de viaje por cliente visitado`;
+                }
+            } else if (traslados > 0) {
+                textoViajePromedio = `${traslados} h de viaje (sin visitas)`;
+            }
 
-            // Tiempo promedio por visita en minutos
+            // Tiempo promedio de atención en cliente por visita
             const minsPromedioVisita = visitas > 0 
                 ? Math.round((servicio * 60) / visitas)
                 : 0;
 
-            // Diagnóstico visual de la ruta
-            let diagnostico = {
-                tipo: 'balanceada',
-                label: 'Ruta Balanceada',
-                badgeClass: 'bg-blue-50 text-blue-700 border-blue-200',
-                dotClass: 'bg-blue-500'
-            };
-
-            if (visitasPorHoraViaje >= 1.5) {
-                diagnostico = {
-                    tipo: 'agil',
-                    label: 'Ruta Ágil / Alta Densidad',
-                    badgeClass: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-                    dotClass: 'bg-emerald-500'
-                };
-            } else if (visitasPorHoraViaje < 0.8 && traslados >= 5) {
-                diagnostico = {
-                    tipo: 'traslado_alto',
-                    label: 'Alto Desplazamiento',
-                    badgeClass: 'bg-amber-50 text-amber-700 border-amber-200',
-                    dotClass: 'bg-amber-500'
-                };
-            }
+            const textoAtencionPromedio = `${minsPromedioVisita} min en cliente por visita (${servicio} h servicio)`;
 
             return {
                 ...e,
                 visitas,
                 traslados,
                 servicio,
-                visitasPorHoraViaje,
+                horasViajePorVisita,
                 minsPromedioVisita,
-                diagnostico
+                textoViajePromedio,
+                textoAtencionPromedio
             };
         });
 
@@ -173,7 +162,10 @@ export default function GraficasGerenciales({
         const sorted = [...mapped].sort((a, b) => {
             if (ordenRutas === 'visitas') return b.visitas - a.visitas;
             if (ordenRutas === 'traslados') return b.traslados - a.traslados;
-            return b.visitasPorHoraViaje - a.visitasPorHoraViaje;
+            // Para 'eficiencia': quienes invierten menor tiempo de viaje por cliente atendido
+            if (a.visitas === 0) return 1;
+            if (b.visitas === 0) return -1;
+            return a.horasViajePorVisita - b.horasViajePorVisita;
         });
 
         // Escalas máximas relativas para que las barras aprovechen todo el ancho
@@ -183,7 +175,7 @@ export default function GraficasGerenciales({
         // Identificar líderes para las tarjetas resumen inferiores
         const liderVisitas = [...mapped].sort((a, b) => b.visitas - a.visitas)[0] || null;
         const liderTraslados = [...mapped].sort((a, b) => b.traslados - a.traslados)[0] || null;
-        const liderEficiencia = [...mapped].sort((a, b) => b.visitasPorHoraViaje - a.visitasPorHoraViaje)[0] || null;
+        const liderEficiencia = [...mapped].filter(e => e.visitas > 0).sort((a, b) => a.horasViajePorVisita - b.horasViajePorVisita)[0] || null;
 
         return {
             list: sorted,
@@ -880,12 +872,12 @@ export default function GraficasGerenciales({
                                 }`}
                             >
                                 <Zap size={13} />
-                                Mayor Rendimiento (vis/h)
+                                Viaje Más Corto (Ágiles)
                             </button>
                         </div>
                     </div>
 
-                    {/* Leyenda Visual de Barras Dobles y Explicación Didáctica */}
+                    {/* Leyenda Visual de Barras Dobles y Explicación */}
                     <div className="bg-gray-50 border border-gray-200/80 p-3.5 rounded-xl space-y-2 text-xs">
                         <div className="flex flex-wrap items-center justify-between gap-3">
                             <div className="flex items-center gap-5 flex-wrap">
@@ -903,7 +895,7 @@ export default function GraficasGerenciales({
                             </span>
                         </div>
                         <p className="text-[11px] text-gray-500 border-t border-gray-200/60 pt-2 leading-relaxed">
-                            💡 <b>Regla de oro de logística:</b> Una barra verde extensa con una naranja corta refleja una ruta de alta densidad. Si la barra naranja supera proporcionalmente a la verde, el colaborador pasa más tiempo en el tráfico que atendiendo clientes.
+                            💡 <b>Interpretación:</b> Compara de forma directa el tiempo en carretera que requirió cada colaborador para atender a sus clientes y el tiempo dedicado en sitio.
                         </p>
                     </div>
 
@@ -923,8 +915,8 @@ export default function GraficasGerenciales({
                                         key={emp.email}
                                         className="p-3.5 bg-white hover:bg-gray-50/70 border border-gray-200/80 rounded-2xl transition duration-150 shadow-sm flex flex-col md:flex-row md:items-center gap-4"
                                     >
-                                        {/* Columna 1: Información y Diagnóstico del Colaborador */}
-                                        <div className="w-full md:w-56 shrink-0 space-y-1">
+                                        {/* Columna 1: Información del Colaborador (Limpia en 2 filas) */}
+                                        <div className="w-full md:w-52 shrink-0 space-y-0.5">
                                             <div className="flex items-center gap-2">
                                                 <span className="w-6 h-6 rounded-lg bg-gray-100 text-gray-700 text-xs font-black flex items-center justify-center shrink-0">
                                                     #{idx + 1}
@@ -936,12 +928,6 @@ export default function GraficasGerenciales({
                                             <p className="text-[10px] text-gray-400 pl-8 truncate">
                                                 {emp.cargo || emp.departamento || 'Operativo de Campo'}
                                             </p>
-                                            <div className="pl-8 pt-0.5">
-                                                <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold border ${emp.diagnostico.badgeClass}`}>
-                                                    <span className={`w-1.5 h-1.5 rounded-full ${emp.diagnostico.dotClass}`}></span>
-                                                    {emp.diagnostico.label}
-                                                </span>
-                                            </div>
                                         </div>
 
                                         {/* Columna 2: Las Dos Barras Paralelas (Visitas vs Viaje) */}
@@ -989,21 +975,14 @@ export default function GraficasGerenciales({
                                             </div>
                                         </div>
 
-                                        {/* Columna 3: Indicadores de Rendimiento y Ratio */}
-                                        <div className="w-full md:w-44 shrink-0 flex md:flex-col items-center md:items-end justify-between md:justify-center gap-1 border-t md:border-t-0 md:border-l border-gray-100 pt-2 md:pt-0 md:pl-4">
-                                            <div className="text-left md:text-right">
-                                                <span className="text-[10px] text-gray-400 block font-medium">Rendimiento:</span>
-                                                <span className="inline-block text-xs font-black text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-lg shadow-xs">
-                                                    {emp.visitasPorHoraViaje} vis/hora
-                                                </span>
+                                        {/* Columna 3: Tiempos promedio por visita y servicio solicitados */}
+                                        <div className="w-full md:w-auto shrink-0 flex flex-col items-start md:items-end justify-center gap-1 border-t md:border-t-0 md:border-l border-gray-100 pt-2 md:pt-0 md:pl-5 text-left md:text-right">
+                                            <div className="text-xs font-bold text-gray-800 flex items-center gap-1.5">
+                                                <span className="text-gray-400 font-medium text-[11px]">prom.:</span>
+                                                <span className="text-indigo-700 font-extrabold">{emp.textoViajePromedio}</span>
                                             </div>
-                                            <div className="text-right text-[10px] text-gray-500 space-y-0.5">
-                                                <p title="Tiempo promedio que dedica en cada cliente">
-                                                    ⏱️ <b className="text-gray-700">{emp.minsPromedioVisita} min</b> /visita
-                                                </p>
-                                                <p title="Total de horas en atención a clientes">
-                                                    💼 <b className="text-emerald-700">{emp.servicio} h</b> servicio
-                                                </p>
+                                            <div className="text-[11px] text-gray-500">
+                                                {emp.textoAtencionPromedio}
                                             </div>
                                         </div>
                                     </div>
@@ -1060,15 +1039,15 @@ export default function GraficasGerenciales({
                                         <Zap size={14} className="text-indigo-600" />
                                         Ruta Más Ágil
                                     </span>
-                                    <span className="text-base font-black text-indigo-700">
-                                        {rutasData.liderEficiencia?.visitasPorHoraViaje || 0} vis/h
+                                    <span className="text-sm font-black text-indigo-700">
+                                        {rutasData.liderEficiencia?.textoViajePromedio.replace(' de viaje por cliente visitado', '') || '0 h'} / cliente
                                     </span>
                                 </div>
                                 <p className="text-xs font-bold text-gray-800 truncate">
                                     {rutasData.liderEficiencia?.nombre || 'N/A'}
                                 </p>
                                 <p className="text-[11px] text-indigo-700">
-                                    {rutasData.liderEficiencia?.minsPromedioVisita || 0} min prom. por atención.
+                                    {rutasData.liderEficiencia?.minsPromedioVisita || 0} min prom. en cliente por visita.
                                 </p>
                             </div>
                         </div>
